@@ -20,7 +20,7 @@ self.onmessage = async (e) => {
       step: 'process',
       text: 'Detectando propiedades…'
     });
-    const result = processChatText(text, group);
+    const result = processChatText(text, group, { maxAgeDays: 60, now: Date.now() });
 
     postMessage({
       type: 'done',

@@ -121,46 +121,65 @@ function sourceText(p) {
   return `${s.sender || p.sender || 'Corredor'} · ${s.group || p.group || 'Grupo'} · ${p.date || ''}`;
 }
 function cardHTML(p) {
-  const r=recencyInfo(p.date);
-  const phone=effectivePhone(p);
-  const fav=favoriteIds.has(p.id);
-  const metas=[];
-  if(p.area_m2) metas.push(`${p.area_m2} m²`);
-  if(p.bedrooms) metas.push(`${p.bedrooms} Hab`);
-  if(p.bathrooms) metas.push(`${p.bathrooms} Baños`);
-  if(p.parking) metas.push(`${p.parking} Puestos`);
-  const src=(p.sources||[])[0]||{};
-  const sender=src.sender||p.sender||'Corredor';
-  const group=src.group||p.group||'Grupo';
-  const original=(p.text||'').trim();
-  const needsExpand=original.length>420 || original.split('\n').length>7;
+  const r = recencyInfo(p.date);
+  const phone = effectivePhone(p);
+  const fav = favoriteIds.has(p.id);
+
+  const metas = [];
+  if (p.area_m2) metas.push(`${p.area_m2} m²`);
+  if (p.bedrooms) metas.push(`${p.bedrooms} Hab`);
+  if (p.bathrooms) metas.push(`${p.bathrooms} Baños`);
+  if (p.parking) metas.push(`${p.parking} Puestos`);
+
+  const src = (p.sources || [])[0] || {};
+  const sender = src.sender || p.sender || 'Corredor';
+  const group = src.group || p.group || 'Grupo';
+  const original = (p.text || '').trim();
+  const needsExpand = original.length > 520 || original.split('\n').length > 9;
 
   return `
-  <article class="propertyCard" data-id="${esc(p.id)}">
-    <div class="propertyTop">
-      <div class="chips">
-        ${p.operation?`<span class="chip gold">${esc(p.operation)}</span>`:''}
-        ${p.property_type?`<span class="chip">${esc(p.property_type)}</span>`:''}
-        ${(p.appearances||1)>1?`<span class="chip">${p.appearances} apariciones</span>`:''}
+  <article class="propertyCard propertyCardV044" data-id="${esc(p.id)}">
+    <div class="cardIdentityRow">
+      <div class="chips compact">
+        ${p.operation ? `<span class="chip gold">${esc(p.operation)}</span>` : ''}
+        ${p.property_type ? `<span class="chip">${esc(p.property_type)}</span>` : ''}
+        ${(p.appearances||1)>1 ? `<span class="chip">${p.appearances} apariciones</span>` : ''}
       </div>
       <span class="recency ${r.cls}">${esc(r.label)}</span>
     </div>
-    <h3>${esc(propertyTitle(p))}</h3>
-    <div class="zone">${esc(p.zone||'Zona no detectada')}</div>
-    <div class="price">${esc(formatMoney(p.price_usd))}</div>
-    ${metas.length?`<div class="meta">${metas.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}
-    ${featureLabels(p).length?`<div class="features">${featureLabels(p).map(x=>`<span class="feature">${esc(x)}</span>`).join('')}</div>`:''}
-    <div class="quickFacts">
-      <div class="who"><b>${esc(sender)}</b><small>${esc(group)}</small></div>
-      <span class="seen">${esc(p.date||'')} ${esc(p.time||'')}</span>
+
+    <div class="cardMainGrid">
+      <div class="cardCore">
+        <h3>${esc(propertyTitle(p))}</h3>
+        <div class="zone">${esc(p.zone || 'Zona no detectada')}</div>
+        <div class="price">${esc(formatMoney(p.price_usd))}</div>
+      </div>
+
+      <div class="cardMetaColumn">
+        ${metas.length ? `<div class="meta compactMeta">${metas.map(x=>`<span>${esc(x)}</span>`).join('')}</div>` : ''}
+        ${featureLabels(p).length ? `<div class="features compactFeatures">${featureLabels(p).map(x=>`<span class="feature">${esc(x)}</span>`).join('')}</div>` : ''}
+      </div>
     </div>
-    <div class="originalInline">
-      <div class="originalInlineHead"><b>Mensaje original del chat</b><span>${original.length.toLocaleString('es-VE')} caracteres</span></div>
-      <div class="originalPreview">${esc(original||'Sin texto original disponible.')}</div>
-      ${needsExpand?`<button class="expandOriginal" data-id="${esc(p.id)}">Mostrar mensaje completo ↓</button>`:''}
+
+    <div class="originalInline originalInlineV044">
+      <div class="originalInlineHead">
+        <b>Mensaje original</b>
+        <span>${esc(p.date||'')} ${esc(p.time||'')}</span>
+      </div>
+      <div class="originalPreview">${esc(original || 'Sin texto original disponible.')}</div>
+      ${needsExpand ? `<button class="expandOriginal" data-id="${esc(p.id)}">Mostrar mensaje completo ↓</button>` : ''}
     </div>
-    <div class="cardActions v042">
-      <button class="action detail" data-id="${esc(p.id)}">Ver ficha</button>
+
+    <div class="sourceCompact">
+      <div class="sourceWho">
+        <b>${esc(sender)}</b>
+        <span>${esc(group)}</span>
+      </div>
+      ${phone ? `<span class="phoneHint">Tel. detectado</span>` : `<span class="phoneHint mutedPhone">Sin teléfono</span>`}
+    </div>
+
+    <div class="cardActions v044">
+      <button class="action detail" data-id="${esc(p.id)}">Ficha completa</button>
       <button class="action whatsapp" data-id="${esc(p.id)}" ${phone?'':'disabled'}>WhatsApp</button>
       <button class="action favorite ${fav?'active':''}" data-id="${esc(p.id)}">${fav?'♥':'♡'}</button>
     </div>
@@ -276,6 +295,7 @@ async function openDetail(id) {
       <div class="sources"><h4>Fuentes encontradas (${(p.sources||[]).length || 1})</h4>
         ${(p.sources||[]).map(s=>`<div class="sourceItem"><b>${esc(s.sender||'Corredor')}</b><br>${esc(s.group||'Grupo')} · ${esc(s.date||'')} ${esc(s.time||'')}</div>`).join('')}
       </div>
+      <button id="detailBackBottom" class="detailBackBottom">← Volver a resultados</button>
     </div>`;
   $('#detailDialog').showModal();
   if (phone) $('#detailWhatsApp').onclick = () => {
@@ -316,7 +336,7 @@ async function saveProcessedResult(m, group, fileName, progressCb) {
     messages:m.result.messages,
     messages_total:m.result.messages_total ?? m.result.messages,
     skipped_age:m.result.messages_skipped_age ?? 0,
-    max_age_days:m.result.max_age_days ?? 45,
+    max_age_days:m.result.max_age_days ?? 60,
     cutoff_date:m.result.cutoff_date ?? null,
     detected:m.result.properties_detected,unique:m.result.unique.length,
     added:saved.added,updated:saved.updated};
@@ -355,7 +375,7 @@ $('#importBtn').addEventListener('click', async () => {
     });
     setStatus('Importación completada',100);
     $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>Importación completada</h3>
-      <div class="summaryGrid"><div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes ≤45 días</span></div>
+      <div class="summaryGrid"><div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes ≤60 días</span></div>
       <div><b>${summary.skipped_age.toLocaleString('es-VE')}</b><span>antiguos omitidos</span></div>
       <div><b>${summary.detected.toLocaleString('es-VE')}</b><span>publicaciones</span></div>
       <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>`;
@@ -377,7 +397,7 @@ async function refreshRecent() {
     : '<p class="muted">Aún no has importado grupos.</p>';
 }
 async function loadData() {
-  await purgeOldProperties(45);
+  await purgeOldProperties(60);
   allProperties = await getAllProperties();
   favoriteIds = await getFavoriteIds();
   await refreshStatsOnly();
@@ -477,7 +497,7 @@ $('#processPending').onclick=async()=>{
       const file=new File([blob],entry.name,{type:'application/zip'});
       const group=groupFromName(entry.name);
       const {summary}=await importOneZip(file,group,(p)=>{
-        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando últimos 45 días · ${entry.name}`;
+        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando últimos 60 días · ${entry.name}`;
         if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Guardando ${entry.name} · ${p.done}/${p.total}`;
       });
       $('#dropboxProgressDetail').textContent=`Moviendo ${entry.name} a ${s.processedPath}`;

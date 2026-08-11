@@ -182,6 +182,67 @@ export async function toggleFavorite(id) {
   return !current;
 }
 
+
+function parseLocalDate(dateStr='') {
+  const m=String(dateStr).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(!m) return 0;
+  let y=Number(m[3]); if(y<100)y+=2000;
+  return new Date(y,Number(m[2])-1,Number(m[1])).getTime();
+}
+
+export async function purgeOldProperties(maxAgeDays=60) {
+  const db=await openDB();
+  const cutoff=new Date();
+  cutoff.setHours(0,0,0,0);
+  cutoff.setDate(cutoff.getDate()-Number(maxAgeDays));
+  const cutoffTs=cutoff.getTime();
+  let removed=0, refreshed=0;
+
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction([PROP_STORE,FAV_STORE],'readwrite');
+    const props=tx.objectStore(PROP_STORE);
+    const favs=tx.objectStore(FAV_STORE);
+    const req=props.openCursor();
+
+    req.onerror=()=>reject(req.error);
+    req.onsuccess=()=>{
+      const c=req.result;
+      if(!c) return;
+      const p=c.value;
+      const candidates=[
+        {date:p.date,time:p.time,sender:p.sender,group:p.group,phone:p.phone},
+        ...(p.sources||[])
+      ].filter(x=>parseLocalDate(x.date));
+
+      candidates.sort((a,b)=>{
+        const ta=parseLocalDate(a.date), tb=parseLocalDate(b.date);
+        if(ta!==tb) return tb-ta;
+        return String(b.time||'').localeCompare(String(a.time||''));
+      });
+
+      const latest=candidates[0];
+      const latestTs=latest ? parseLocalDate(latest.date) : 0;
+
+      if(latestTs && latestTs < cutoffTs){
+        c.delete();
+        favs.delete(p.id);
+        removed++;
+      } else if(latest && (latest.date!==p.date || latest.time!==p.time)){
+        c.update({...p,date:latest.date,time:latest.time,
+          sender:latest.sender||p.sender,group:latest.group||p.group,
+          phone:latest.phone||p.phone});
+        refreshed++;
+      }
+      c.continue();
+    };
+    tx.oncomplete=resolve;
+    tx.onerror=()=>reject(tx.error);
+    tx.onabort=()=>reject(tx.error);
+  });
+  db.close();
+  return {removed,refreshed,cutoff:cutoff.toISOString().slice(0,10)};
+}
+
 export async function clearDatabase() {
   const db = await openDB();
   const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE];

@@ -1,7 +1,23 @@
-Sube al MISMO repositorio GitHub:
+ACTUALIZACIÓN ACUMULATIVA v0.4.4
+
+Sube TODOS estos archivos al MISMO repositorio GitHub:
+engine.js
+worker.js
+db.js
+search-utils.js
 index.html
 styles.css
 app.js
 sw.js
+dropbox.js
+manifest.webmanifest
 
-Commit changes. No borres la PWA ni vacíes la base local.
+Commit changes.
+Espera GitHub Pages.
+Abre Safari y recarga una vez la URL.
+Luego cierra/reabre la PWA.
+
+Debe decir v0.4.4.
+
+NO vacíes la base local.
+NO necesitas configurar Dropbox otra vez.

@@ -22,9 +22,9 @@ export function recencyInfo(dateStr, now = Date.now()) {
   if (!ts) return { days: 9999, label: 'Fecha no disponible', cls: 'expired' };
   const days = Math.max(0, Math.floor((now - ts) / 86400000));
   if (days <= 7) return { days, label: days === 0 ? 'Hoy' : `${days} d`, cls: 'recent' };
-  if (days <= 14) return { days, label: `${days} d`, cls: 'valid' };
-  if (days <= 21) return { days, label: `${days} d · verificar`, cls: 'verify' };
-  return { days, label: `${days} d · vencida`, cls: 'expired' };
+  if (days <= 21) return { days, label: `${days} d`, cls: 'valid' };
+  if (days <= 60) return { days, label: `${days} d · verificar`, cls: 'verify' };
+  return { days, label: `${days} d · fuera de vigencia`, cls: 'expired' };
 }
 
 export function formatMoney(v) {
@@ -47,6 +47,11 @@ export function effectivePhone(p) {
 }
 
 export function matchesFilters(p, f={}) {
+  // REGLA DURA: ninguna tarjeta con fecha válida >45 días puede aparecer.
+  // También ocultamos registros sin fecha interpretable para evitar inventario incierto.
+  const hardRecency = recencyInfo(p.date);
+  if (!Number.isFinite(hardRecency.days) || hardRecency.days > 60) return false;
+
   const hay = norm([
     p.operation, p.property_type, p.zone, p.residence, p.sender, p.group,
     p.text, p.normalized

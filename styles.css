@@ -41,3 +41,160 @@
 .cardActions.v042{grid-template-columns:1fr .8fr .48fr;margin-top:10px}
 .cardAnchorFlash{animation:cardFlash .9s ease-out}
 @keyframes cardFlash{0%{box-shadow:0 0 0 2px rgba(212,175,55,.65)}100%{box-shadow:none}}
+
+.vigencyBanner{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:4px 0 11px;padding:9px 11px;border:1px solid #3f371e;background:#151208;border-radius:12px}
+.vigencyBanner b{font-size:9px;color:var(--gold2);text-transform:uppercase;letter-spacing:.06em}
+.vigencyBanner span{font-size:9px;color:#a79b72;text-align:right}
+
+
+/* v0.4.4 — Arquitectura de tarjeta compacta y funcional */
+.propertyCardV044{
+  padding:14px 14px 13px;
+}
+.cardIdentityRow{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:8px;
+}
+.chips.compact{
+  gap:5px;
+}
+.cardMainGrid{
+  display:grid;
+  grid-template-columns:minmax(0,1.2fr) minmax(115px,.8fr);
+  gap:12px;
+  align-items:start;
+  margin-top:9px;
+}
+.cardCore h3{
+  margin:0 0 3px;
+  font-size:20px;
+  line-height:1.06;
+}
+.cardCore .zone{
+  margin-bottom:5px;
+}
+.cardCore .price{
+  margin:5px 0 0;
+  font-size:29px;
+}
+.cardMetaColumn{
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:6px;
+}
+.compactMeta{
+  gap:5px;
+  justify-content:flex-start;
+}
+.compactMeta span{
+  width:max-content;
+  max-width:100%;
+}
+.compactFeatures{
+  margin:0;
+  gap:5px;
+}
+.originalInlineV044{
+  margin-top:10px;
+  padding:10px 11px;
+  background:linear-gradient(180deg,#0b0b0b,#090909);
+  border-color:#2b2b2b;
+}
+.originalInlineV044 .originalPreview{
+  -webkit-line-clamp:9;
+  font-size:11px;
+  line-height:1.48;
+  color:#d0d0d0;
+}
+.sourceCompact{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+  margin-top:9px;
+  padding-top:8px;
+  border-top:1px solid #202020;
+}
+.sourceWho{
+  min-width:0;
+}
+.sourceWho b,
+.sourceWho span{
+  display:block;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.sourceWho b{
+  font-size:10px;
+  color:#cfcfcf;
+}
+.sourceWho span{
+  margin-top:2px;
+  font-size:8px;
+  color:#666;
+}
+.phoneHint{
+  font-size:8px;
+  color:#8acb98;
+  border:1px solid #233829;
+  background:#101a12;
+  border-radius:999px;
+  padding:5px 7px;
+  white-space:nowrap;
+}
+.phoneHint.mutedPhone{
+  color:#777;
+  border-color:#2a2a2a;
+  background:#111;
+}
+.cardActions.v044{
+  grid-template-columns:1fr .82fr .44fr;
+  gap:6px;
+  margin-top:10px;
+}
+.detailBackBottom{
+  width:100%;
+  margin-top:16px;
+  border:1px solid #4a4022;
+  background:linear-gradient(110deg,#17140b,#201a09);
+  color:var(--gold2);
+  border-radius:13px;
+  padding:14px 12px;
+  font-size:12px;
+  font-weight:900;
+}
+.vigencyBanner{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin:4px 0 11px;
+  padding:9px 11px;
+  border:1px solid #3f371e;
+  background:#151208;
+  border-radius:12px;
+}
+.vigencyBanner b{
+  font-size:9px;
+  color:var(--gold2);
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.vigencyBanner span{
+  font-size:9px;
+  color:#a79b72;
+  text-align:right;
+}
+@media(max-width:390px){
+  .cardMainGrid{
+    grid-template-columns:1fr;
+    gap:6px;
+  }
+  .cardMetaColumn{
+    align-items:flex-start;
+  }
+}

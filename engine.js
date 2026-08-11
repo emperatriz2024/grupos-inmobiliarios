@@ -24,22 +24,60 @@ export function normalizeText(s='') {
 
 const START_RE = /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?\]\s*(.*?):\s*(.*)$/i;
 
-export function parseWhatsAppText(text, group='Grupo') {
+function parseMessageDate(dateStr) {
+  const m = String(dateStr).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!m) return null;
+  let year = Number(m[3]);
+  if (year < 100) year += 2000;
+  const d = new Date(year, Number(m[2]) - 1, Number(m[1]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function cutoffForDays(maxAgeDays, now=Date.now()) {
+  const d = new Date(now);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - maxAgeDays);
+  return d;
+}
+
+export function parseWhatsAppText(text, group='Grupo', options={}) {
+  const maxAgeDays = Number(options.maxAgeDays ?? 60);
+  const now = options.now ?? Date.now();
+  const cutoff = maxAgeDays > 0 ? cutoffForDays(maxAgeDays, now) : null;
+
   const rows = [];
   let current = null;
+  let totalMessages = 0;
+  let skippedOld = 0;
+
+  const flush = () => {
+    if (!current) return;
+    current.text = current.lines.join('\n').trim();
+    delete current.lines;
+    rows.push(current);
+    current = null;
+  };
+
   for (const raw of cleanText(text).split(/\r?\n/)) {
     const line = raw.trimStart();
     const m = line.match(START_RE);
+
     if (m) {
-      if (current) {
-        current.text = current.lines.join('\n').trim();
-        delete current.lines;
-        rows.push(current);
+      flush();
+      totalMessages++;
+
+      const msgDate = parseMessageDate(m[1]);
+      if (cutoff && msgDate && msgDate < cutoff) {
+        skippedOld++;
+        current = null; // no acumulamos ni las líneas del mensaje viejo
+        continue;
       }
+
       let hour = Number(m[2]);
       const ap = m[5].toLowerCase();
       if (ap === 'p' && hour !== 12) hour += 12;
       if (ap === 'a' && hour === 12) hour = 0;
+
       current = {
         date: m[1],
         time: `${String(hour).padStart(2,'0')}:${m[3]}:${m[4] || '00'}`,
@@ -51,11 +89,12 @@ export function parseWhatsAppText(text, group='Grupo') {
       current.lines.push(line);
     }
   }
-  if (current) {
-    current.text = current.lines.join('\n').trim();
-    delete current.lines;
-    rows.push(current);
-  }
+
+  flush();
+  rows.totalMessages = totalMessages;
+  rows.skippedOld = skippedOld;
+  rows.maxAgeDays = maxAgeDays;
+  rows.cutoffDate = cutoff ? cutoff.toISOString().slice(0,10) : null;
   return rows;
 }
 
@@ -197,16 +236,51 @@ export function extractProperty(message) {
   return rec;
 }
 
-export function processChatText(text, group='Grupo') {
-  const messages=parseWhatsAppText(text,group);
+function messageDateTime(dateStr, timeStr='00:00:00') {
+  const d = parseMessageDate(dateStr);
+  if (!d) return 0;
+  const p = String(timeStr).split(':').map(Number);
+  d.setHours(p[0]||0,p[1]||0,p[2]||0,0);
+  return d.getTime();
+}
+
+export function processChatText(text, group='Grupo', options={}) {
+  const maxAgeDays = Number(options.maxAgeDays ?? 60);
+  const messages = parseWhatsAppText(text, group, {maxAgeDays, now: options.now ?? Date.now()});
+
   const properties=[];
-  for(const m of messages){const r=extractProperty(m); if(r) properties.push(r);}
+  for(const m of messages){
+    const r=extractProperty(m);
+    if(r) properties.push(r);
+  }
+
   const unique=new Map();
   for(const r of properties){
-    if(!unique.has(r.id)) unique.set(r.id,{...r,appearances:1,sources:[{group:r.group,sender:r.sender,date:r.date,time:r.time,phone:r.phone}]});
-    else {const x=unique.get(r.id);x.appearances++;x.sources.push({group:r.group,sender:r.sender,date:r.date,time:r.time,phone:r.phone});}
+    const source={group:r.group,sender:r.sender,date:r.date,time:r.time,phone:r.phone};
+    if(!unique.has(r.id)) {
+      unique.set(r.id,{...r,appearances:1,sources:[source]});
+    } else {
+      const x=unique.get(r.id);
+      x.appearances++;
+      x.sources.push(source);
+
+      // La tarjeta principal usa SIEMPRE la publicación más reciente.
+      if (messageDateTime(r.date,r.time) > messageDateTime(x.date,x.time)) {
+        x.date=r.date; x.time=r.time; x.sender=r.sender; x.group=r.group;
+        if (r.phone) x.phone=r.phone;
+      }
+    }
   }
-  return {messages:messages.length,properties_detected:properties.length,unique:[...unique.values()]};
+
+  return {
+    messages:messages.length,
+    messages_total:messages.totalMessages ?? messages.length,
+    messages_skipped_age:messages.skippedOld ?? 0,
+    max_age_days:maxAgeDays,
+    cutoff_date:messages.cutoffDate ?? null,
+    properties_detected:properties.length,
+    unique:[...unique.values()]
+  };
 }
 
 function simpleHash(s) {
