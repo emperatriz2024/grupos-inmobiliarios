@@ -1,14 +1,19 @@
-import { isDemandRequest } from './intent-utils.js?v=0410';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0410';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0410';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0410';
+import { isDemandRequest } from './intent-utils.js?v=0412';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0412';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0412';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0412';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0412';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
 const CONTACT_STORE = 'contacts';
+const MUNICIPALITY_STORE='municipalities';
+const ZONE_STORE='zones';
+const COMPLEX_STORE='complexes';
+const LOCATION_PENDING_STORE='location_pending';
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -30,6 +35,13 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(CONTACT_STORE)) {
         db.createObjectStore(CONTACT_STORE, { keyPath: 'phone' });
+      }
+      if(!db.objectStoreNames.contains(MUNICIPALITY_STORE)) db.createObjectStore(MUNICIPALITY_STORE,{keyPath:'id'});
+      if(!db.objectStoreNames.contains(ZONE_STORE)) db.createObjectStore(ZONE_STORE,{keyPath:'id'});
+      if(!db.objectStoreNames.contains(COMPLEX_STORE)) db.createObjectStore(COMPLEX_STORE,{keyPath:'id'});
+      if(!db.objectStoreNames.contains(LOCATION_PENDING_STORE)){
+        const lp=db.createObjectStore(LOCATION_PENDING_STORE,{keyPath:'id'});
+        lp.createIndex('status','status',{unique:false});lp.createIndex('kind','kind',{unique:false});
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -192,6 +204,98 @@ export async function toggleFavorite(id) {
 
 
 
+function mergeAliasRows(old,row){
+  return {...row,...old,aliases:[...new Set([...(old?.aliases||[]),...(row.aliases||[]),old?.nombre,row.nombre].filter(Boolean))]};
+}
+export async function ensureLocationCatalogSeed(){
+  const db=await openDB();
+  const current=await new Promise((resolve,reject)=>{
+    const tx=db.transaction([MUNICIPALITY_STORE,ZONE_STORE,COMPLEX_STORE],'readonly');
+    Promise.all([
+      reqP(tx.objectStore(MUNICIPALITY_STORE).getAll()),
+      reqP(tx.objectStore(ZONE_STORE).getAll()),
+      reqP(tx.objectStore(COMPLEX_STORE).getAll())
+    ]).then(([municipalities,zones,complexes])=>resolve({municipalities,zones,complexes})).catch(reject);
+  });
+  const approvedZones=(current.zones||[]).filter(x=>['ia_aprobada','user_approved'].includes(x.fuente));
+  const approvedComplexes=(current.complexes||[]).filter(x=>['ia_aprobada','user_approved'].includes(x.fuente));
+  const oldZones=new Map((current.zones||[]).map(x=>[x.id,x]));
+  const oldComplexes=new Map((current.complexes||[]).map(x=>[x.id,x]));
+
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction([MUNICIPALITY_STORE,ZONE_STORE,COMPLEX_STORE],'readwrite');
+    const ms=tx.objectStore(MUNICIPALITY_STORE),zs=tx.objectStore(ZONE_STORE),cs=tx.objectStore(COMPLEX_STORE);
+    ms.clear();zs.clear();cs.clear();
+    for(const row of SEED_MUNICIPALITIES) ms.put(row);
+    for(const row of SEED_ZONES){
+      const prev=oldZones.get(row.id);
+      zs.put(prev?mergeAliasRows(prev,row):row);
+    }
+    for(const row of SEED_COMPLEXES){
+      const prev=oldComplexes.get(row.id);
+      cs.put(prev?mergeAliasRows(prev,row):row);
+    }
+    for(const row of approvedZones) if(!SEED_ZONES.some(x=>x.id===row.id)) zs.put(row);
+    for(const row of approvedComplexes) if(!SEED_COMPLEXES.some(x=>x.id===row.id)) cs.put(row);
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();
+}
+
+export async function getLocationCatalog(){
+  const db=await openDB(),tx=db.transaction([MUNICIPALITY_STORE,ZONE_STORE,COMPLEX_STORE],'readonly');
+  const municipalities=await reqP(tx.objectStore(MUNICIPALITY_STORE).getAll()),zones=await reqP(tx.objectStore(ZONE_STORE).getAll()),complexes=await reqP(tx.objectStore(COMPLEX_STORE).getAll());db.close();
+  return {municipalities,zones,complexes};
+}
+export async function getLocationStats(){
+  const cat=await getLocationCatalog(),pending=await getLocationPendings('pending');
+  return {municipalities:cat.municipalities.filter(x=>x.activo!==false).length,zones:cat.zones.filter(x=>x.activo!==false).length,complexes:cat.complexes.filter(x=>x.activo!==false).length,pending:pending.length};
+}
+function pendingId(x){return `${x.kind}|${normLocation(x.detected||'')}|${x.zone_id||''}`;}
+export async function recordLocationPendings(items=[]){
+  if(!items.length)return {added:0,updated:0};const db=await openDB();let added=0,updated=0;
+  await new Promise((resolve,reject)=>{const tx=db.transaction(LOCATION_PENDING_STORE,'readwrite'),s=tx.objectStore(LOCATION_PENDING_STORE);
+    for(const x of items){if(!x?.kind||!x?.detected)continue;const id=pendingId(x),q=s.get(id);q.onsuccess=()=>{const old=q.result,propIds=[...new Set([...(old?.property_ids||[]),x.property_id].filter(Boolean))],samples=[...(old?.samples||[])];
+      if(x.sample_text&&!samples.some(v=>v===x.sample_text))samples.unshift(x.sample_text);if(samples.length>3)samples.length=3;
+      if(old){s.put({...old,...x,id,status:old.status||'pending',seen_count:Number(old.seen_count||0)+1,property_ids:propIds,samples,last_seen_at:new Date().toISOString()});updated++;}
+      else{s.put({...x,id,status:'pending',seen_count:1,property_ids:propIds,samples,created_at:new Date().toISOString(),last_seen_at:new Date().toISOString()});added++;}}}
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return {added,updated};
+}
+export async function clearLocationPendings(){
+  const db=await openDB();
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(LOCATION_PENDING_STORE,'readwrite');
+    tx.objectStore(LOCATION_PENDING_STORE).clear();
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();
+}
+export async function getLocationPendings(status='pending'){
+  const db=await openDB(),tx=db.transaction(LOCATION_PENDING_STORE,'readonly'),s=tx.objectStore(LOCATION_PENDING_STORE),rows=await reqP(s.getAll());db.close();
+  return rows.filter(x=>!status||x.status===status).sort((a,b)=>(b.seen_count||0)-(a.seen_count||0)||String(b.last_seen_at||'').localeCompare(String(a.last_seen_at||'')));
+}
+async function updatePending(id,patch){const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(LOCATION_PENDING_STORE,'readwrite'),s=tx.objectStore(LOCATION_PENDING_STORE),q=s.get(id);q.onsuccess=()=>{if(q.result)s.put({...q.result,...patch,updated_at:new Date().toISOString()});};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();}
+export async function linkLocationPending(id,targetId){
+  const rows=await getLocationPendings(null),p=rows.find(x=>x.id===id);if(!p)throw new Error('Detección no encontrada');const db=await openDB();
+  await new Promise((resolve,reject)=>{const storeName=p.kind==='zone'?ZONE_STORE:COMPLEX_STORE,tx=db.transaction(storeName,'readwrite'),s=tx.objectStore(storeName),q=s.get(targetId);q.onsuccess=()=>{const r=q.result;if(!r)throw new Error('Destino no encontrado');s.put({...r,aliases:[...new Set([...(r.aliases||[]),r.nombre,p.detected].filter(Boolean))],fuente:r.fuente||'manual'});};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();
+  await updatePending(id,{status:'resolved',resolution:'linked',target_id:targetId});return p;
+}
+export async function createZoneFromPending(id,municipalityId,name){
+  const rows=await getLocationPendings(null),p=rows.find(x=>x.id===id);if(!p)throw new Error('Detección no encontrada');const nombre=String(name||p.detected).trim(),zone={id:`zone_${slugLocation(nombre)}_${municipalityId.replace(/^mun_/,'')}`,nombre,municipio_id:municipalityId,aliases:[nombre,p.detected],fuente:'ia_aprobada',activo:true};
+  const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(ZONE_STORE,'readwrite');tx.objectStore(ZONE_STORE).put(zone);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();await updatePending(id,{status:'resolved',resolution:'created',target_id:zone.id});return {pending:p,zone};
+}
+export async function createComplexFromPending(id,zoneId,name,tipo='conjunto_cerrado'){
+  const rows=await getLocationPendings(null),p=rows.find(x=>x.id===id);if(!p)throw new Error('Detección no encontrada');const nombre=String(name||p.detected).trim(),row={id:`complex_${slugLocation(nombre)}_${zoneId.replace(/^zone_/,'')}`,nombre,zona_id:zoneId,tipo,aliases:[nombre,p.detected],fuente:'ia_aprobada',activo:true};
+  const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(COMPLEX_STORE,'readwrite');tx.objectStore(COMPLEX_STORE).put(row);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();await updatePending(id,{status:'resolved',resolution:'created',target_id:row.id});return {pending:p,complex:row};
+}
+export async function discardLocationPending(id){await updatePending(id,{status:'discarded',resolution:'discarded'});}
+export async function rematchAllPropertyLocations(catalog){
+  const db=await openDB();let updated=0;const pendings=[];
+  await new Promise((resolve,reject)=>{const tx=db.transaction(PROP_STORE,'readwrite'),s=tx.objectStore(PROP_STORE),q=s.openCursor();q.onerror=()=>reject(q.error);q.onsuccess=()=>{const c=q.result;if(!c)return;const p=c.value,loc=resolveLocationRecord(p.text||'',catalog,{existingZone:p.zone,existingComplex:p.residence});
+      const next={...p,municipality_id:loc.municipality_id,municipality:loc.municipality,zone_id:loc.zone_id,zone:loc.zone||p.zone||null,zone_detected:loc.zone_detected,zone_detected_norm:loc.zone_detected_norm,zone_confidence:loc.zone_confidence,zone_matches:loc.zone_matches,complex_id:loc.complex_id,complex_detected:loc.complex_detected,complex_detected_norm:loc.complex_detected_norm,complex_confidence:loc.complex_confidence,location_requires_review:loc.requires_review,location_terms:[...new Set([...(loc.location_terms||[]),...(p.location_terms||[])])],residence:loc.complex||p.residence||loc.complex_detected||null};
+      c.update(next);for(const x of loc.pending||[])pendings.push({...x,property_id:p.id,group:p.group,sender:p.sender,date:p.date,date_iso:p.date_iso,sample_text:(p.text||'').slice(0,1800)});updated++;c.continue();};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();await recordLocationPendings(pendings);return {updated,pending:pendings.length};
+}
+
 export async function upsertContacts(records=[],sourceLabel='contactos'){
   const db=await openDB();let added=0,updated=0;
   const clean=records.map(r=>{const phone=cleanPhone(r.phone),aliases=[...new Set([...(r.aliases||[]),r.display_name].filter(Boolean))];
@@ -312,7 +416,7 @@ export async function purgeOldProperties(maxAgeDays=60) {
 }
 export async function clearDatabase() {
   const db = await openDB();
-  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE, CONTACT_STORE];
+  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE, CONTACT_STORE, MUNICIPALITY_STORE, ZONE_STORE, COMPLEX_STORE, LOCATION_PENDING_STORE];
   await Promise.all(stores.map(name => new Promise((resolve, reject) => {
     const tx = db.transaction(name, 'readwrite');
     tx.oncomplete = resolve;

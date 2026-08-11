@@ -2,21 +2,24 @@
 import {
   mergeProperties, addImport, getStats, getRecentImports, clearDatabase,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties,
-  learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats
-} from './db.js?v=0410';
+  learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
+  ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
+  linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations
+} from './db.js?v=0412';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0410';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0410';
-import { isDemandRequest } from './intent-utils.js?v=0410';
-import { consolidateProperties } from './dedupe-utils.js?v=0410';
+} from './search-utils.js?v=0412';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0412';
+import { isDemandRequest } from './intent-utils.js?v=0412';
+import { consolidateProperties } from './dedupe-utils.js?v=0412';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0410';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0410';
+} from './dropbox.js?v=0412';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0412';
+import { normLocation } from './location-catalog.js?v=0412';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -25,8 +28,11 @@ let favoriteIds = new Set();
 let currentResults = [];
 let contactIndex=buildContactIndex([]);
 let contactDirectory=[];
+let locationCatalog={municipalities:[],zones:[],complexes:[]};
+let locationPendings=[];
 let visibleCount = 30;
 let selectedPropertyTypes=new Set();
+let selectedMunicipalities=new Set();
 let selectedZones=new Set();
 let zoneCatalog=[];
 let selectorMode=null;
@@ -41,7 +47,7 @@ function rememberSearchPosition(cardId='') {
     if(cardId) sessionStorage.setItem(SEARCH_CARD_KEY,cardId);
     sessionStorage.setItem(SEARCH_STATE_KEY,JSON.stringify({
       visibleCount,q:$('#q')?.value||'',operation:$('#operation')?.value||'',
-      propertyTypes:[...selectedPropertyTypes],zones:[...selectedZones],residence:$('#residence')?.value||'',
+      propertyTypes:[...selectedPropertyTypes],municipalities:[...selectedMunicipalities],zones:[...selectedZones],residence:$('#residence')?.value||'',
       minPrice:$('#minPrice')?.value||'',maxPrice:$('#maxPrice')?.value||'',bedrooms:$('#bedrooms')?.value||'',
       bathrooms:$('#bathrooms')?.value||'',parking:$('#parking')?.value||'',minArea:$('#minArea')?.value||'',maxArea:$('#maxArea')?.value||'',
       maxAge:$('#maxAge')?.value||'',sortMode:$('#sortMode')?.value||'recent',planta100:!!$('#planta100')?.checked,
@@ -55,7 +61,13 @@ function restoreSearchFormState(){
   try{
     const s=JSON.parse(sessionStorage.getItem(SEARCH_STATE_KEY)||'null'); if(!s)return false;
     const v=(id,val)=>{const el=$('#'+id);if(el)el.value=val??'';}; const c=(id,val)=>{const el=$('#'+id);if(el)el.checked=!!val;};
-    v('q',s.q);v('operation',s.operation);v('residence',s.residence);selectedPropertyTypes=new Set(s.propertyTypes||[]);selectedZones=new Set(s.zones||[]);
+    v('q',s.q);v('operation',s.operation);v('residence',s.residence);
+    selectedPropertyTypes=new Set(s.propertyTypes||[]);
+    selectedMunicipalities=new Set((s.municipalities||[]).filter(id=>(locationCatalog.municipalities||[]).some(m=>m.id===id)));
+    selectedZones=new Set((s.zones||[]).map(v=>{
+      if((locationCatalog.zones||[]).some(z=>z.id===v))return v;
+      return (locationCatalog.zones||[]).find(z=>normLoc(z.nombre)===normLoc(v))?.id||null;
+    }).filter(Boolean));
     v('minPrice',s.minPrice);v('maxPrice',s.maxPrice);v('bedrooms',s.bedrooms);v('bathrooms',s.bathrooms);v('parking',s.parking);v('minArea',s.minArea);v('maxArea',s.maxArea);v('maxAge',s.maxAge);v('sortMode',s.sortMode);
     c('planta100',s.planta100);c('planta',s.planta);c('pozo',s.pozo);c('tanque',s.tanque);c('amoblado',s.amoblado);c('financiamiento',s.financiamiento);c('piscina',s.piscina);c('onlyPhone',s.onlyPhone);
     visibleCount=Math.max(30,Number(s.visibleCount||30)); updateSelectorUI(); return true;
@@ -248,7 +260,10 @@ function getFilters() {
     q: $('#q').value,
     operation: $('#operation').value,
     property_types: [...selectedPropertyTypes],
-    zones: [...selectedZones],
+    municipality_ids: [...selectedMunicipalities],
+    municipality_names: [...selectedMunicipalities].map(id=>locationCatalog.municipalities.find(m=>m.id===id)?.nombre).filter(Boolean),
+    zone_ids: [...selectedZones],
+    zones: [...selectedZones].map(id=>locationCatalog.zones.find(z=>z.id===id)?.nombre).filter(Boolean),
     residence: $('#residence').value,
     min_price: $('#minPrice').value,
     max_price: $('#maxPrice').value,
@@ -292,47 +307,97 @@ $('#sortMode').onchange = () => runSearch();
 $('#clearFilters').onclick = () => {
   ['q','operation','residence','minPrice','maxPrice','bedrooms','bathrooms','parking','minArea','maxArea','maxAge'].forEach(id => $('#'+id).value='');
   ['planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id => $('#'+id).checked=false);
-  selectedPropertyTypes.clear(); selectedZones.clear(); updateSelectorUI();
+  selectedPropertyTypes.clear(); selectedMunicipalities.clear(); selectedZones.clear(); updateSelectorUI();
   runSearch();
 };
 
 const PROPERTY_TYPES=['Apartamento','Townhouse','Penthouse','Casa','Terreno','Local comercial','Oficina','Galpón','Anexo'];
-function allLocationTerms(p){return [...new Set([p.zone,...(p.location_terms||[]),...extractLocationTerms(p.text||'',p.zone)].filter(Boolean))];}
+function allLocationTerms(p){return [...new Set([p.municipality,p.zone,p.zone_detected,p.residence,p.complex_detected,...(p.location_terms||[]),...(p.zone_matches||[]).map(x=>x.nombre),...extractLocationTerms(p.text||'',p.zone)].filter(Boolean))];}
+function municipalityName(id){return locationCatalog.municipalities.find(m=>m.id===id)?.nombre||id;}
+function zoneName(id){return locationCatalog.zones.find(z=>z.id===id)?.nombre||id;}
 function buildZoneCatalog(){
-  zoneCatalog=[...new Set(allProperties.flatMap(allLocationTerms).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));
-  for(const z of selectedZones) if(!zoneCatalog.includes(z)) zoneCatalog.push(z);
+  zoneCatalog=(locationCatalog.zones||[]).filter(z=>z.activo!==false).sort((a,b)=>{
+    const ma=municipalityName(a.municipio_id),mb=municipalityName(b.municipio_id);
+    return ma.localeCompare(mb,'es',{sensitivity:'base'})||a.nombre.localeCompare(b.nombre,'es',{sensitivity:'base'});
+  });
+  // Migrate saved old zone-name selections to canonical zone IDs.
+  selectedZones=new Set([...selectedZones].map(v=>{
+    if(zoneCatalog.some(z=>z.id===v))return v;
+    return zoneCatalog.find(z=>normLoc(z.nombre)===normLoc(v))?.id||null;
+  }).filter(Boolean));
+  selectedMunicipalities=new Set([...selectedMunicipalities].filter(id=>(locationCatalog.municipalities||[]).some(m=>m.id===id&&m.activo!==false)));
+  const list=$('#complexCatalogList');if(list)list.innerHTML=(locationCatalog.complexes||[]).filter(x=>x.activo!==false).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')).map(x=>`<option value="${esc(x.nombre)}"></option>`).join('');
 }
 function summaryText(set,empty,singular){const a=[...set];if(!a.length)return empty;if(a.length<=2)return a.join(' + ');return `${a.length} ${singular}`;}
-function renderPills(containerId,set){
-  const box=$('#'+containerId); if(!box)return; box.innerHTML=[...set].map(v=>`<span class="selectedPill">${esc(v)}<button type="button" data-value="${esc(v)}">×</button></span>`).join('');
-  box.querySelectorAll('button').forEach(b=>b.onclick=()=>{set.delete(b.dataset.value);updateSelectorUI();rememberSearchPosition();});
+function renderPills(containerId,set,labelFn=x=>x){
+  const box=$('#'+containerId);if(!box)return;
+  box.innerHTML=[...set].map(v=>`<span class="selectedPill">${esc(labelFn(v))}<button type="button" data-value="${esc(v)}">×</button></span>`).join('');
+  box.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    set.delete(b.dataset.value);
+    if(containerId==='municipalitySelectedPills'&&set.size){
+      selectedZones=new Set([...selectedZones].filter(zid=>{
+        const z=locationCatalog.zones.find(z=>z.id===zid);return z&&set.has(z.municipio_id);
+      }));
+    }
+    updateSelectorUI();rememberSearchPosition();
+  });
 }
 function updateSelectorUI(){
-  if($('#typeSelectorText')) $('#typeSelectorText').textContent=summaryText(selectedPropertyTypes,'Todos','seleccionados');
-  if($('#zoneSelectorText')) $('#zoneSelectorText').textContent=summaryText(selectedZones,'Todas las zonas','seleccionadas');
-  renderPills('typeSelectedPills',selectedPropertyTypes);renderPills('zoneSelectedPills',selectedZones);
+  if($('#typeSelectorText'))$('#typeSelectorText').textContent=summaryText(selectedPropertyTypes,'Todos','tipos');
+  if($('#municipalitySelectorText')){
+    const names=new Set([...selectedMunicipalities].map(municipalityName));
+    $('#municipalitySelectorText').textContent=summaryText(names,'Todos los municipios','municipios');
+  }
+  if($('#zoneSelectorText')){
+    const names=new Set([...selectedZones].map(zoneName));
+    $('#zoneSelectorText').textContent=summaryText(names,'Todas las zonas','zonas');
+  }
+  renderPills('typeSelectedPills',selectedPropertyTypes);
+  renderPills('municipalitySelectedPills',selectedMunicipalities,municipalityName);
+  renderPills('zoneSelectedPills',selectedZones,zoneName);
 }
-function selectorValues(){return selectorMode==='types'?PROPERTY_TYPES:zoneCatalog;}
 function renderSelectorOptions(){
-  const q=normLoc($('#selectorSearchInput')?.value||''); const list=selectorValues().filter(v=>!q||normLoc(v).includes(q));
-  $('#selectorOptionsList').innerHTML=list.length?list.map(v=>`<label class="selectorOption"><input type="checkbox" value="${esc(v)}" ${selectorDraft.has(v)?'checked':''}><span>${esc(v)}</span></label>`).join(''):'<div class="empty">No encontré opciones.</div>';
-  $('#selectorOptionsList').querySelectorAll('input').forEach(x=>x.onchange=()=>{if(x.checked)selectorDraft.add(x.value);else selectorDraft.delete(x.value);});
+  const q=normLoc($('#selectorSearchInput')?.value||''),box=$('#selectorOptionsList');
+  if(selectorMode==='types'){
+    const rows=PROPERTY_TYPES.filter(v=>!q||normLoc(v).includes(q));
+    box.innerHTML=rows.length?rows.map(v=>`<label class="selectorOption"><input type="checkbox" value="${esc(v)}" ${selectorDraft.has(v)?'checked':''}><span>${esc(v)}</span></label>`).join(''):'<div class="empty">No encontré opciones.</div>';
+  }else if(selectorMode==='municipalities'){
+    const rows=(locationCatalog.municipalities||[]).filter(m=>m.activo!==false&&(!q||normLoc(m.nombre).includes(q)));
+    box.innerHTML=rows.length?rows.map(m=>`<label class="selectorOption"><input type="checkbox" value="${esc(m.id)}" ${selectorDraft.has(m.id)?'checked':''}><span>${esc(m.nombre)}</span></label>`).join(''):'<div class="empty">No encontré municipios.</div>';
+  }else{
+    const allowed=selectedMunicipalities.size?new Set(selectedMunicipalities):null;
+    const rows=zoneCatalog.filter(z=>(!allowed||allowed.has(z.municipio_id))&&(!q||normLoc(z.nombre+' '+(z.aliases||[]).join(' ')).includes(q)));
+    const groups=new Map();
+    for(const z of rows){const mn=municipalityName(z.municipio_id);if(!groups.has(mn))groups.set(mn,[]);groups.get(mn).push(z);}
+    box.innerHTML=rows.length?[...groups.entries()].map(([mn,zones])=>`<div class="selectorGroupTitle">${esc(mn)}</div>${zones.map(z=>`<label class="selectorOption"><input type="checkbox" value="${esc(z.id)}" ${selectorDraft.has(z.id)?'checked':''}><span>${esc(z.nombre)}</span></label>`).join('')}`).join(''):'<div class="empty">No encontré zonas para esos municipios.</div>';
+  }
+  box.querySelectorAll('input').forEach(x=>x.onchange=()=>{if(x.checked)selectorDraft.add(x.value);else selectorDraft.delete(x.value);});
 }
 function openSelector(mode){
-  selectorMode=mode;selectorDraft=new Set(mode==='types'?selectedPropertyTypes:selectedZones);
-  $('#selectorTitle').textContent=mode==='types'?'Tipos de inmueble':'Zonas';$('#selectorSearchWrap').hidden=mode==='types';$('#selectorSearchInput').value='';renderSelectorOptions();$('#multiSelectorDialog').showModal();
+  selectorMode=mode;
+  selectorDraft=new Set(mode==='types'?selectedPropertyTypes:mode==='municipalities'?selectedMunicipalities:selectedZones);
+  $('#selectorTitle').textContent=mode==='types'?'Tipos de inmueble':mode==='municipalities'?'Municipios':'Zonas / sectores';
+  $('#selectorSearchWrap').hidden=mode==='types';$('#selectorSearchInput').value='';renderSelectorOptions();$('#multiSelectorDialog').showModal();
 }
-$('#openTypeSelector').onclick=()=>openSelector('types');$('#openZoneSelector').onclick=()=>openSelector('zones');
+$('#openTypeSelector').onclick=()=>openSelector('types');
+$('#openMunicipalitySelector').onclick=()=>openSelector('municipalities');
+$('#openZoneSelector').onclick=()=>openSelector('zones');
 $('#closeMultiSelector').onclick=()=>$('#multiSelectorDialog').close();
 $('#selectorSearchInput').oninput=()=>renderSelectorOptions();
 $('#selectorClearBtn').onclick=()=>{selectorDraft.clear();renderSelectorOptions();};
-$('#selectorApplyBtn').onclick=()=>{if(selectorMode==='types')selectedPropertyTypes=new Set(selectorDraft);else selectedZones=new Set(selectorDraft);updateSelectorUI();rememberSearchPosition();$('#multiSelectorDialog').close();};
-
+$('#selectorApplyBtn').onclick=()=>{
+  if(selectorMode==='types')selectedPropertyTypes=new Set(selectorDraft);
+  else if(selectorMode==='municipalities'){
+    selectedMunicipalities=new Set(selectorDraft);
+    if(selectedMunicipalities.size)selectedZones=new Set([...selectedZones].filter(zid=>{const z=locationCatalog.zones.find(z=>z.id===zid);return z&&selectedMunicipalities.has(z.municipio_id);}));
+  }else selectedZones=new Set(selectorDraft);
+  updateSelectorUI();rememberSearchPosition();$('#multiSelectorDialog').close();
+};
 
 async function openDetail(id) {
   const p = allProperties.find(x=>x.id===id);
   if (!p) return;
-  $('#detailType').textContent = [p.operation,p.property_type,p.zone].filter(Boolean).join(' · ');
+  $('#detailType').textContent = [p.operation,p.property_type,p.zone,p.residence].filter(Boolean).join(' · ');
   $('#detailTitle').textContent = propertyTitle(p);
   const phone = effectivePhone(p);
   const grid = [
@@ -368,7 +433,7 @@ async function renderSaved() {
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0410',{type:'module'});
+    const worker = new Worker('./worker.js?v=0412',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -376,7 +441,7 @@ function processZipWithWorker(file, group, progressCb) {
       if(m.type==='done'){ worker.terminate(); resolve(m); }
     };
     worker.onerror=(e)=>{worker.terminate();reject(new Error(e.message||'Error del procesador'));};
-    worker.postMessage({file,group});
+    worker.postMessage({file,group,locationCatalog});
   });
 }
 
@@ -392,6 +457,7 @@ async function saveProcessedResult(m, group, fileName, progressCb) {
     added:saved.added,updated:saved.updated};
   await addImport(summary);
   await learnContactsFromProperties(m.result.unique);
+  await recordLocationPendings(m.result.location_pendings||[]);
   return summary;
 }
 
@@ -447,7 +513,43 @@ async function refreshRecent() {
     <small>${new Date(r.imported_at).toLocaleString('es-VE')} · ${Number(r.messages||0).toLocaleString('es-VE')} recientes${r.skipped_age?` · ${Number(r.skipped_age).toLocaleString('es-VE')} omitidos`:''}</small></div><span>+${Number(r.added||0).toLocaleString('es-VE')}</span></div>`).join('')
     : '<p class="muted">Aún no has importado grupos.</p>';
 }
+async function refreshLocationStats(){
+  const s=await getLocationStats();locationPendings=await getLocationPendings('pending');
+  if($('#smartZoneCount'))$('#smartZoneCount').textContent=s.zones.toLocaleString('es-VE');
+  if($('#smartComplexCount'))$('#smartComplexCount').textContent=s.complexes.toLocaleString('es-VE');
+  if($('#smartPendingCount'))$('#smartPendingCount').textContent=s.pending.toLocaleString('es-VE');
+  if($('#openLocationReview'))$('#openLocationReview').disabled=!s.pending;
+}
+function municipalityOptions(selected=''){return (locationCatalog.municipalities||[]).filter(x=>x.activo!==false).map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(x.nombre)}</option>`).join('');}
+function zoneOptions(selected=''){return (locationCatalog.zones||[]).filter(x=>x.activo!==false).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')).map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(x.nombre)}</option>`).join('');}
+function complexOptions(selected='',zoneId=null){return (locationCatalog.complexes||[]).filter(x=>x.activo!==false&&(!zoneId||x.zona_id===zoneId)).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')).map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(x.nombre)}</option>`).join('');}
+function renderLocationReview(){
+  const box=$('#locationReviewList');if(!box)return;
+  const rows=locationPendings.slice(0,80);$('#locationReviewMeta').textContent=`${locationPendings.length.toLocaleString('es-VE')} detecciones pendientes`;
+  box.innerHTML=rows.length?rows.map(p=>{const isZone=p.kind==='zone';return `<article class="locationPendingCard" data-id="${esc(p.id)}">\n    <div class="locationPendingTop"><div><span>${isZone?'ZONA':'CONJUNTO / TORRE'}</span><h4>${esc(p.detected)}</h4></div><b>${Number(p.seen_count||1)}×</b></div>\n    <small>${esc([p.zone_nombre,p.group,p.date].filter(Boolean).join(' · '))}</small>\n    <div class="locationSample">${esc((p.samples?.[0]||p.sample_text||'').slice(0,420))}</div>\n    ${isZone?`<div class="pendingControl"><select class="existingTarget"><option value="">Vincular a zona existente…</option>${zoneOptions()}</select><button class="linkPending ghost">Vincular</button></div>\n      <div class="pendingControl"><select class="municipalityTarget">${municipalityOptions(p.municipality_id||'')}</select><input class="newLocationName" value="${esc(p.detected)}"><button class="createPending primary">Crear zona</button></div>`:
+      `<div class="pendingControl"><select class="existingTarget"><option value="">Vincular a conjunto existente…</option>${complexOptions('',p.zone_id||null)}</select><button class="linkPending ghost">Vincular</button></div>\n      <div class="pendingControl"><select class="zoneTarget">${zoneOptions(p.zone_id||'')}</select><input class="newLocationName" value="${esc(p.detected)}"><select class="complexType"><option value="conjunto_cerrado">Conjunto cerrado</option><option value="torre">Torre</option><option value="edificio">Edificio</option><option value="urbanizacion_privada">Urbanización privada</option></select><button class="createPending primary">Crear conjunto</button></div>`}\n    <button class="discardPending miniGhost">Descartar detección</button>\n  </article>`;}).join(''):'<div class="empty">No hay detecciones pendientes. El catálogo está limpio.</div>';
+  box.querySelectorAll('.locationPendingCard').forEach(card=>{
+    const id=card.dataset.id,p=locationPendings.find(x=>x.id===id);if(!p)return;
+    card.querySelector('.linkPending')?.addEventListener('click',async()=>{const target=card.querySelector('.existingTarget')?.value;if(!target)return alert('Selecciona un destino.');await linkLocationPending(id,target);await afterLocationDecision();});
+    card.querySelector('.createPending')?.addEventListener('click',async()=>{const name=card.querySelector('.newLocationName')?.value?.trim()||p.detected;if(p.kind==='zone'){const mid=card.querySelector('.municipalityTarget')?.value;if(!mid)return alert('Selecciona municipio.');await createZoneFromPending(id,mid,name);}else{const zid=card.querySelector('.zoneTarget')?.value,type=card.querySelector('.complexType')?.value||'conjunto_cerrado';if(!zid)return alert('Selecciona la zona donde pertenece.');await createComplexFromPending(id,zid,name,type);}await afterLocationDecision();});
+    card.querySelector('.discardPending')?.addEventListener('click',async()=>{await discardLocationPending(id);await refreshLocationStats();renderLocationReview();});
+  });
+}
+async function afterLocationDecision(){
+  locationCatalog=await getLocationCatalog();await rematchAllPropertyLocations(locationCatalog);locationCatalog=await getLocationCatalog();await refreshLocationStats();await loadData();renderLocationReview();
+}
+async function initLocationSystem(){
+  await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();
+  const migration=localStorage.getItem('gi_location_migration_v0412');
+  if(!migration){await clearLocationPendings();await rematchAllPropertyLocations(locationCatalog);localStorage.setItem('gi_location_migration_v0412',String(Date.now()));locationCatalog=await getLocationCatalog();}
+  await refreshLocationStats();
+}
+$('#openLocationReview')?.addEventListener('click',async()=>{locationPendings=await getLocationPendings('pending');renderLocationReview();$('#locationReviewDialog').showModal();});
+$('#closeLocationReview')?.addEventListener('click',()=>$('#locationReviewDialog').close());
+$('#refreshLocationCatalog')?.addEventListener('click',async()=>{locationCatalog=await getLocationCatalog();await rematchAllPropertyLocations(locationCatalog);await refreshLocationStats();await loadData();alert('Catálogo aplicado nuevamente a tu inventario.');});
+
 async function loadData() {
+  if(!locationCatalog.zones?.length){await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();}
   await purgeOldProperties(60);
   const rawProperties=await getAllProperties();
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
@@ -708,8 +810,11 @@ async function initDropbox() {
     alert(`Dropbox: ${e.message}`);
   }
 }
-initDropbox();
 
+async function initApp(){
+  try{await initLocationSystem();await loadData();await initDropbox();}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+}
+initApp();
 
 window.addEventListener('pagehide',()=>rememberSearchPosition());
 window.addEventListener('pageshow',e=>{ if(e.persisted) restoreSearchPosition(); });
@@ -718,6 +823,5 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v049')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0410').catch(()=>{});
-loadData();
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0411')).map(k=>caches.delete(k)))).catch(()=>{});}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0412').catch(()=>{});

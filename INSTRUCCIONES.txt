@@ -1,18 +1,26 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.10 PRO
+ACTUALIZACIÓN ACUMULATIVA v0.4.12 PRO — JERARQUÍA TERRITORIAL
 
-Sube TODOS los archivos de esta carpeta al MISMO repositorio GitHub.
-Luego Commit changes, espera GitHub Pages, abre la URL en Safari y recarga una vez.
-Cierra y vuelve a abrir la PWA.
+IMPORTANTE:
+NO instales primero v0.4.11. v0.4.12 la sustituye.
 
-Debe decir v0.4.10 PRO.
+1. Descomprime este ZIP.
+2. Entra al MISMO repositorio GitHub: grupos-inmobiliarios.
+3. Upload files / Subir archivos.
+4. Sube TODOS los archivos de esta carpeta.
+5. Commit changes.
+6. Espera GitHub Pages.
+7. Abre la URL una vez en Safari y recarga.
+8. Cierra y vuelve a abrir Grupos Inmobiliarios.
+9. Debe aparecer v0.4.12 PRO.
 
-NO necesitas:
-- importar contactos,
-- subir un directorio,
-- clasificar colegas/clientes/familiares,
-- reconfigurar Dropbox.
+NO vacíes la base local.
+NO reconfigures Dropbox.
+NO vuelvas a importar contactos.
 
-La app toma automáticamente los contactos de:
-/CONTACTOS_PROCESADOS
+Al entrar en Buscar:
+1. Elige uno o varios MUNICIPIOS.
+2. Abre ZONAS / SECTORES.
+3. Solo verás ubicaciones del catálogo territorial, agrupadas por municipio.
+4. Puedes tildar varias zonas simultáneamente.
 
-El botón “Actualizar directorio ahora” queda solo como acción manual opcional.
+La primera apertura vuelve a clasificar territorialmente el inventario existente.

@@ -1,6 +1,6 @@
-import { isDemandRequest } from './intent-utils.js?v=0410';
-import { extractLocationTerms, normLoc } from './location-utils.js?v=0410';
-import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=0410';
+import { isDemandRequest } from './intent-utils.js?v=0412';
+import { extractLocationTerms, normLoc } from './location-utils.js?v=0412';
+import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=0412';
 
 const ACCENTS = {á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
 
@@ -85,8 +85,8 @@ export function matchesFilters(p, f={}) {
   if (isDemandRequest(p.text || '')) return false;
 
   const hay = norm([
-    p.operation, p.property_type, p.zone, p.residence, p.sender, p.group,
-    p.text, p.normalized
+    p.operation, p.property_type, p.municipality, p.zone, p.zone_detected, p.residence, p.complex_detected, p.sender, p.group,
+    ...(p.location_terms||[]), p.text, p.normalized
   ].filter(Boolean).join(' '));
 
   const q = f.q || '';
@@ -96,9 +96,20 @@ export function matchesFilters(p, f={}) {
   const types=Array.isArray(f.property_types)?f.property_types.filter(Boolean):[];
   if(types.length && !types.includes(p.property_type)) return false;
 
+  const municipalityIds=Array.isArray(f.municipality_ids)?f.municipality_ids.filter(Boolean):[];
+  if(municipalityIds.length && p.municipality_id && !municipalityIds.includes(p.municipality_id)) return false;
+  if(municipalityIds.length && !p.municipality_id){
+    const names=(f.municipality_names||[]).filter(Boolean);
+    const mhay=normLoc([p.municipality,p.zone,p.text].filter(Boolean).join(' '));
+    if(names.length && !names.some(x=>mhay.includes(normLoc(x)))) return false;
+  }
+
+  const zoneIds=Array.isArray(f.zone_ids)?f.zone_ids.filter(Boolean):[];
+  if(zoneIds.length && p.zone_id && !zoneIds.includes(p.zone_id)) return false;
+
   const zones=Array.isArray(f.zones)?f.zones.filter(Boolean):[];
   if(zones.length){
-    const locationHay=normLoc([p.zone,p.residence,...(p.location_terms||[]),...extractLocationTerms(p.text||'',p.zone),p.text].filter(Boolean).join(' '));
+    const locationHay=normLoc([p.municipality,p.zone,p.zone_detected,p.residence,p.complex_detected,...(p.location_terms||[]),...(p.zone_matches||[]).map(x=>x.nombre),...extractLocationTerms(p.text||'',p.zone),p.text].filter(Boolean).join(' '));
     if(!zones.some(z=>locationHay.includes(normLoc(z)))) return false;
   }
 

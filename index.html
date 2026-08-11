@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0410" />
+  <link rel="stylesheet" href="./styles.css?v=0412" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.4.10 PRO</div>
+      <div class="version">v0.4.12 PRO</div>
     </header>
 
     <section class="stats">
@@ -55,12 +55,18 @@
             <div id="typeSelectedPills" class="selectedPills"></div>
           </div>
           <div class="selectorField fullSpan">
+            <label>Municipios</label>
+            <button id="openMunicipalitySelector" class="selectorTrigger" type="button"><span id="municipalitySelectorText">Todos los municipios</span><b>⌄</b></button>
+            <div id="municipalitySelectedPills" class="selectedPills"></div>
+          </div>
+          <div class="selectorField fullSpan">
             <label>Zonas</label>
             <button id="openZoneSelector" class="selectorTrigger" type="button"><span id="zoneSelectorText">Todas las zonas</span><b>⌄</b></button>
             <div id="zoneSelectedPills" class="selectedPills"></div>
           </div>
-          <label>Residencia
-            <input id="residence" placeholder="Nombre..." />
+          <label>Conjunto / Torre
+            <input id="residence" list="complexCatalogList" placeholder="Ej. Lo Más Alto, Terramar" />
+            <datalist id="complexCatalogList"></datalist>
           </label>
           <label>Precio mínimo
             <input id="minPrice" type="number" inputmode="numeric" placeholder="$0" />
@@ -183,6 +189,13 @@
         <div id="contactSyncStatus" class="contactSyncStatus">El directorio se carga automáticamente desde Dropbox.</div>
       </section>
 
+      <section class="card smartLocationCard">
+        <div class="sectionTitle"><span>⌖</span><div><h2>Territorio inteligente</h2><p>Municipio → Zona/Sector → Conjunto/Torre. Catálogo controlado.</p></div></div>
+        <div class="smartLocationStats"><div><strong id="smartZoneCount">0</strong><span>zonas</span></div><div><strong id="smartComplexCount">0</strong><span>conjuntos</span></div><div><strong id="smartPendingCount">0</strong><span>por revisar</span></div></div>
+        <div class="smartLocationActions"><button id="openLocationReview" class="primary">Revisar detecciones</button><button id="refreshLocationCatalog" class="ghost">Aplicar catálogo</button></div>
+        <small class="smartLocationNote">Las variantes se vinculan como alias. Una zona nueva solo entra al catálogo cuando tú la apruebas.</small>
+      </section>
+
       <details class="card manualImport">
         <summary>Importación manual desde iPhone</summary>
         <p class="muted">Úsala como respaldo si necesitas seleccionar un ZIP desde Archivos.</p>
@@ -227,6 +240,11 @@
       </div>
     </dialog>
 
+    <dialog id="locationReviewDialog" class="locationReviewDialog">
+      <div class="dialogHead"><div><span>CATÁLOGO CONTROLADO</span><h2>Zonas y conjuntos por revisar</h2><small id="locationReviewMeta"></small></div><button id="closeLocationReview">×</button></div>
+      <div id="locationReviewList" class="locationReviewList"></div>
+    </dialog>
+
     <dialog id="detailDialog">
       <div class="dialogHead">
         <div><span id="detailType"></span><h2 id="detailTitle"></h2></div>
@@ -242,6 +260,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0410"></script>
+  <script type="module" src="./app.js?v=0412"></script>
 </body>
 </html>

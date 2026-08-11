@@ -1,8 +1,8 @@
-import { extractWhatsAppChat, decodeChat } from './zip-reader.js?v=0410';
-import { processChatText } from './engine.js?v=0410';
+import { extractWhatsAppChat, decodeChat } from './zip-reader.js?v=0412';
+import { processChatText } from './engine.js?v=0412';
 
 self.onmessage = async (e) => {
-  const { file, group } = e.data;
+  const { file, group, locationCatalog } = e.data;
   try {
     postMessage({ type: 'status', step: 'zip', text: 'Abriendo ZIP…' });
     const extracted = await extractWhatsAppChat(file);
@@ -20,7 +20,7 @@ self.onmessage = async (e) => {
       step: 'process',
       text: 'Detectando propiedades…'
     });
-    const result = processChatText(text, group, { maxAgeDays: 60, now: Date.now() });
+    const result = processChatText(text, group, { maxAgeDays: 60, now: Date.now(), locationCatalog });
 
     postMessage({
       type: 'done',

@@ -1,6 +1,7 @@
-import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0410';
-import { KNOWN_ZONES, extractLocationTerms, bestZone } from './location-utils.js?v=0410';
-import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0410';
+import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0412';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0412';
+import { resolveLocationRecord } from './location-catalog.js?v=0412';
+import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0412';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
 */
@@ -210,7 +211,7 @@ function extractPhone(text) {
   return '0'+m[1].replace(/^0/,'')+m[2]+m[3];
 }
 
-export function extractProperty(message) {
+export function extractProperty(message, options={}) {
   const n=normalizeText(message.text);
   if(!isPropertyPost(message.text)) return null;
   const rent=n.match(/\b(alquiler|alquilo|alquila|canon|arrendamiento|arrendo)\b/i);
@@ -219,12 +220,18 @@ export function extractProperty(message) {
   if(rent && !sale) operation='Alquiler'; else if(sale && !rent) operation='Venta';
   else if(rent && sale) operation = rent.index < sale.index ? 'Alquiler':'Venta';
   let propertyType=null; for(const [label,rx] of TYPES){if(rx.test(n)){propertyType=label;break;}}
-  const locationTerms=extractLocationTerms(message.text);
-  const zone=bestZone(message.text, locationTerms[0]||null);
+  const residenceDetected=extractResidence(message.text);
+  const smartLocation=resolveLocationRecord(message.text,options.locationCatalog||null,{existingComplex:residenceDetected});
+  const locationTerms=smartLocation.location_terms?.length?smartLocation.location_terms:extractLocationTerms(message.text);
+  const zone=smartLocation.zone||bestZone(message.text,locationTerms[0]||null);
   const price=extractPrice(message.text, operation);
   const rec={
     group:message.group,date:message.date,date_iso:message.date_iso,date_order:message.date_order,time:message.time,sender:message.sender,
-    operation,property_type:propertyType,zone,location_terms:locationTerms,residence:extractResidence(message.text),price_usd:price,
+    operation,property_type:propertyType,
+    municipality_id:smartLocation.municipality_id,municipality:smartLocation.municipality,
+    zone_id:smartLocation.zone_id,zone,zone_detected:smartLocation.zone_detected,zone_detected_norm:smartLocation.zone_detected_norm,zone_confidence:smartLocation.zone_confidence,zone_matches:smartLocation.zone_matches,
+    complex_id:smartLocation.complex_id,complex_detected:smartLocation.complex_detected,complex_detected_norm:smartLocation.complex_detected_norm,complex_confidence:smartLocation.complex_confidence,location_requires_review:smartLocation.requires_review,
+    location_terms:locationTerms,residence:smartLocation.complex||smartLocation.complex_detected||null,price_usd:price,
     area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|mts?|metros(?:\s+cuadrados?)?)\b/i]),
     bedrooms:firstNumber(n,[/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?)\b/i,/\bhabitaciones?\s*[:\-]?\s*(\d{1,2})\b/i]),
     bathrooms:firstNumber(n,[/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?)\b/i,/\bbanos?\s*[:\-]?\s*(\d{1,2})/i]),
@@ -241,6 +248,7 @@ export function extractProperty(message) {
     normalized:n
   };
   rec.id = simpleHash(n);
+  rec.location_pending=(smartLocation.pending||[]).map(x=>({...x,property_id:rec.id,group:message.group,sender:message.sender,date:message.date,date_iso:message.date_iso,sample_text:message.text.slice(0,1800)}));
   return rec;
 }
 
@@ -284,7 +292,7 @@ export function processChatText(text, group='Grupo', options={}) {
     const parts=splitMultiListingMessage(m);
     if(parts.length>1) multiItemsCreated += parts.length;
     for(const part of parts){
-      const r=extractProperty(part);
+      const r=extractProperty(part,{locationCatalog:options.locationCatalog});
       if(r) properties.push(r);
     }
   }
@@ -317,6 +325,7 @@ export function processChatText(text, group='Grupo', options={}) {
     requests_skipped:requestsSkipped,
     multi_items_created:multiItemsCreated,
     properties_detected:properties.length,
+    location_pendings:properties.flatMap(p=>p.location_pending||[]),
     unique:[...unique.values()]
   };
 }
