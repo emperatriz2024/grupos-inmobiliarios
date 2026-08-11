@@ -7,6 +7,11 @@ import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
 } from './search-utils.js';
+import {
+  getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
+  disconnectDropbox as dropboxDisconnect, listPendingZips, downloadDropboxFile, moveDropboxFile,
+  redirectUri as dropboxRedirectUri
+} from './dropbox.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -206,6 +211,35 @@ async function renderSaved() {
   bindCardActions(box);
 }
 
+
+function processZipWithWorker(file, group, progressCb) {
+  return new Promise((resolve,reject)=>{
+    const worker = new Worker('./worker.js',{type:'module'});
+    worker.onmessage = async (e)=>{
+      const m=e.data;
+      if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
+      if(m.type==='error'){ worker.terminate(); reject(new Error(m.message)); return; }
+      if(m.type==='done'){ worker.terminate(); resolve(m); }
+    };
+    worker.onerror=(e)=>{worker.terminate();reject(new Error(e.message||'Error del procesador'));};
+    worker.postMessage({file,group});
+  });
+}
+
+async function saveProcessedResult(m, group, fileName, progressCb) {
+  const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
+  const summary={group,file_name:fileName,chat_file:m.entryName,messages:m.result.messages,
+    detected:m.result.properties_detected,unique:m.result.unique.length,added:saved.added,updated:saved.updated};
+  await addImport(summary);
+  return summary;
+}
+
+async function importOneZip(file, group, progressCb) {
+  const m = await processZipWithWorker(file,group,progressCb);
+  const summary = await saveProcessedResult(m,group,file.name,progressCb);
+  return {m,summary};
+}
+
 const fileInput = $('#zipInput');
 fileInput.addEventListener('change', () => {
   selectedFile = fileInput.files?.[0] || null;
@@ -219,46 +253,25 @@ fileInput.addEventListener('change', () => {
 
 $('#importBtn').addEventListener('click', async () => {
   if (!selectedFile) return;
-  $('#importBtn').disabled = true;
-  fileInput.disabled = true;
-  $('#resultBox').hidden = true;
-  setStatus('Preparando importación…');
-  const worker = new Worker('./worker.js', { type: 'module' });
-  const group = groupFromName(selectedFile.name);
-
-  worker.onmessage = async (e) => {
-    const m = e.data;
-    if (m.type === 'status') {
-      const map = { zip: 12, decode: 28, process: 48 };
-      setStatus(m.bytes ? `${m.text} ${prettySize(m.bytes)}` : m.text, map[m.step] ?? null);
-      return;
-    }
-    if (m.type === 'error') {
-      setStatus(`Error: ${m.message}`, 0);
-      $('#importBtn').disabled = false; fileInput.disabled = false; worker.terminate(); return;
-    }
-    if (m.type === 'done') {
-      setStatus(`Guardando ${m.result.unique.length.toLocaleString('es-VE')} publicaciones únicas…`, 60);
-      const saved = await mergeProperties(m.result.unique, (done,total) => setStatus(
-        `Guardando base local… ${done.toLocaleString('es-VE')} / ${total.toLocaleString('es-VE')}`,
-        60 + Math.round((done/Math.max(total,1))*35)
-      ));
-      const summary = {group,file_name:selectedFile.name,chat_file:m.entryName,messages:m.result.messages,
-        detected:m.result.properties_detected,unique:m.result.unique.length,added:saved.added,updated:saved.updated};
-      await addImport(summary);
-      setStatus('Importación completada',100);
-      $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>Importación completada</h3>
-        <div class="summaryGrid">
-        <div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes</span></div>
-        <div><b>${summary.detected.toLocaleString('es-VE')}</b><span>publicaciones</span></div>
-        <div><b>${summary.unique.toLocaleString('es-VE')}</b><span>textos únicos</span></div>
-        <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>`;
-      $('#resultBox').hidden=false;
-      $('#importBtn').disabled=false; fileInput.disabled=false; worker.terminate();
-      await loadData();
-    }
-  };
-  worker.postMessage({ file:selectedFile, group });
+  $('#importBtn').disabled = true; fileInput.disabled = true; $('#resultBox').hidden = true;
+  try {
+    const group = groupFromName(selectedFile.name);
+    setStatus('Preparando importación…');
+    const {summary} = await importOneZip(selectedFile,group,(p)=>{
+      if(p.phase==='zip') setStatus('Abriendo ZIP…',12);
+      else if(p.phase==='decode') setStatus(p.bytes?`Leyendo chat… ${prettySize(p.bytes)}`:'Leyendo chat…',28);
+      else if(p.phase==='process') setStatus('Detectando propiedades…',48);
+      else if(p.phase==='save') setStatus(`Guardando base local… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,60+Math.round((p.done/Math.max(p.total,1))*35));
+    });
+    setStatus('Importación completada',100);
+    $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>Importación completada</h3>
+      <div class="summaryGrid"><div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes</span></div>
+      <div><b>${summary.detected.toLocaleString('es-VE')}</b><span>publicaciones</span></div>
+      <div><b>${summary.unique.toLocaleString('es-VE')}</b><span>textos únicos</span></div>
+      <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>`;
+    $('#resultBox').hidden=false; await loadData();
+  } catch(e) { setStatus(`Error: ${e.message}`,0); }
+  finally { $('#importBtn').disabled=false; fileInput.disabled=false; }
 });
 
 async function refreshStatsOnly() {
@@ -291,6 +304,115 @@ $('#resetBtn').onclick = async () => {
   await clearDatabase(); allProperties=[]; favoriteIds=new Set(); await loadData();
   $('#resultBox').hidden=true; $('#statusBox').hidden=true;
 };
+
+
+let pendingDropboxFiles = [];
+
+function renderDropboxState() {
+  const s=getDropboxSettings();
+  $('#dropboxAppKey').value=s.appKey;
+  $('#pendingPath').value=s.pendingPath;
+  $('#processedPath').value=s.processedPath;
+  $('#redirectUri').textContent=dropboxRedirectUri();
+  $('#dropboxDisconnected').hidden=s.connected;
+  $('#dropboxConnected').hidden=!s.connected;
+  if(s.connected) $('#dropboxFolderLabel').textContent=`${s.pendingPath} → ${s.processedPath}`;
+}
+function renderPendingList() {
+  $('#pendingCount').textContent=pendingDropboxFiles.length.toLocaleString('es-VE');
+  const total=pendingDropboxFiles.reduce((a,x)=>a+Number(x.size||0),0);
+  $('#pendingSize').textContent=prettySize(total);
+  $('#pendingList').innerHTML=pendingDropboxFiles.length
+    ? pendingDropboxFiles.slice(0,20).map(x=>`<div class="pendingItem"><div><b>${esc(x.name)}</b><small>${x.server_modified?new Date(x.server_modified).toLocaleString('es-VE'):''}</small></div><span>${prettySize(x.size||0)}</span></div>`).join('')
+    : '<p class="muted">No hay ZIP pendientes en esta carpeta.</p>';
+}
+async function refreshDropboxPending() {
+  const s=getDropboxSettings();
+  $('#dropboxProgress').hidden=false;
+  $('#dropboxProgressTitle').textContent='Leyendo Dropbox…';
+  $('#dropboxProgressCount').textContent='';
+  $('#dropboxProgressBar').removeAttribute('value');
+  $('#dropboxProgressDetail').textContent=s.pendingPath;
+  try {
+    pendingDropboxFiles=await listPendingZips(s.pendingPath);
+    renderPendingList();
+    $('#dropboxProgressTitle').textContent='Lista actualizada';
+    $('#dropboxProgressBar').value=100; $('#dropboxProgressBar').max=100;
+    $('#dropboxProgressDetail').textContent=`${pendingDropboxFiles.length} ZIP encontrados`;
+  } catch(e) {
+    $('#dropboxProgressTitle').textContent='No pude leer la carpeta';
+    $('#dropboxProgressDetail').textContent=e.message;
+  }
+}
+
+$('#saveDropboxSettings').onclick=()=>{
+  saveDropboxSettings({appKey:$('#dropboxAppKey').value,pendingPath:$('#pendingPath').value,processedPath:$('#processedPath').value});
+  renderDropboxState();
+  alert('Configuración de Dropbox guardada.');
+};
+$('#connectDropbox').onclick=async()=>{
+  saveDropboxSettings({appKey:$('#dropboxAppKey').value,pendingPath:$('#pendingPath').value,processedPath:$('#processedPath').value});
+  try{await startDropboxOAuth();}catch(e){alert(e.message);}
+};
+$('#disconnectDropbox').onclick=()=>{
+  if(!confirm('¿Desconectar Dropbox de esta aplicación?')) return;
+  dropboxDisconnect(); pendingDropboxFiles=[]; renderDropboxState();
+};
+$('#refreshDropbox').onclick=()=>refreshDropboxPending();
+
+$('#processPending').onclick=async()=>{
+  if(!pendingDropboxFiles.length){await refreshDropboxPending(); if(!pendingDropboxFiles.length) return;}
+  const s=getDropboxSettings();
+  $('#processPending').disabled=true; $('#refreshDropbox').disabled=true;
+  $('#dropboxProgress').hidden=false; $('#dropboxProgressBar').max=pendingDropboxFiles.length;
+  let ok=0, failed=0;
+  const queue=[...pendingDropboxFiles];
+  for(let i=0;i<queue.length;i++){
+    const entry=queue[i];
+    $('#dropboxProgressBar').value=i;
+    $('#dropboxProgressTitle').textContent='Procesando chats pendientes';
+    $('#dropboxProgressCount').textContent=`${i+1}/${queue.length}`;
+    $('#dropboxProgressDetail').textContent=`Descargando ${entry.name}`;
+    try{
+      const blob=await downloadDropboxFile(entry.path_lower||entry.path_display);
+      const file=new File([blob],entry.name,{type:'application/zip'});
+      const group=groupFromName(entry.name);
+      const {summary}=await importOneZip(file,group,(p)=>{
+        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando ${entry.name}`;
+        if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Guardando ${entry.name} · ${p.done}/${p.total}`;
+      });
+      $('#dropboxProgressDetail').textContent=`Moviendo ${entry.name} a ${s.processedPath}`;
+      await moveDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name);
+      ok++;
+      await loadData();
+    }catch(e){
+      failed++;
+      console.error(entry.name,e);
+      $('#dropboxProgressDetail').textContent=`Error en ${entry.name}: ${e.message}`;
+      await new Promise(r=>setTimeout(r,1200));
+    }
+  }
+  $('#dropboxProgressBar').value=queue.length;
+  $('#dropboxProgressTitle').textContent=failed?'Proceso terminado con avisos':'Todos los pendientes fueron procesados';
+  $('#dropboxProgressCount').textContent=`${ok} OK${failed?` · ${failed} error`:''}`;
+  $('#dropboxProgressDetail').textContent=failed?'Los archivos con error permanecen en Chat pendiente.':'Los ZIP procesados fueron movidos a Procesado.';
+  $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
+  await refreshDropboxPending();
+};
+
+async function initDropbox() {
+  renderDropboxState();
+  try {
+    const finished=await finishDropboxOAuthIfPresent();
+    renderDropboxState();
+    if(finished || getDropboxSettings().connected) await refreshDropboxPending();
+  } catch(e) {
+    renderDropboxState();
+    alert(`Dropbox: ${e.message}`);
+  }
+}
+initDropbox();
+
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 loadData();

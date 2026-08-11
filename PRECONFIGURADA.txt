@@ -1,0 +1,28 @@
+GRUPOS INMOBILIARIOS v0.4 — PRECONFIGURADA
+
+Dropbox App Key:
+rsyovq93iej48hn
+
+Tipo de acceso:
+App Folder / AplicaciónInstagramInmobiliario
+
+Carpeta de entrada API:
+/CHAT_PENDIENTES
+
+Carpeta de salida API:
+/CHAT_PROCESADOS
+
+Redirect URI registrado:
+https://emperatriz2024.github.io/grupos-inmobiliarios/
+
+Uso:
+1. Subir los archivos de esta actualización al MISMO repositorio GitHub.
+2. Esperar la actualización de GitHub Pages.
+3. Abrir Grupos Inmobiliarios.
+4. Importar → Dropbox · Chats pendientes.
+5. Tocar “Conectar Dropbox”.
+6. Autorizar la app.
+7. Tocar “Procesar pendientes”.
+
+No se utiliza App Secret.
+No se utiliza token generado manualmente.

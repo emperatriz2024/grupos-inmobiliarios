@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.3</div>
+      <div class="version">v0.4</div>
     </header>
 
     <section class="stats">
@@ -123,14 +123,58 @@
     </section>
 
     <section id="viewImport" class="view">
-      <section class="card importCard">
+      <section class="card dropboxCard">
         <div class="sectionTitle">
-          <span>+</span>
-          <div><h2>Importar chat</h2><p>Selecciona un ZIP exportado desde WhatsApp.</p></div>
+          <span>☁</span>
+          <div><h2>Dropbox · Chats pendientes</h2><p>Procesa tus grupos directamente desde la nube.</p></div>
         </div>
+
+        <div id="dropboxDisconnected">
+          <div class="setupBox">
+            <label>Dropbox App Key
+              <input id="dropboxAppKey" value="rsyovq93iej48hn" readonly />
+            </label>
+            <label>Carpeta de entrada
+              <input id="pendingPath" value="/CHAT_PENDIENTES" />
+            </label>
+            <label>Carpeta procesada
+              <input id="processedPath" value="/CHAT_PROCESADOS" />
+            </label>
+            <small>Dirección de retorno para Dropbox:</small>
+            <code id="redirectUri"></code>
+            <button id="saveDropboxSettings" class="ghost">Guardar configuración</button>
+            <button id="connectDropbox" class="primary">Conectar Dropbox</button>
+          </div>
+        </div>
+
+        <div id="dropboxConnected" hidden>
+          <div class="cloudStatus">
+            <div><span class="onlineDot"></span><b>Dropbox conectado</b><small id="dropboxFolderLabel"></small></div>
+            <button id="disconnectDropbox" class="miniGhost">Desconectar</button>
+          </div>
+          <div class="pendingStats">
+            <div><strong id="pendingCount">—</strong><span>ZIP pendientes</span></div>
+            <div><strong id="pendingSize">—</strong><span>peso total</span></div>
+          </div>
+          <div class="cloudActions">
+            <button id="refreshDropbox" class="ghost">Actualizar lista</button>
+            <button id="processPending" class="primary">Procesar pendientes</button>
+          </div>
+          <div id="dropboxProgress" class="syncProgress" hidden>
+            <div class="row"><b id="dropboxProgressTitle">Sincronizando…</b><span id="dropboxProgressCount"></span></div>
+            <progress id="dropboxProgressBar"></progress>
+            <small id="dropboxProgressDetail"></small>
+          </div>
+          <div id="pendingList"></div>
+        </div>
+      </section>
+
+      <details class="card manualImport">
+        <summary>Importación manual desde iPhone</summary>
+        <p class="muted">Úsala como respaldo si necesitas seleccionar un ZIP desde Archivos.</p>
         <label class="picker" for="zipInput">
           <b>Seleccionar ZIP</b>
-          <small>Archivos · iCloud Drive · Dropbox</small>
+          <small>Archivos · iCloud Drive</small>
         </label>
         <input id="zipInput" type="file" accept=".zip,application/zip" />
         <div id="fileCard" class="fileCard" hidden>
@@ -138,12 +182,12 @@
           <div><b id="fileName"></b><small id="fileMeta"></small></div>
         </div>
         <button id="importBtn" class="primary" disabled>Procesar y guardar</button>
-      </section>
+      </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.3</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.4</span></div>
         <progress id="progress"></progress>
-        <small>El procesamiento ocurre en este dispositivo.</small>
+        <small>Los chats se procesan en este dispositivo.</small>
       </section>
       <section id="resultBox" class="card resultCard" hidden></section>
 
