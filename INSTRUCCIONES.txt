@@ -1,5 +1,17 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.7
-Sube TODOS los archivos al MISMO repositorio GitHub y haz Commit changes.
-Recarga GitHub Pages y vuelve a abrir la PWA.
-No vacíes la base local ni reconfigures Dropbox.
-Después de actualizar, usa Importar → Reindexar CHAT_PROCESADOS una sola vez para recuperar captaciones omitidas por motores anteriores.
+ACTUALIZACIÓN ACUMULATIVA v0.4.8 PRO
+
+1. Descomprime este ZIP.
+2. En el MISMO repositorio GitHub grupos-inmobiliarios, usa Upload files.
+3. Sube TODOS los archivos de esta carpeta.
+4. Commit changes.
+5. Espera GitHub Pages.
+6. Abre la URL una vez en Safari y recarga.
+7. Cierra y vuelve a abrir Grupos Inmobiliarios.
+8. Debe decir v0.4.8 PRO.
+
+NO vacíes la base local.
+NO reconfigures Dropbox.
+
+Después de actualizar:
+Importar → Reindexar CHAT_PROCESADOS con el motor actual.
+Esto permite recuperar captaciones que un motor anterior pudo no reconocer.

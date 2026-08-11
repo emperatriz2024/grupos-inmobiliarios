@@ -2,7 +2,7 @@ const A={á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
 export function normLoc(s=''){return String(s).toLowerCase().replace(/[áéíóúüñ]/g,c=>A[c]||c).replace(/[^\p{L}\p{N}\s\-]/gu,' ').replace(/\s+/g,' ').trim();}
 
 export const KNOWN_ZONES=[
-'Lomas del Este','Lomas de Los Mangos','Lomas de la Hacienda','Lomas del Country','Los Nísperos','Los Nisperos',
+'Lomas del Este','Lomas Altas','Lomas Alto','Lomas de Los Mangos','Lomas de la Hacienda','Lomas del Country','Los Nísperos','Los Nisperos',
 'Mañongo','Naguanagua','Tazajal','El Rincón','Manantial','La Granja','Piedra Pintada','Guaparo Norte','Guaparo','Guataparo','Altos de Guataparo',
 'Valles de Camoruco','Valle de Camoruco','Valle Blanco','El Parral','Los Mangos','El Bosque','Prebo III','Prebo II','Prebo I','Prebo',
 'La Viña','La Trigaleña','Trigaleña','Trigal Norte','Trigal Centro','Trigal Sur','Las Chimeneas','Agua Blanca','Sabana Larga','Campo Alegre',
@@ -27,9 +27,11 @@ export function extractLocationTerms(text='', existingZone=null){
   for(const z of KNOWN_ZONES){const zn=normLoc(z); if(new RegExp(`(^|\\W)${esc(zn)}(?=$|\\W)`,'i').test(n)) add(z);}
   const rxs=[
     /\b(?:urb(?:anizaci[oó]n)?\.?|urbanizaci[oó]n)\s*[:\-]?\s*([^\n,;|]{3,55})/gi,
-    /\b(?:zona|sector)\s*[:\-]?\s*([^\n,;|]{3,45})/gi
+    /\b(?:zona|sector|municipio|parroquia)\s*[:\-]?\s*([^\n,;|]{3,45})/gi
   ];
   for(const rx of rxs){for(const m of raw.matchAll(rx)) add(m[1]);}
+  // Lines marked with a map pin are frequently the urbanization/zone in Venezuelan listings.
+  for(const m of raw.matchAll(/(?:📍|ubicaci[oó]n\s*[:\-])\s*([^\n,;|]{3,45})/gi)) add(m[1]);
   return out;
 }
 export function bestZone(text='', existingZone=null){return extractLocationTerms(text,existingZone)[0]||existingZone||null;}

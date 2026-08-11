@@ -2,17 +2,19 @@
 import {
   mergeProperties, addImport, getStats, getRecentImports, clearDatabase,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties
-} from './db.js';
+} from './db.js?v=048';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js';
+} from './search-utils.js?v=048';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=048';
+import { isDemandRequest } from './intent-utils.js?v=048';
+import { consolidateProperties } from './dedupe-utils.js?v=048';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, downloadDropboxFile, moveDropboxFile,
   redirectUri as dropboxRedirectUri
-} from './dropbox.js';
+} from './dropbox.js?v=048';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -20,6 +22,11 @@ let allProperties = [];
 let favoriteIds = new Set();
 let currentResults = [];
 let visibleCount = 30;
+let selectedPropertyTypes=new Set();
+let selectedZones=new Set();
+let zoneCatalog=[];
+let selectorMode=null;
+let selectorDraft=new Set();
 const SEARCH_SCROLL_KEY='gi_search_scroll_v042';
 const SEARCH_CARD_KEY='gi_search_card_v042';
 const SEARCH_STATE_KEY='gi_search_state_v042';
@@ -29,34 +36,25 @@ function rememberSearchPosition(cardId='') {
     sessionStorage.setItem(SEARCH_SCROLL_KEY,String(window.scrollY||0));
     if(cardId) sessionStorage.setItem(SEARCH_CARD_KEY,cardId);
     sessionStorage.setItem(SEARCH_STATE_KEY,JSON.stringify({
-      visibleCount,
-      q:$('#q')?.value||'', operation:$('#operation')?.value||'',
-      propertyTypes:getSelectedValues('propertyTypeOptions'), zones:getSelectedValues('zoneOptions'),
-      residence:$('#residence')?.value||'', minPrice:$('#minPrice')?.value||'',
-      maxPrice:$('#maxPrice')?.value||'', bedrooms:$('#bedrooms')?.value||'', bathrooms:$('#bathrooms')?.value||'',
-      parking:$('#parking')?.value||'', minArea:$('#minArea')?.value||'', maxArea:$('#maxArea')?.value||'',
-      maxAge:$('#maxAge')?.value||'', sortMode:$('#sortMode')?.value||'recent',
-      planta100:!!$('#planta100')?.checked, planta:!!$('#planta')?.checked, pozo:!!$('#pozo')?.checked,
-      tanque:!!$('#tanque')?.checked, amoblado:!!$('#amoblado')?.checked, financiamiento:!!$('#financiamiento')?.checked,
-      piscina:!!$('#piscina')?.checked, onlyPhone:!!$('#onlyPhone')?.checked
+      visibleCount,q:$('#q')?.value||'',operation:$('#operation')?.value||'',
+      propertyTypes:[...selectedPropertyTypes],zones:[...selectedZones],residence:$('#residence')?.value||'',
+      minPrice:$('#minPrice')?.value||'',maxPrice:$('#maxPrice')?.value||'',bedrooms:$('#bedrooms')?.value||'',
+      bathrooms:$('#bathrooms')?.value||'',parking:$('#parking')?.value||'',minArea:$('#minArea')?.value||'',maxArea:$('#maxArea')?.value||'',
+      maxAge:$('#maxAge')?.value||'',sortMode:$('#sortMode')?.value||'recent',planta100:!!$('#planta100')?.checked,
+      planta:!!$('#planta')?.checked,pozo:!!$('#pozo')?.checked,tanque:!!$('#tanque')?.checked,amoblado:!!$('#amoblado')?.checked,
+      financiamiento:!!$('#financiamiento')?.checked,piscina:!!$('#piscina')?.checked,onlyPhone:!!$('#onlyPhone')?.checked
     }));
   } catch {}
 }
 
 function restoreSearchFormState(){
   try{
-    const s=JSON.parse(sessionStorage.getItem(SEARCH_STATE_KEY)||'null');
-    if(!s) return false;
-    const v=(id,val)=>{const el=$('#'+id); if(el) el.value=val??'';};
-    const c=(id,val)=>{const el=$('#'+id); if(el) el.checked=!!val;};
-    v('q',s.q);v('operation',s.operation);v('residence',s.residence);
-    setSelectedValues('propertyTypeOptions',s.propertyTypes||[]); setSelectedValues('zoneOptions',s.zones||[]); updateMultiCounts();
-    v('minPrice',s.minPrice);v('maxPrice',s.maxPrice);v('bedrooms',s.bedrooms);v('bathrooms',s.bathrooms);v('parking',s.parking);
-    v('minArea',s.minArea);v('maxArea',s.maxArea);v('maxAge',s.maxAge);v('sortMode',s.sortMode);
-    c('planta100',s.planta100);c('planta',s.planta);c('pozo',s.pozo);c('tanque',s.tanque);c('amoblado',s.amoblado);
-    c('financiamiento',s.financiamiento);c('piscina',s.piscina);c('onlyPhone',s.onlyPhone);
-    visibleCount=Math.max(30,Number(s.visibleCount||30));
-    return true;
+    const s=JSON.parse(sessionStorage.getItem(SEARCH_STATE_KEY)||'null'); if(!s)return false;
+    const v=(id,val)=>{const el=$('#'+id);if(el)el.value=val??'';}; const c=(id,val)=>{const el=$('#'+id);if(el)el.checked=!!val;};
+    v('q',s.q);v('operation',s.operation);v('residence',s.residence);selectedPropertyTypes=new Set(s.propertyTypes||[]);selectedZones=new Set(s.zones||[]);
+    v('minPrice',s.minPrice);v('maxPrice',s.maxPrice);v('bedrooms',s.bedrooms);v('bathrooms',s.bathrooms);v('parking',s.parking);v('minArea',s.minArea);v('maxArea',s.maxArea);v('maxAge',s.maxAge);v('sortMode',s.sortMode);
+    c('planta100',s.planta100);c('planta',s.planta);c('pozo',s.pozo);c('tanque',s.tanque);c('amoblado',s.amoblado);c('financiamiento',s.financiamiento);c('piscina',s.piscina);c('onlyPhone',s.onlyPhone);
+    visibleCount=Math.max(30,Number(s.visibleCount||30)); updateSelectorUI(); return true;
   }catch{return false;}
 }
 
@@ -103,6 +101,11 @@ function buildWhatsAppMessage(p) {
     'Gracias.'
   ].join('\n');
 }
+function buildWhatsAppHref(p){
+  const num=whatsappNumber(effectivePhone(p)); if(!num)return '';
+  return `https://wa.me/${num}?text=${encodeURIComponent(buildWhatsAppMessage(p))}`;
+}
+
 
 function setStatus(text, pct = null) {
   $('#statusBox').hidden = false;
@@ -138,7 +141,7 @@ function sourceText(p) {
 function cardHTML(p) {
   const r = recencyInfo(p);
   const phone = effectivePhone(p);
-  const fav = favoriteIds.has(p.id);
+  const fav = [p.id,...(p.merged_ids||[])].some(id=>favoriteIds.has(id));
 
   const metas = [];
   if (p.area_m2) metas.push(`${p.area_m2} m²`);
@@ -195,7 +198,7 @@ function cardHTML(p) {
 
     <div class="cardActions v044">
       <button class="action detail" data-id="${esc(p.id)}">Ficha completa</button>
-      <button class="action whatsapp" data-id="${esc(p.id)}" ${phone?'':'disabled'}>WhatsApp</button>
+      ${phone ? `<a class="action whatsapp whatsappLink" data-id="${esc(p.id)}" href="${esc(buildWhatsAppHref(p))}">WhatsApp</a>` : `<button class="action whatsapp disabled" disabled>Sin WhatsApp</button>`}
       <button class="action favorite ${fav?'active':''}" data-id="${esc(p.id)}">${fav?'♥':'♡'}</button>
     </div>
   </article>`;
@@ -219,25 +222,18 @@ function bindCardActions(container) {
     if (nowFav) favoriteIds.add(btn.dataset.id); else favoriteIds.delete(btn.dataset.id);
     btn.classList.toggle('active', nowFav);
     btn.textContent = nowFav ? '♥' : '♡';
-    await refreshStatsOnly();
+    await refreshStatsOnly(allProperties.length);
     if ($('#viewSaved').classList.contains('active')) renderSaved();
   });
-  container.querySelectorAll('.whatsapp').forEach(btn => btn.onclick = () => {
-    rememberSearchPosition(btn.dataset.id);
-    const p = allProperties.find(x => x.id === btn.dataset.id);
-    const num = whatsappNumber(effectivePhone(p));
-    if (!num) return;
-    const msg = encodeURIComponent(buildWhatsAppMessage(p));
-    window.location.href = `https://wa.me/${num}?text=${msg}`;
-  });
+  container.querySelectorAll('a.whatsapp').forEach(link => link.addEventListener('click',()=>rememberSearchPosition(link.dataset.id)));
 }
 
 function getFilters() {
   return {
     q: $('#q').value,
     operation: $('#operation').value,
-    property_types: getSelectedValues('propertyTypeOptions'),
-    zones: getSelectedValues('zoneOptions'),
+    property_types: [...selectedPropertyTypes],
+    zones: [...selectedZones],
     residence: $('#residence').value,
     min_price: $('#minPrice').value,
     max_price: $('#maxPrice').value,
@@ -281,25 +277,41 @@ $('#sortMode').onchange = () => runSearch();
 $('#clearFilters').onclick = () => {
   ['q','operation','residence','minPrice','maxPrice','bedrooms','bathrooms','parking','minArea','maxArea','maxAge'].forEach(id => $('#'+id).value='');
   ['planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id => $('#'+id).checked=false);
-  document.querySelectorAll('#propertyTypeOptions input,#zoneOptions input').forEach(x=>x.checked=false); updateMultiCounts();
+  selectedPropertyTypes.clear(); selectedZones.clear(); updateSelectorUI();
   runSearch();
 };
 
 const PROPERTY_TYPES=['Apartamento','Townhouse','Penthouse','Casa','Terreno','Local comercial','Oficina','Galpón','Anexo'];
-function getSelectedValues(containerId){return [...document.querySelectorAll(`#${containerId} input:checked`)].map(x=>x.value);}
-function setSelectedValues(containerId,values=[]){const wanted=new Set(values);document.querySelectorAll(`#${containerId} input`).forEach(x=>x.checked=wanted.has(x.value));}
-function choiceHTML(value,group){return `<label class="multiChoice"><input type="checkbox" value="${esc(value)}" data-group="${group}"><span>${esc(value)}</span></label>`;}
-function updateMultiCounts(){const t=getSelectedValues('propertyTypeOptions').length,z=getSelectedValues('zoneOptions').length;$('#typeSelectedCount').textContent=t?`${t} seleccionados`:'Todos';$('#zoneSelectedCount').textContent=z?`${z} seleccionadas`:'Todas';}
-function bindMultiChoices(){document.querySelectorAll('#propertyTypeOptions input,#zoneOptions input').forEach(x=>x.onchange=()=>{updateMultiCounts();rememberSearchPosition();});}
-function buildTypeOptions(){ $('#propertyTypeOptions').innerHTML=PROPERTY_TYPES.map(x=>choiceHTML(x,'type')).join(''); }
 function allLocationTerms(p){return [...new Set([p.zone,...(p.location_terms||[]),...extractLocationTerms(p.text||'',p.zone)].filter(Boolean))];}
-function buildZoneOptions(){
-  const previous=new Set(getSelectedValues('zoneOptions'));
-  const zones=[...new Set(allProperties.flatMap(allLocationTerms).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  $('#zoneOptions').innerHTML=zones.map(z=>choiceHTML(z,'zone')).join('');
-  setSelectedValues('zoneOptions',[...previous]); bindMultiChoices(); updateMultiCounts();
+function buildZoneCatalog(){
+  zoneCatalog=[...new Set(allProperties.flatMap(allLocationTerms).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));
+  for(const z of selectedZones) if(!zoneCatalog.includes(z)) zoneCatalog.push(z);
 }
-function filterZoneChoices(q=''){const x=normLoc(q);document.querySelectorAll('#zoneOptions .multiChoice').forEach(l=>{l.style.display=!x||normLoc(l.textContent).includes(x)?'':'none';});}
+function summaryText(set,empty,singular){const a=[...set];if(!a.length)return empty;if(a.length<=2)return a.join(' + ');return `${a.length} ${singular}`;}
+function renderPills(containerId,set){
+  const box=$('#'+containerId); if(!box)return; box.innerHTML=[...set].map(v=>`<span class="selectedPill">${esc(v)}<button type="button" data-value="${esc(v)}">×</button></span>`).join('');
+  box.querySelectorAll('button').forEach(b=>b.onclick=()=>{set.delete(b.dataset.value);updateSelectorUI();rememberSearchPosition();});
+}
+function updateSelectorUI(){
+  if($('#typeSelectorText')) $('#typeSelectorText').textContent=summaryText(selectedPropertyTypes,'Todos','seleccionados');
+  if($('#zoneSelectorText')) $('#zoneSelectorText').textContent=summaryText(selectedZones,'Todas las zonas','seleccionadas');
+  renderPills('typeSelectedPills',selectedPropertyTypes);renderPills('zoneSelectedPills',selectedZones);
+}
+function selectorValues(){return selectorMode==='types'?PROPERTY_TYPES:zoneCatalog;}
+function renderSelectorOptions(){
+  const q=normLoc($('#selectorSearchInput')?.value||''); const list=selectorValues().filter(v=>!q||normLoc(v).includes(q));
+  $('#selectorOptionsList').innerHTML=list.length?list.map(v=>`<label class="selectorOption"><input type="checkbox" value="${esc(v)}" ${selectorDraft.has(v)?'checked':''}><span>${esc(v)}</span></label>`).join(''):'<div class="empty">No encontré opciones.</div>';
+  $('#selectorOptionsList').querySelectorAll('input').forEach(x=>x.onchange=()=>{if(x.checked)selectorDraft.add(x.value);else selectorDraft.delete(x.value);});
+}
+function openSelector(mode){
+  selectorMode=mode;selectorDraft=new Set(mode==='types'?selectedPropertyTypes:selectedZones);
+  $('#selectorTitle').textContent=mode==='types'?'Tipos de inmueble':'Zonas';$('#selectorSearchWrap').hidden=mode==='types';$('#selectorSearchInput').value='';renderSelectorOptions();$('#multiSelectorDialog').showModal();
+}
+$('#openTypeSelector').onclick=()=>openSelector('types');$('#openZoneSelector').onclick=()=>openSelector('zones');
+$('#closeMultiSelector').onclick=()=>$('#multiSelectorDialog').close();
+$('#selectorSearchInput').oninput=()=>renderSelectorOptions();
+$('#selectorClearBtn').onclick=()=>{selectorDraft.clear();renderSelectorOptions();};
+$('#selectorApplyBtn').onclick=()=>{if(selectorMode==='types')selectedPropertyTypes=new Set(selectorDraft);else selectedZones=new Set(selectorDraft);updateSelectorUI();rememberSearchPosition();$('#multiSelectorDialog').close();};
 
 
 async function openDetail(id) {
@@ -317,7 +329,7 @@ async function openDetail(id) {
       <div class="detailPrice">${esc(formatMoney(p.price_usd))}</div>
       <div class="features">${featureLabels(p).map(x=>`<span class="feature">${esc(x)}</span>`).join('')}</div>
       <div class="detailGrid">${grid.map(([a,b])=>`<div><small>${esc(a)}</small><b>${esc(b)}</b></div>`).join('')}</div>
-      ${phone ? `<button id="detailWhatsApp" class="primary">Contactar por WhatsApp</button>` : ''}
+      ${phone ? `<a id="detailWhatsApp" class="primary detailWhatsAppLink" href="${esc(buildWhatsAppHref(p))}">Contactar por WhatsApp</a>` : ''}
       <h4>Publicación original</h4>
       <div class="originalText">${esc(p.text || '')}</div>
       <div class="sources"><h4>Fuentes encontradas (${(p.sources||[]).length || 1})</h4>
@@ -326,11 +338,6 @@ async function openDetail(id) {
       <button id="detailBackBottom" class="detailBackBottom">← Volver a resultados</button>
     </div>`;
   $('#detailDialog').showModal();
-  if (phone) $('#detailWhatsApp').onclick = () => {
-    const num = whatsappNumber(phone);
-    const msg = encodeURIComponent(buildWhatsAppMessage(p));
-    window.location.href = `https://wa.me/${num}?text=${msg}`;
-  };
 }
 $('#closeDialog').onclick = () => { $('#detailDialog').close(); restoreSearchPosition(); };
 $('#detailDialog').addEventListener('close',()=>restoreSearchPosition());
@@ -346,7 +353,7 @@ async function renderSaved() {
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js',{type:'module'});
+    const worker = new Worker('./worker.js?v=048',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -412,9 +419,9 @@ $('#importBtn').addEventListener('click', async () => {
   finally { $('#importBtn').disabled=false; fileInput.disabled=false; }
 });
 
-async function refreshStatsOnly() {
+async function refreshStatsOnly(uniqueCount=null) {
   const s = await getStats();
-  $('#propertyCount').textContent = s.properties.toLocaleString('es-VE');
+  $('#propertyCount').textContent = Number(uniqueCount ?? s.properties).toLocaleString('es-VE');
   $('#importCount').textContent = s.imports.toLocaleString('es-VE');
   $('#favoriteCount').textContent = s.favorites.toLocaleString('es-VE');
 }
@@ -426,26 +433,15 @@ async function refreshRecent() {
 }
 async function loadData() {
   await purgeOldProperties(60);
-  allProperties = await getAllProperties();
-  favoriteIds = await getFavoriteIds();
-  await refreshStatsOnly();
-  await refreshRecent();
-  buildTypeOptions(); buildZoneOptions(); bindMultiChoices();
-  $('#zoneSearch').oninput=()=>filterZoneChoices($('#zoneSearch').value);
+  const rawProperties=await getAllProperties();
+  const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
+  allProperties=consolidateProperties(valid);
+  favoriteIds=await getFavoriteIds();
+  await refreshStatsOnly(allProperties.length);await refreshRecent();buildZoneCatalog();updateSelectorUI();
   const restored=restoreSearchFormState();
-  if(restored){
-    currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);
-    $('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');
-    $('#resultHint').textContent='Búsqueda restaurada';
-  }else{
-    currentResults=sortProperties(allProperties,'recent');
-    $('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');
-    $('#resultHint').textContent='Mostrando las más recientes';
-    visibleCount=30;
-  }
-  renderResults();
-  if(restored) restoreSearchPosition();
-  if ($('#viewSaved').classList.contains('active')) renderSaved();
+  if(restored){currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Búsqueda restaurada';}
+  else{currentResults=sortProperties(allProperties,'recent');$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent=`${allProperties.length.toLocaleString('es-VE')} inmuebles únicos`;visibleCount=30;}
+  renderResults();if(restored)restoreSearchPosition();if($('#viewSaved').classList.contains('active'))renderSaved();
 }
 $('#resetBtn').onclick = async () => {
   if (!confirm('¿Eliminar propiedades, importaciones y guardadas de este dispositivo?')) return;
@@ -607,5 +603,6 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v048')).map(k=>caches.delete(k)))).catch(()=>{});}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=048').catch(()=>{});
 loadData();

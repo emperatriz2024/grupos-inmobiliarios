@@ -1,6 +1,6 @@
-import { isDemandRequest, listingIntentScore } from './intent-utils.js';
-import { KNOWN_ZONES, extractLocationTerms, bestZone } from './location-utils.js';
-import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js';
+import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=048';
+import { KNOWN_ZONES, extractLocationTerms, bestZone } from './location-utils.js?v=048';
+import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=048';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
 */
@@ -111,7 +111,7 @@ const SYSTEM_BITS = [
   'creo el grupo','cambio el asunto','cambio la descripcion','cambio el icono'
 ];
 
-const RE_TERMS = /\b(venta|vendo|vende|alquiler|alquilo|alquila|canon|apartamento|apto\.?|town\s*house|townhouse|casa|penthouse|ph\b|terreno|parcela|local\s+comercial|oficina|galpon|inmueble|habitaciones?|banos?|estacionamientos?|puestos?|mts?2|m2|precio|ref\.?|residencias?|urbanizacion|conjunto)\b/gi;
+const RE_TERMS = /\b(venta|vendo|vende|alquiler|alquilo|alquila|canon|apartamento|apto\.?|town\s*house|townhouse|townhause|town\s*home|casa|quinta|vivienda|penthouse|ph\b|terreno|parcela|local\s+comercial|oficina|galpon|inmueble|habitaciones?|banos?|estacionamientos?|puestos?|mts?2|m2|precio|ref\.?|residencias?|urbanizacion|conjunto)\b/gi;
 const MONEY_RE = /(?:us\s*\$|usd\s*\$?|\$)\s*\d|\b\d{2,3}(?:[.,]\d{3})+\s*\$|\b\d{2,3}\s*k\b/i;
 
 export function isPropertyPost(text) {
@@ -127,9 +127,9 @@ export function isPropertyPost(text) {
 const TYPES = [
   ['Apartamento', /\b(apartamento|apto\.?)\b/i],
   ['Anexo', /\banexo\b/i],
-  ['Townhouse', /\b(town\s*house|townhouse|town\s*home|townhome|t\s*\/\s*h|th)\b/i],
+  ['Townhouse', /\b(town\s*house|townhouse|townhause|town\s*home|townhome|t\s*\/\s*h|th)\b/i],
   ['Penthouse', /\b(pent\s*house|penthouse|ph)\b/i],
-  ['Casa', /\b(casa|quinta|aparto[\s-]?quinta)\b/i],
+  ['Casa', /\b(casa|quinta|vivienda|chalet|aparto[\s-]?quinta)\b/i],
   ['Terreno', /\b(terreno|parcela|lote)\b/i],
   ['Local comercial', /\blocal(?:\s+comercial)?\b/i],
   ['Oficina', /\boficina\b/i],
@@ -187,13 +187,19 @@ function firstNumber(n, patterns) {
 }
 
 function extractResidence(text) {
-  const rx=/\b(?:residencias?\b|res\.(?=\s)|conjunto\s+residencial\b|conj\.?\s*res\.?)\s*[:\-]?\s*[“"']?([^\n,;]{3,60})/i;
-  for (const line0 of cleanText(text).split('\n').slice(0,15)) {
+  const raw=cleanText(text);
+  const prefix=/\b(?:residencias?|resd\.?|res\.|conjunto(?:\s+residencial)?|conj\.?\s*(?:res\.?)?)\s*[:\-]?\s*[“"']?([^\n,;]{3,60})/i;
+  for (const line0 of raw.split('\n').slice(0,18)) {
     if (/https?:\/\//i.test(line0)) continue;
-    const m=line0.match(rx); if(!m) continue;
+    const m=line0.match(prefix); if(!m) continue;
     let v=m[1].replace(/^[ *•\-:,.“”"']+|[ *•\-:,.“”"']+$/g,'');
-    v=v.split(/\s{2,}|\s+ubicad[oa]\b|\s+valencia\b|\s+estado\b|\s+de\s+\d{2,5}\b/i)[0];
+    v=v.split(/\s{2,}|\s+ubicad[oa]\b|\s+valencia\b|\s+estado\b|\s+de\s+\d{2,5}\b|\s+consta\b/i)[0].trim();
     if (!/^(de|una|un)\b/i.test(v) && v.length>2) return v;
+  }
+  // Common Venezuelan residence names are often posted as a standalone line: “Villas Corina”, “Villa Serino”.
+  for(const line0 of raw.split('\n').slice(0,14)){
+    const line=line0.replace(/^[ *•\-:,.“”"']+|[ *•\-:,.“”"']+$/g,'').trim();
+    if(/^villas?\s+[\p{L}0-9][\p{L}0-9 .'-]{2,38}$/iu.test(line) && !/\b(?:venta|alquiler|casa|townhouse|apartamento|precio)\b/i.test(line)) return line;
   }
   return null;
 }
@@ -219,7 +225,7 @@ export function extractProperty(message) {
   const rec={
     group:message.group,date:message.date,date_iso:message.date_iso,date_order:message.date_order,time:message.time,sender:message.sender,
     operation,property_type:propertyType,zone,location_terms:locationTerms,residence:extractResidence(message.text),price_usd:price,
-    area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mts2|mts\s*2|mts?\s+cuadrados?|metros\s*cuadrados?)\b/i]),
+    area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|mts?|metros(?:\s+cuadrados?)?)\b/i]),
     bedrooms:firstNumber(n,[/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?)\b/i,/\bhabitaciones?\s*[:\-]?\s*(\d{1,2})\b/i]),
     bathrooms:firstNumber(n,[/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?)\b/i,/\bbanos?\s*[:\-]?\s*(\d{1,2})/i]),
     parking:firstNumber(n,[/\b(\d{1,2})\s*(?:p\s*\/?\s*e|puestos?(?:\s+de)?\s+estacionamiento|estacionamientos?)\b/i,/\bpuestos?\s*[:\-]?\s*(\d{1,2})/i]),

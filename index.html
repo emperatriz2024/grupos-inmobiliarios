@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=048" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.4.7</div>
+      <div class="version">v0.4.8 PRO</div>
     </header>
 
     <section class="stats">
@@ -49,14 +49,15 @@
               <option>Venta</option><option>Alquiler</option>
             </select>
           </label>
-          <div class="multiField fullSpan">
-            <div class="multiFieldHead"><b>Tipos de inmueble</b><span id="typeSelectedCount">Todos</span></div>
-            <div id="propertyTypeOptions" class="multiChips"></div>
+          <div class="selectorField fullSpan">
+            <label>Tipos de inmueble</label>
+            <button id="openTypeSelector" class="selectorTrigger" type="button"><span id="typeSelectorText">Todos</span><b>⌄</b></button>
+            <div id="typeSelectedPills" class="selectedPills"></div>
           </div>
-          <div class="multiField fullSpan">
-            <div class="multiFieldHead"><b>Zonas</b><span id="zoneSelectedCount">Todas</span></div>
-            <input id="zoneSearch" class="zoneSearch" placeholder="Buscar zona..." autocomplete="off" />
-            <div id="zoneOptions" class="multiChips zoneChips"></div>
+          <div class="selectorField fullSpan">
+            <label>Zonas</label>
+            <button id="openZoneSelector" class="selectorTrigger" type="button"><span id="zoneSelectorText">Todas las zonas</span><b>⌄</b></button>
+            <div id="zoneSelectedPills" class="selectedPills"></div>
           </div>
           <label>Residencia
             <input id="residence" placeholder="Nombre..." />
@@ -205,6 +206,15 @@
       <div id="savedEmpty" class="empty" hidden>No has guardado propiedades todavía.</div>
     </section>
 
+    <dialog id="multiSelectorDialog" class="multiSelectorDialog">
+      <div class="selectorSheet">
+        <div class="selectorSheetHead"><div><small>Filtro múltiple</small><h3 id="selectorTitle">Seleccionar</h3></div><button id="closeMultiSelector" type="button">×</button></div>
+        <div id="selectorSearchWrap" class="selectorSearchWrap"><input id="selectorSearchInput" placeholder="Buscar..." autocomplete="off" /></div>
+        <div id="selectorOptionsList" class="selectorOptionsList"></div>
+        <div class="selectorSheetFooter"><button id="selectorClearBtn" class="ghost" type="button">Limpiar</button><button id="selectorApplyBtn" class="primary" type="button">Aplicar selección</button></div>
+      </div>
+    </dialog>
+
     <dialog id="detailDialog">
       <div class="dialogHead">
         <div><span id="detailType"></span><h2 id="detailTitle"></h2></div>
@@ -220,6 +230,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=048"></script>
 </body>
 </html>

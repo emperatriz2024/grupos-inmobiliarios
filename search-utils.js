@@ -1,6 +1,6 @@
-import { isDemandRequest } from './intent-utils.js';
-import { extractLocationTerms, normLoc } from './location-utils.js';
-import { parseFlexibleDate, propertyTimestamp } from './date-utils.js';
+import { isDemandRequest } from './intent-utils.js?v=048';
+import { extractLocationTerms, normLoc } from './location-utils.js?v=048';
+import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=048';
 
 const ACCENTS = {á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
 
@@ -53,6 +53,29 @@ export function effectivePhone(p) {
   return '';
 }
 
+const SEARCH_ALIAS=[
+  [/\b(?:town\s*house|townhouse|townhause|town\s*home|townhome|\bth\b)\b/g,'townhouse'],
+  [/\b(?:apto|apartamento)\b/g,'apartamento'],
+  [/\b(?:quinta|vivienda|chalet|casa)\b/g,'casa'],
+  [/\b(?:pent\s*house|penthouse|\bph\b)\b/g,'penthouse'],
+  [/\b(?:galpon|galpón)\b/g,'galpon']
+];
+function canonSearch(s=''){let x=norm(s);for(const [rx,v] of SEARCH_ALIAS)x=x.replace(rx,v);return x.replace(/\s+/g,' ').trim();}
+function editDistance1(a,b){
+  if(a===b)return true;if(Math.abs(a.length-b.length)>1)return false;
+  let i=0,j=0,d=0;while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue;}if(++d>1)return false;if(a.length>b.length)i++;else if(b.length>a.length)j++;else{i++;j++;}}return d+(i<a.length||j<b.length?1:0)<=1;
+}
+function queryMatches(q,hay){
+  const query=canonSearch(q); if(!query)return true;
+  const target=canonSearch(hay); const words=target.split(' ').filter(Boolean);
+  for(const t of query.split(' ').filter(Boolean)){
+    if(target.includes(t))continue;
+    if(t.length>=5 && words.some(w=>w.length>=4&&editDistance1(t,w)))continue;
+    return false;
+  }
+  return true;
+}
+
 export function matchesFilters(p, f={}) {
   // REGLA DURA: ninguna tarjeta con fecha válida >45 días puede aparecer.
   // También ocultamos registros sin fecha interpretable para evitar inventario incierto.
@@ -65,11 +88,8 @@ export function matchesFilters(p, f={}) {
     p.text, p.normalized
   ].filter(Boolean).join(' '));
 
-  const q = norm(f.q || '');
-  if (q) {
-    const tokens = q.split(' ').filter(Boolean);
-    if (!tokens.every(t => hay.includes(t))) return false;
-  }
+  const q = f.q || '';
+  if (q && !queryMatches(q, hay)) return false;
 
   if (f.operation && p.operation !== f.operation) return false;
   const types=Array.isArray(f.property_types)?f.property_types.filter(Boolean):[];

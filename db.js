@@ -1,6 +1,6 @@
-import { isDemandRequest } from './intent-utils.js';
-import { extractLocationTerms, bestZone } from './location-utils.js';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js';
+import { isDemandRequest } from './intent-utils.js?v=048';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=048';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=048';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 2;

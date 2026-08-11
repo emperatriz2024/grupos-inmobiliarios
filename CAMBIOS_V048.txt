@@ -1,0 +1,14 @@
+GRUPOS INMOBILIARIOS v0.4.8 PRO
+
+- Selector múltiple REAL para Tipos de inmueble.
+- Selector múltiple REAL para Zonas, con buscador y casillas para tildar varias.
+- WhatsApp directo desde la tarjeta al captador.
+- Solicitudes excluidas: solicito, se solicita, busco, cliente busca, requiero, necesito, etc.
+- Deduplicación conservadora por inmueble: reposts del mismo inmueble se muestran una sola vez.
+- “Apariciones” conserva todas las fechas/fuentes del inmueble consolidado.
+- Zonas dinámicas aprendidas desde los propios chats.
+- Lomas del Este / Lomas Altas incorporadas.
+- Mejor extracción de residencias como Villas Corina / Villa Serino.
+- Búsqueda tolerante a sinónimos: townhouse / town house / TH, apto / apartamento, etc.
+- Ventana máxima de 60 días.
+- Caché interna versionada para impedir mezcla de archivos viejos/nuevos en Safari PWA.
