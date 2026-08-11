@@ -1,7 +1,9 @@
+
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
+const FAV_STORE = 'favorites';
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -17,6 +19,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(IMPORT_STORE)) {
         db.createObjectStore(IMPORT_STORE, { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(FAV_STORE)) {
+        db.createObjectStore(FAV_STORE, { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -107,11 +112,12 @@ export async function addImport(summary) {
 
 export async function getStats() {
   const db = await openDB();
-  const tx = db.transaction([PROP_STORE, IMPORT_STORE], 'readonly');
+  const tx = db.transaction([PROP_STORE, IMPORT_STORE, FAV_STORE], 'readonly');
   const properties = await reqP(tx.objectStore(PROP_STORE).count());
   const imports = await reqP(tx.objectStore(IMPORT_STORE).count());
+  const favorites = await reqP(tx.objectStore(FAV_STORE).count());
   db.close();
-  return { properties, imports };
+  return { properties, imports, favorites };
 }
 
 export async function getRecentImports(limit = 8) {
@@ -133,21 +139,57 @@ export async function getRecentImports(limit = 8) {
   return out;
 }
 
+export async function getAllProperties() {
+  const db = await openDB();
+  const tx = db.transaction(PROP_STORE, 'readonly');
+  const items = await reqP(tx.objectStore(PROP_STORE).getAll());
+  db.close();
+  return items;
+}
+
+export async function getPropertiesByIds(ids=[]) {
+  const db = await openDB();
+  const tx = db.transaction(PROP_STORE, 'readonly');
+  const store = tx.objectStore(PROP_STORE);
+  const out = [];
+  for (const id of ids) {
+    const p = await reqP(store.get(id));
+    if (p) out.push(p);
+  }
+  db.close();
+  return out;
+}
+
+export async function getFavoriteIds() {
+  const db = await openDB();
+  const tx = db.transaction(FAV_STORE, 'readonly');
+  const rows = await reqP(tx.objectStore(FAV_STORE).getAll());
+  db.close();
+  return new Set(rows.map(x => x.id));
+}
+
+export async function toggleFavorite(id) {
+  const db = await openDB();
+  const tx = db.transaction(FAV_STORE, 'readwrite');
+  const store = tx.objectStore(FAV_STORE);
+  const current = await reqP(store.get(id));
+  if (current) store.delete(id);
+  else store.put({id, saved_at: new Date().toISOString()});
+  await new Promise((resolve,reject)=>{
+    tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error);
+  });
+  db.close();
+  return !current;
+}
+
 export async function clearDatabase() {
   const db = await openDB();
-  await Promise.all([
-    new Promise((resolve, reject) => {
-      const tx = db.transaction(PROP_STORE, 'readwrite');
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-      tx.objectStore(PROP_STORE).clear();
-    }),
-    new Promise((resolve, reject) => {
-      const tx = db.transaction(IMPORT_STORE, 'readwrite');
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-      tx.objectStore(IMPORT_STORE).clear();
-    })
-  ]);
+  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE];
+  await Promise.all(stores.map(name => new Promise((resolve, reject) => {
+    const tx = db.transaction(name, 'readwrite');
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.objectStore(name).clear();
+  })));
   db.close();
 }

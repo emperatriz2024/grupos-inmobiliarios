@@ -1,0 +1,8 @@
+ACTUALIZACIÓN v0.3
+1) Descomprime esta carpeta en iPhone.
+2) En el MISMO repositorio GitHub grupos-inmobiliarios, usa Upload files.
+3) Selecciona todos los archivos de esta carpeta (excepto INSTRUCCIONES si quieres).
+4) Commit changes. Los archivos con el mismo nombre se reemplazan.
+5) Espera GitHub Pages y abre la app.
+6) Cierra y vuelve a abrir la PWA. Debe mostrar v0.3.
+La base existente de v0.2 se conserva.

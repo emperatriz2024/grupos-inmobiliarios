@@ -8,79 +8,173 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Grupos Inmobiliarios" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="./assets/icon-180.png" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <main class="shell">
-    <header>
-      <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
-      <h1>Grupos<br><span>Inmobiliarios</span></h1>
-      <p>Importa tus chats de WhatsApp y conviértelos en una base inmobiliaria local en tu iPhone.</p>
+    <header class="topHeader">
+      <div>
+        <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
+        <h1>Grupos <span>Inmobiliarios</span></h1>
+      </div>
+      <div class="version">v0.3</div>
     </header>
 
     <section class="stats">
-      <div><strong id="propertyCount">0</strong><span>propiedades únicas</span></div>
-      <div><strong id="importCount">0</strong><span>grupos importados</span></div>
+      <div><strong id="propertyCount">0</strong><span>propiedades</span></div>
+      <div><strong id="favoriteCount">0</strong><span>guardadas</span></div>
+      <div><strong id="importCount">0</strong><span>grupos</span></div>
     </section>
 
-    <section class="card importCard">
-      <div class="sectionTitle">
-        <span>01</span>
-        <div>
-          <h2>Importar chat</h2>
-          <p>Selecciona el ZIP exportado desde WhatsApp.</p>
+    <section id="viewSearch" class="view active">
+      <div class="searchHero">
+        <label class="quickSearch">
+          <span>⌕</span>
+          <input id="q" placeholder="Ej. apartamento Mañongo planta" autocomplete="off" />
+        </label>
+        <button id="searchBtn" class="primary">Buscar propiedades</button>
+      </div>
+
+      <details class="card filters" open>
+        <summary>Filtros avanzados <span>ajustar</span></summary>
+        <div class="filterGrid">
+          <label>Operación
+            <select id="operation">
+              <option value="">Todas</option>
+              <option>Venta</option><option>Alquiler</option>
+            </select>
+          </label>
+          <label>Tipo
+            <select id="propertyType">
+              <option value="">Todos</option>
+              <option>Apartamento</option><option>Townhouse</option><option>Penthouse</option>
+              <option>Casa</option><option>Terreno</option><option>Local comercial</option>
+              <option>Oficina</option><option>Galpón</option><option>Anexo</option>
+            </select>
+          </label>
+          <label>Zona
+            <select id="zone"><option value="">Todas</option></select>
+          </label>
+          <label>Residencia
+            <input id="residence" placeholder="Nombre..." />
+          </label>
+          <label>Precio mínimo
+            <input id="minPrice" type="number" inputmode="numeric" placeholder="$0" />
+          </label>
+          <label>Precio máximo
+            <input id="maxPrice" type="number" inputmode="numeric" placeholder="$100.000" />
+          </label>
+          <label>Habitaciones mín.
+            <select id="bedrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+          </label>
+          <label>Baños mín.
+            <select id="bathrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+          </label>
+          <label>Puestos mín.
+            <select id="parking"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option></select>
+          </label>
+          <label>m² mínimo
+            <input id="minArea" type="number" inputmode="numeric" placeholder="0" />
+          </label>
+          <label>m² máximo
+            <input id="maxArea" type="number" inputmode="numeric" placeholder="500" />
+          </label>
+          <label>Vigencia
+            <select id="maxAge">
+              <option value="">Cualquier fecha</option>
+              <option value="7">Últimos 7 días</option>
+              <option value="14">Últimos 14 días</option>
+              <option value="21">Últimos 21 días</option>
+            </select>
+          </label>
         </div>
-      </div>
 
-      <label class="picker" for="zipInput">
-        <span class="plus">+</span>
-        <b>Seleccionar ZIP</b>
-        <small>Archivos · iCloud Drive · Dropbox</small>
-      </label>
-      <input id="zipInput" type="file" accept=".zip,application/zip" />
-
-      <div id="fileCard" class="fileCard" hidden>
-        <div class="zipBadge">ZIP</div>
-        <div>
-          <b id="fileName"></b>
-          <small id="fileMeta"></small>
+        <div class="checkGrid">
+          <label><input id="planta100" type="checkbox"> Planta 100%</label>
+          <label><input id="planta" type="checkbox"> Planta eléctrica</label>
+          <label><input id="pozo" type="checkbox"> Pozo</label>
+          <label><input id="tanque" type="checkbox"> Tanque</label>
+          <label><input id="amoblado" type="checkbox"> Amoblado</label>
+          <label><input id="financiamiento" type="checkbox"> Financiamiento</label>
+          <label><input id="piscina" type="checkbox"> Piscina</label>
+          <label><input id="onlyPhone" type="checkbox"> Con teléfono</label>
         </div>
-      </div>
 
-      <button id="importBtn" class="primary" disabled>Procesar y guardar</button>
-    </section>
-
-    <section id="statusBox" class="card statusCard" hidden>
-      <div class="row">
-        <b id="statusText">Procesando…</b>
-        <span>v0.2</span>
-      </div>
-      <progress id="progress"></progress>
-      <small>El procesamiento ocurre en este dispositivo.</small>
-    </section>
-
-    <section id="resultBox" class="card resultCard" hidden></section>
-
-    <section class="card">
-      <div class="sectionTitle">
-        <span>02</span>
-        <div>
-          <h2>Importaciones recientes</h2>
-          <p>Historial guardado localmente.</p>
+        <div class="filterActions">
+          <button id="clearFilters" class="ghost">Limpiar filtros</button>
+          <select id="sortMode" aria-label="Ordenar">
+            <option value="recent">Más recientes</option>
+            <option value="price_asc">Menor precio</option>
+            <option value="price_desc">Mayor precio</option>
+            <option value="appearances">Más republicadas</option>
+          </select>
         </div>
+      </details>
+
+      <div class="resultsHead">
+        <div><b id="resultCount">0</b><span> resultados</span></div>
+        <small id="resultHint">Busca en tu base local</small>
       </div>
-      <div id="recent"></div>
+      <section id="results"></section>
+      <button id="loadMore" class="ghost loadMore" hidden>Mostrar más</button>
     </section>
 
-    <section class="dangerZone">
-      <button id="resetBtn" class="ghost">Vaciar base local</button>
+    <section id="viewImport" class="view">
+      <section class="card importCard">
+        <div class="sectionTitle">
+          <span>+</span>
+          <div><h2>Importar chat</h2><p>Selecciona un ZIP exportado desde WhatsApp.</p></div>
+        </div>
+        <label class="picker" for="zipInput">
+          <b>Seleccionar ZIP</b>
+          <small>Archivos · iCloud Drive · Dropbox</small>
+        </label>
+        <input id="zipInput" type="file" accept=".zip,application/zip" />
+        <div id="fileCard" class="fileCard" hidden>
+          <div class="zipBadge">ZIP</div>
+          <div><b id="fileName"></b><small id="fileMeta"></small></div>
+        </div>
+        <button id="importBtn" class="primary" disabled>Procesar y guardar</button>
+      </section>
+
+      <section id="statusBox" class="card statusCard" hidden>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.3</span></div>
+        <progress id="progress"></progress>
+        <small>El procesamiento ocurre en este dispositivo.</small>
+      </section>
+      <section id="resultBox" class="card resultCard" hidden></section>
+
+      <section class="card">
+        <div class="sectionTitle"><span>↻</span><div><h2>Importaciones recientes</h2><p>Historial guardado localmente.</p></div></div>
+        <div id="recent"></div>
+      </section>
+      <div class="dangerZone"><button id="resetBtn" class="ghost">Vaciar toda la base local</button></div>
     </section>
 
-    <footer>GRUPOS INMOBILIARIOS · MOBILE v0.2</footer>
+    <section id="viewSaved" class="view">
+      <div class="savedHeader"><h2>Propiedades guardadas</h2><p>Tus opciones favoritas para revisar o enviar después.</p></div>
+      <section id="savedResults"></section>
+      <div id="savedEmpty" class="empty" hidden>No has guardado propiedades todavía.</div>
+    </section>
+
+    <dialog id="detailDialog">
+      <div class="dialogHead">
+        <div><span id="detailType"></span><h2 id="detailTitle"></h2></div>
+        <button id="closeDialog">×</button>
+      </div>
+      <div id="detailContent"></div>
+    </dialog>
   </main>
+
+  <nav class="bottomNav">
+    <button data-view="viewSearch" class="active"><span>⌕</span>Buscar</button>
+    <button data-view="viewImport"><span>＋</span>Importar</button>
+    <button data-view="viewSaved"><span>♡</span>Guardadas</button>
+  </nav>
+
   <script type="module" src="./app.js"></script>
 </body>
 </html>
