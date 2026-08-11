@@ -1,6 +1,6 @@
-import { isDemandRequest } from './intent-utils.js?v=048';
-import { extractLocationTerms, normLoc } from './location-utils.js?v=048';
-import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=048';
+import { isDemandRequest } from './intent-utils.js?v=0410';
+import { extractLocationTerms, normLoc } from './location-utils.js?v=0410';
+import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=0410';
 
 const ACCENTS = {á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
 
@@ -50,6 +50,7 @@ export function whatsappNumber(phone='') {
 export function effectivePhone(p) {
   if (p?.phone) return p.phone;
   for (const s of p?.sources || []) if (s.phone) return s.phone;
+  if (p?.resolved_phone) return p.resolved_phone;
   return '';
 }
 

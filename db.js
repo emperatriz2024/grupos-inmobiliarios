@@ -1,12 +1,14 @@
-import { isDemandRequest } from './intent-utils.js?v=048';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=048';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=048';
+import { isDemandRequest } from './intent-utils.js?v=0410';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0410';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0410';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0410';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
+const CONTACT_STORE = 'contacts';
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -25,6 +27,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(FAV_STORE)) {
         db.createObjectStore(FAV_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(CONTACT_STORE)) {
+        db.createObjectStore(CONTACT_STORE, { keyPath: 'phone' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -186,6 +191,24 @@ export async function toggleFavorite(id) {
 }
 
 
+
+export async function upsertContacts(records=[],sourceLabel='contactos'){
+  const db=await openDB();let added=0,updated=0;
+  const clean=records.map(r=>{const phone=cleanPhone(r.phone),aliases=[...new Set([...(r.aliases||[]),r.display_name].filter(Boolean))];
+    return {...r,phone,aliases,alias_keys:[...new Set([...(r.alias_keys||[]),...aliases.flatMap(personAliasKeys)])],sources:[...new Set([...(r.sources||[]),sourceLabel].filter(Boolean))]};}).filter(r=>r.phone&&r.alias_keys.length);
+  await new Promise((resolve,reject)=>{const tx=db.transaction(CONTACT_STORE,'readwrite'),store=tx.objectStore(CONTACT_STORE);
+    for(const r of clean){const q=store.get(r.phone);q.onsuccess=()=>{const old=q.result;if(!old){store.put({...r,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});added++;}
+      else{store.put({...old,...r,display_name:old.display_name||r.display_name,aliases:[...new Set([...(old.aliases||[]),...(r.aliases||[])])],alias_keys:[...new Set([...(old.alias_keys||[]),...(r.alias_keys||[])])],sources:[...new Set([...(old.sources||[]),...(r.sources||[])])],updated_at:new Date().toISOString()});updated++;}}}
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return {added,updated,total:clean.length};
+}
+export async function learnContactsFromProperties(records=[]){
+  const rows=[];for(const p of records){if(p?.sender&&p?.phone)rows.push({phone:p.phone,display_name:p.sender,aliases:[p.sender],alias_keys:personAliasKeys(p.sender),sources:['publicación']});
+    for(const s of p?.sources||[])if(s?.sender&&s?.phone)rows.push({phone:s.phone,display_name:s.sender,aliases:[s.sender],alias_keys:personAliasKeys(s.sender),sources:['publicación']});}
+  return upsertContacts(rows,'aprendido de publicaciones');
+}
+export async function getAllContacts(){const db=await openDB(),tx=db.transaction(CONTACT_STORE,'readonly'),rows=await reqP(tx.objectStore(CONTACT_STORE).getAll());db.close();return rows;}
+export async function getContactStats(){const contacts=await getAllContacts(),aliases=new Set();for(const c of contacts)for(const a of c.alias_keys||[])aliases.add(a);return {contacts:contacts.length,aliases:aliases.size};}
+
 function parseLocalDate(dateStr='', order='auto') {
   return parseFlexibleDate(dateStr,order,'MDY');
 }
@@ -289,7 +312,7 @@ export async function purgeOldProperties(maxAgeDays=60) {
 }
 export async function clearDatabase() {
   const db = await openDB();
-  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE];
+  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE, CONTACT_STORE];
   await Promise.all(stores.map(name => new Promise((resolve, reject) => {
     const tx = db.transaction(name, 'readwrite');
     tx.oncomplete = resolve;

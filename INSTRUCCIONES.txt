@@ -1,17 +1,18 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.8 PRO
+ACTUALIZACIÓN ACUMULATIVA v0.4.10 PRO
 
-1. Descomprime este ZIP.
-2. En el MISMO repositorio GitHub grupos-inmobiliarios, usa Upload files.
-3. Sube TODOS los archivos de esta carpeta.
-4. Commit changes.
-5. Espera GitHub Pages.
-6. Abre la URL una vez en Safari y recarga.
-7. Cierra y vuelve a abrir Grupos Inmobiliarios.
-8. Debe decir v0.4.8 PRO.
+Sube TODOS los archivos de esta carpeta al MISMO repositorio GitHub.
+Luego Commit changes, espera GitHub Pages, abre la URL en Safari y recarga una vez.
+Cierra y vuelve a abrir la PWA.
 
-NO vacíes la base local.
-NO reconfigures Dropbox.
+Debe decir v0.4.10 PRO.
 
-Después de actualizar:
-Importar → Reindexar CHAT_PROCESADOS con el motor actual.
-Esto permite recuperar captaciones que un motor anterior pudo no reconocer.
+NO necesitas:
+- importar contactos,
+- subir un directorio,
+- clasificar colegas/clientes/familiares,
+- reconfigurar Dropbox.
+
+La app toma automáticamente los contactos de:
+/CONTACTOS_PROCESADOS
+
+El botón “Actualizar directorio ahora” queda solo como acción manual opcional.

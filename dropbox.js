@@ -36,6 +36,8 @@ export function getDropboxSettings() {
     appKey: localStorage.getItem(K.appKey) || 'rsyovq93iej48hn',
     pendingPath: localStorage.getItem(K.pending) || '/CHAT_PENDIENTES',
     processedPath: localStorage.getItem(K.processed) || '/CHAT_PROCESADOS',
+    contactsPath: '/CONTACTOS',
+    contactsProcessedPath: '/CONTACTOS_PROCESADOS',
     connected: !!localStorage.getItem(K.refresh)
   };
 }
@@ -207,4 +209,9 @@ export async function moveDropboxFile(fromPath,toFolder,fileName) {
     autorename:true,
     allow_ownership_transfer:false
   });
+}
+
+export async function listDropboxContactFiles(path){
+  const e=await listDropboxFolder(path);
+  return e.filter(x=>x['.tag']==='file'&&/\.(?:vcf|vcard|csv|tsv|txt|json|zip)$/i.test(x.name)).sort((a,b)=>String(b.server_modified||'').localeCompare(String(a.server_modified||'')));
 }

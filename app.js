@@ -1,26 +1,30 @@
 
 import {
   mergeProperties, addImport, getStats, getRecentImports, clearDatabase,
-  getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties
-} from './db.js?v=048';
+  getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties,
+  learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats
+} from './db.js?v=0410';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=048';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=048';
-import { isDemandRequest } from './intent-utils.js?v=048';
-import { consolidateProperties } from './dedupe-utils.js?v=048';
+} from './search-utils.js?v=0410';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0410';
+import { isDemandRequest } from './intent-utils.js?v=0410';
+import { consolidateProperties } from './dedupe-utils.js?v=0410';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
-  disconnectDropbox as dropboxDisconnect, listPendingZips, downloadDropboxFile, moveDropboxFile,
+  disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=048';
+} from './dropbox.js?v=0410';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0410';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
 let allProperties = [];
 let favoriteIds = new Set();
 let currentResults = [];
+let contactIndex=buildContactIndex([]);
+let contactDirectory=[];
 let visibleCount = 30;
 let selectedPropertyTypes=new Set();
 let selectedZones=new Set();
@@ -90,6 +94,17 @@ function esc(s = '') {
 function groupFromName(name = '') {
   return name.replace(/\.zip$/i, '').replace(/^WhatsApp Chat\s*-?\s*/i, '').trim() || 'Grupo inmobiliario';
 }
+
+
+function annotateContactResolution(p){
+  const explicit=p?.phone||(p?.sources||[]).find(s=>s?.phone)?.phone||'';
+  if(explicit)return {...p,resolved_phone:'',phone_resolution:{source:'publicacion',label:'Tel. publicación'}};
+  const r=resolvePropertyContact(p,contactIndex);
+  if(r.status==='resolved')return {...p,resolved_phone:r.phone,phone_resolution:{source:'directorio',label:'WhatsApp · contacto',contact_name:r.contact?.display_name||r.matched_name||'',confidence:r.confidence}};
+  if(r.status==='ambiguous')return {...p,resolved_phone:'',phone_resolution:{source:'ambiguo',label:'Contacto ambiguo',count:r.count}};
+  return {...p,resolved_phone:'',phone_resolution:{source:'none',label:'Sin contacto'}};
+}
+function contactBadge(p){const x=p?.phone_resolution?.source;return x==='directorio'?'WhatsApp · contacto':x==='publicacion'?'Tel. publicación':x==='ambiguo'?'Contacto ambiguo':'Sin contacto';}
 
 function buildWhatsAppMessage(p) {
   const original = (p?.text || '').trim();
@@ -193,7 +208,7 @@ function cardHTML(p) {
         <b>${esc(sender)}</b>
         <span>${esc(group)}</span>
       </div>
-      ${phone ? `<span class="phoneHint">Tel. detectado</span>` : `<span class="phoneHint mutedPhone">Sin teléfono</span>`}
+      ${phone ? `<span class="phoneHint ${p.phone_resolution?.source==='directorio'?'directoryPhone':''}">${esc(contactBadge(p))}</span>` : `<span class="phoneHint mutedPhone">${esc(contactBadge(p))}</span>`}
     </div>
 
     <div class="cardActions v044">
@@ -322,7 +337,7 @@ async function openDetail(id) {
   const phone = effectivePhone(p);
   const grid = [
     ['Precio',formatMoney(p.price_usd)],['m²',p.area_m2||'—'],['Habitaciones',p.bedrooms||'—'],
-    ['Baños',p.bathrooms||'—'],['Puestos',p.parking||'—'],['Teléfono',phone||'No detectado']
+    ['Baños',p.bathrooms||'—'],['Puestos',p.parking||'—'],['Teléfono',phone?`${displayPhone(phone)} · ${contactBadge(p)}`:'No detectado']
   ];
   $('#detailContent').innerHTML = `
     <div class="detailBody">
@@ -353,7 +368,7 @@ async function renderSaved() {
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=048',{type:'module'});
+    const worker = new Worker('./worker.js?v=0410',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -376,6 +391,7 @@ async function saveProcessedResult(m, group, fileName, progressCb) {
     detected:m.result.properties_detected,unique:m.result.unique.length,
     added:saved.added,updated:saved.updated};
   await addImport(summary);
+  await learnContactsFromProperties(m.result.unique);
   return summary;
 }
 
@@ -435,9 +451,11 @@ async function loadData() {
   await purgeOldProperties(60);
   const rawProperties=await getAllProperties();
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
-  allProperties=consolidateProperties(valid);
+  const consolidated=consolidateProperties(valid);
+  contactDirectory=await getAllContacts();contactIndex=buildContactIndex(contactDirectory);
+  allProperties=consolidated.map(annotateContactResolution);
   favoriteIds=await getFavoriteIds();
-  await refreshStatsOnly(allProperties.length);await refreshRecent();buildZoneCatalog();updateSelectorUI();
+  await refreshStatsOnly(allProperties.length);await refreshRecent();await refreshContactStats();buildZoneCatalog();updateSelectorUI();
   const restored=restoreSearchFormState();
   if(restored){currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Búsqueda restaurada';}
   else{currentResults=sortProperties(allProperties,'recent');$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent=`${allProperties.length.toLocaleString('es-VE')} inmuebles únicos`;visibleCount=30;}
@@ -449,6 +467,92 @@ $('#resetBtn').onclick = async () => {
   $('#resultBox').hidden=true; $('#statusBox').hidden=true;
 };
 
+
+
+async function refreshContactStats(){
+  const s=await getContactStats(),resolved=allProperties.filter(p=>p.phone_resolution?.source==='directorio').length;
+  if($('#contactCount'))$('#contactCount').textContent=s.contacts.toLocaleString('es-VE');
+  if($('#contactAliasCount'))$('#contactAliasCount').textContent=s.aliases.toLocaleString('es-VE');
+  if($('#contactResolvedCount'))$('#contactResolvedCount').textContent=resolved.toLocaleString('es-VE');
+}
+function setContactStatus(text,kind=''){const e=$('#contactSyncStatus');if(e){e.textContent=text;e.dataset.kind=kind;}}
+async function parseAndStoreContactEntry(entry,folder){
+  const blob=await downloadDropboxFile(entry.path_lower||entry.path_display),records=await parseContactBlob(blob,entry.name);
+  if(!records.length)return 0;await upsertContacts(records,`${folder}/${entry.name}`);return records.length;
+}
+async function syncDropboxContacts({silent=false}={}){
+  const s=getDropboxSettings();
+  if(!s.connected){
+    if(!silent)setContactStatus('Conecta Dropbox para cargar el directorio.','warn');
+    return;
+  }
+
+  const btn=$('#syncContacts');
+  if(btn)btn.disabled=true;
+  if(!silent)setContactStatus('Leyendo CONTACTOS_PROCESADOS…','working');
+
+  let records=0,filesRead=0,errors=0;
+  try{
+    // CONTACTOS_PROCESADOS es la fuente principal y autoritativa.
+    let processed=[];
+    try{
+      processed=await listDropboxContactFiles(s.contactsProcessedPath);
+    }catch(e){
+      if(!String(e.message).includes('not_found')) throw e;
+    }
+
+    for(const entry of processed){
+      try{
+        const n=await parseAndStoreContactEntry(entry,'CONTACTOS_PROCESADOS');
+        records+=n;filesRead++;
+      }catch(e){
+        errors++;
+        console.error('contacts processed',entry.name,e);
+      }
+    }
+
+    // CONTACTOS queda como bandeja opcional de nuevos archivos, pero no exige acción del usuario.
+    // Si existe algo allí, se procesa automáticamente y se archiva.
+    let pending=[];
+    try{
+      pending=await listDropboxContactFiles(s.contactsPath);
+    }catch(e){
+      if(!String(e.message).includes('not_found')) throw e;
+    }
+
+    for(const entry of pending){
+      try{
+        const n=await parseAndStoreContactEntry(entry,'CONTACTOS');
+        records+=n;filesRead++;
+        if(n){
+          await moveDropboxFile(entry.path_lower||entry.path_display,s.contactsProcessedPath,entry.name);
+        }
+      }catch(e){
+        errors++;
+        console.error('contacts pending',entry.name,e);
+      }
+    }
+
+    contactDirectory=await getAllContacts();
+    contactIndex=buildContactIndex(contactDirectory);
+
+    // Recalcula inmediatamente los enlaces WhatsApp de todas las propiedades visibles.
+    await loadData();
+
+    const st=await getContactStats();
+    setContactStatus(
+      `${st.contacts.toLocaleString('es-VE')} teléfonos · ${st.aliases.toLocaleString('es-VE')} nombres/alias · ${filesRead} archivo(s) leídos${errors?` · ${errors} error(es)`:''}`,
+      errors?'warn':'ok'
+    );
+    localStorage.setItem('gi_contacts_last_sync_v0410',String(Date.now()));
+  }catch(e){
+    console.error(e);
+    if(!silent)setContactStatus(`No pude cargar CONTACTOS_PROCESADOS: ${e.message}`,'error');
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+$('#syncContacts')?.addEventListener('click',()=>syncDropboxContacts({silent:false}));
 
 let pendingDropboxFiles = [];
 
@@ -587,7 +691,18 @@ async function initDropbox() {
   try {
     const finished=await finishDropboxOAuthIfPresent();
     renderDropboxState();
-    if(finished || getDropboxSettings().connected) await refreshDropboxPending();
+    if(finished || getDropboxSettings().connected){
+      await refreshDropboxPending();
+
+      // Directorio automático:
+      // si nunca se cargó en esta versión, se lee CONTACTOS_PROCESADOS inmediatamente.
+      const last=Number(localStorage.getItem('gi_contacts_last_sync_v0410')||0);
+      if(finished || !last || Date.now()-last>6*60*60*1000){
+        await syncDropboxContacts({silent:true});
+      }else{
+        await refreshContactStats();
+      }
+    }
   } catch(e) {
     renderDropboxState();
     alert(`Dropbox: ${e.message}`);
@@ -603,6 +718,6 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v048')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=048').catch(()=>{});
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v049')).map(k=>caches.delete(k)))).catch(()=>{});}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0410').catch(()=>{});
 loadData();

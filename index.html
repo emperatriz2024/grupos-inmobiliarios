@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=048" />
+  <link rel="stylesheet" href="./styles.css?v=0410" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.4.8 PRO</div>
+      <div class="version">v0.4.10 PRO</div>
     </header>
 
     <section class="stats">
@@ -171,6 +171,18 @@
         </div>
       </section>
 
+      <section class="card contactsCard">
+        <div class="sectionTitle"><span>👥</span><div><h2>Directorio de captadores</h2><p>Se construye automáticamente desde CONTACTOS_PROCESADOS.</p></div></div>
+        <div class="contactFlow"><span>CONTACTOS_PROCESADOS</span><b>→</b><span>Directorio local</span><b>→</b><span>WhatsApp automático</span></div>
+        <div class="contactStats">
+          <div><strong id="contactCount">0</strong><span>teléfonos</span></div>
+          <div><strong id="contactAliasCount">0</strong><span>nombres / alias</span></div>
+          <div><strong id="contactResolvedCount">0</strong><span>propiedades enlazadas</span></div>
+        </div>
+        <button id="syncContacts" class="ghost contactSyncBtn">Actualizar directorio ahora</button>
+        <div id="contactSyncStatus" class="contactSyncStatus">El directorio se carga automáticamente desde Dropbox.</div>
+      </section>
+
       <details class="card manualImport">
         <summary>Importación manual desde iPhone</summary>
         <p class="muted">Úsala como respaldo si necesitas seleccionar un ZIP desde Archivos.</p>
@@ -187,7 +199,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.4.2 · 45 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.4.9 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -230,6 +242,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=048"></script>
+  <script type="module" src="./app.js?v=0410"></script>
 </body>
 </html>
