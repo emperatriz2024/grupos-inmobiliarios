@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Grupos Inmobiliarios" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./assets/icon-180.png" />
+  <title>Grupos Inmobiliarios</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
+      <h1>Grupos<br><span>Inmobiliarios</span></h1>
+      <p>Importa tus chats de WhatsApp y conviértelos en una base inmobiliaria local en tu iPhone.</p>
+    </header>
+
+    <section class="stats">
+      <div><strong id="propertyCount">0</strong><span>propiedades únicas</span></div>
+      <div><strong id="importCount">0</strong><span>grupos importados</span></div>
+    </section>
+
+    <section class="card importCard">
+      <div class="sectionTitle">
+        <span>01</span>
+        <div>
+          <h2>Importar chat</h2>
+          <p>Selecciona el ZIP exportado desde WhatsApp.</p>
+        </div>
+      </div>
+
+      <label class="picker" for="zipInput">
+        <span class="plus">+</span>
+        <b>Seleccionar ZIP</b>
+        <small>Archivos · iCloud Drive · Dropbox</small>
+      </label>
+      <input id="zipInput" type="file" accept=".zip,application/zip" />
+
+      <div id="fileCard" class="fileCard" hidden>
+        <div class="zipBadge">ZIP</div>
+        <div>
+          <b id="fileName"></b>
+          <small id="fileMeta"></small>
+        </div>
+      </div>
+
+      <button id="importBtn" class="primary" disabled>Procesar y guardar</button>
+    </section>
+
+    <section id="statusBox" class="card statusCard" hidden>
+      <div class="row">
+        <b id="statusText">Procesando…</b>
+        <span>v0.2</span>
+      </div>
+      <progress id="progress"></progress>
+      <small>El procesamiento ocurre en este dispositivo.</small>
+    </section>
+
+    <section id="resultBox" class="card resultCard" hidden></section>
+
+    <section class="card">
+      <div class="sectionTitle">
+        <span>02</span>
+        <div>
+          <h2>Importaciones recientes</h2>
+          <p>Historial guardado localmente.</p>
+        </div>
+      </div>
+      <div id="recent"></div>
+    </section>
+
+    <section class="dangerZone">
+      <button id="resetBtn" class="ghost">Vaciar base local</button>
+    </section>
+
+    <footer>GRUPOS INMOBILIARIOS · MOBILE v0.2</footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
