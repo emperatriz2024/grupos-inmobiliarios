@@ -1,0 +1,7 @@
+v0.4.2
+- Mensaje original visible en cada tarjeta.
+- Mensajes largos se expanden dentro de la tarjeta.
+- Corredor, grupo y fecha visibles sin entrar a la ficha.
+- Guarda filtros, número de resultados, tarjeta y scroll.
+- Al volver desde ficha/WhatsApp restaura la misma secuencia.
+- Conserva Dropbox y regla de 45 días.

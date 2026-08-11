@@ -24,3 +24,20 @@
 .pendingItem{display:flex;justify-content:space-between;gap:10px;align-items:center;border-top:1px solid #222;padding:10px 2px}
 .pendingItem:first-child{margin-top:12px}.pendingItem b{display:block;max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px}.pendingItem small{font-size:8px;color:#777;display:block;margin-top:3px}.pendingItem span{font-size:9px;color:#aaa;white-space:nowrap}
 .manualImport summary{font-size:11px;color:#aaa;font-weight:700;cursor:pointer}
+
+/* v0.4.2 */
+.originalInline{margin-top:11px;background:#090909;border:1px solid #242424;border-radius:12px;padding:10px 11px}
+.originalInlineHead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px}
+.originalInlineHead b{font-size:9px;color:var(--gold2);letter-spacing:.04em;text-transform:uppercase}
+.originalInlineHead span{font-size:8px;color:#666}
+.originalPreview{white-space:pre-wrap;word-break:break-word;font-size:10.5px;line-height:1.48;color:#c9c9c9;margin:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:7;overflow:hidden}
+.originalInline.expanded .originalPreview{display:block;max-height:none;overflow:visible}
+.expandOriginal{width:100%;margin-top:8px;border:0;border-top:1px solid #1f1f1f;background:transparent;color:#a99550;font-size:9px;font-weight:800;padding:8px 2px 0;text-align:left}
+.quickFacts{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:9px}
+.quickFacts .who{min-width:0}
+.quickFacts .who b{display:block;font-size:9.5px;color:#cfcfcf;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.quickFacts .who small{display:block;font-size:8px;color:#707070;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.quickFacts .seen{font-size:8px;color:#8c8c8c;background:#0b0b0b;border:1px solid #222;border-radius:999px;padding:5px 7px;white-space:nowrap}
+.cardActions.v042{grid-template-columns:1fr .8fr .48fr;margin-top:10px}
+.cardAnchorFlash{animation:cardFlash .9s ease-out}
+@keyframes cardFlash{0%{box-shadow:0 0 0 2px rgba(212,175,55,.65)}100%{box-shadow:none}}

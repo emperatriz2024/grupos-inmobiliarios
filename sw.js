@@ -1,5 +1,5 @@
 
-const CACHE='grupos-inmobiliarios-v04-1';
+const CACHE='grupos-inmobiliarios-v042-busqueda-rapida';
 const ASSETS=['./','./index.html','./styles.css','./app.js','./db.js','./worker.js','./engine.js',
 './zip-reader.js','./search-utils.js','./dropbox.js','./manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));

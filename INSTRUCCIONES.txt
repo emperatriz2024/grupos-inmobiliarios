@@ -1,22 +1,7 @@
-ACTUALIZACIÓN PRECONFIGURADA v0.4
+Sube al MISMO repositorio GitHub:
+index.html
+styles.css
+app.js
+sw.js
 
-1. Descomprime este ZIP en tu iPhone.
-2. Entra al MISMO repositorio GitHub: grupos-inmobiliarios.
-3. Upload files / Subir archivos.
-4. Sube:
-   - index.html
-   - styles.css
-   - app.js
-   - dropbox.js
-   - sw.js
-   - manifest.webmanifest
-5. Commit changes.
-6. Espera a que GitHub Pages actualice.
-7. Abre Grupos Inmobiliarios.
-8. Debe aparecer v0.4.
-9. Importar → Conectar Dropbox.
-10. Autoriza la conexión.
-11. Procesar pendientes.
-
-NO borres la PWA.
-NO pulses “Vaciar toda la base local”.
+Commit changes. No borres la PWA ni vacíes la base local.

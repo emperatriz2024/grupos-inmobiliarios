@@ -1,7 +1,7 @@
 
 import {
   mergeProperties, addImport, getStats, getRecentImports, clearDatabase,
-  getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds
+  getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties
 } from './db.js';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
@@ -19,6 +19,62 @@ let allProperties = [];
 let favoriteIds = new Set();
 let currentResults = [];
 let visibleCount = 30;
+const SEARCH_SCROLL_KEY='gi_search_scroll_v042';
+const SEARCH_CARD_KEY='gi_search_card_v042';
+const SEARCH_STATE_KEY='gi_search_state_v042';
+
+function rememberSearchPosition(cardId='') {
+  try {
+    sessionStorage.setItem(SEARCH_SCROLL_KEY,String(window.scrollY||0));
+    if(cardId) sessionStorage.setItem(SEARCH_CARD_KEY,cardId);
+    sessionStorage.setItem(SEARCH_STATE_KEY,JSON.stringify({
+      visibleCount,
+      q:$('#q')?.value||'', operation:$('#operation')?.value||'', propertyType:$('#propertyType')?.value||'',
+      zone:$('#zone')?.value||'', residence:$('#residence')?.value||'', minPrice:$('#minPrice')?.value||'',
+      maxPrice:$('#maxPrice')?.value||'', bedrooms:$('#bedrooms')?.value||'', bathrooms:$('#bathrooms')?.value||'',
+      parking:$('#parking')?.value||'', minArea:$('#minArea')?.value||'', maxArea:$('#maxArea')?.value||'',
+      maxAge:$('#maxAge')?.value||'', sortMode:$('#sortMode')?.value||'recent',
+      planta100:!!$('#planta100')?.checked, planta:!!$('#planta')?.checked, pozo:!!$('#pozo')?.checked,
+      tanque:!!$('#tanque')?.checked, amoblado:!!$('#amoblado')?.checked, financiamiento:!!$('#financiamiento')?.checked,
+      piscina:!!$('#piscina')?.checked, onlyPhone:!!$('#onlyPhone')?.checked
+    }));
+  } catch {}
+}
+
+function restoreSearchFormState(){
+  try{
+    const s=JSON.parse(sessionStorage.getItem(SEARCH_STATE_KEY)||'null');
+    if(!s) return false;
+    const v=(id,val)=>{const el=$('#'+id); if(el) el.value=val??'';};
+    const c=(id,val)=>{const el=$('#'+id); if(el) el.checked=!!val;};
+    v('q',s.q);v('operation',s.operation);v('propertyType',s.propertyType);v('zone',s.zone);v('residence',s.residence);
+    v('minPrice',s.minPrice);v('maxPrice',s.maxPrice);v('bedrooms',s.bedrooms);v('bathrooms',s.bathrooms);v('parking',s.parking);
+    v('minArea',s.minArea);v('maxArea',s.maxArea);v('maxAge',s.maxAge);v('sortMode',s.sortMode);
+    c('planta100',s.planta100);c('planta',s.planta);c('pozo',s.pozo);c('tanque',s.tanque);c('amoblado',s.amoblado);
+    c('financiamiento',s.financiamiento);c('piscina',s.piscina);c('onlyPhone',s.onlyPhone);
+    visibleCount=Math.max(30,Number(s.visibleCount||30));
+    return true;
+  }catch{return false;}
+}
+
+function restoreSearchPosition(){
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    try{
+      const cardId=sessionStorage.getItem(SEARCH_CARD_KEY);
+      const y=Number(sessionStorage.getItem(SEARCH_SCROLL_KEY)||0);
+      if(cardId){
+        const card=document.querySelector(`.propertyCard[data-id="${CSS.escape(cardId)}"]`);
+        if(card){
+          card.scrollIntoView({block:'center'});
+          card.classList.add('cardAnchorFlash');
+          setTimeout(()=>card.classList.remove('cardAnchorFlash'),1000);
+          return;
+        }
+      }
+      if(y>0) window.scrollTo({top:y,behavior:'auto'});
+    }catch{}
+  }));
+}
 
 function prettySize(n = 0) {
   if (n < 1024) return `${n} B`;
@@ -65,32 +121,46 @@ function sourceText(p) {
   return `${s.sender || p.sender || 'Corredor'} · ${s.group || p.group || 'Grupo'} · ${p.date || ''}`;
 }
 function cardHTML(p) {
-  const r = recencyInfo(p.date);
-  const phone = effectivePhone(p);
-  const fav = favoriteIds.has(p.id);
-  const metas = [];
-  if (p.area_m2) metas.push(`${p.area_m2} m²`);
-  if (p.bedrooms) metas.push(`${p.bedrooms} Hab`);
-  if (p.bathrooms) metas.push(`${p.bathrooms} Baños`);
-  if (p.parking) metas.push(`${p.parking} Puestos`);
+  const r=recencyInfo(p.date);
+  const phone=effectivePhone(p);
+  const fav=favoriteIds.has(p.id);
+  const metas=[];
+  if(p.area_m2) metas.push(`${p.area_m2} m²`);
+  if(p.bedrooms) metas.push(`${p.bedrooms} Hab`);
+  if(p.bathrooms) metas.push(`${p.bathrooms} Baños`);
+  if(p.parking) metas.push(`${p.parking} Puestos`);
+  const src=(p.sources||[])[0]||{};
+  const sender=src.sender||p.sender||'Corredor';
+  const group=src.group||p.group||'Grupo';
+  const original=(p.text||'').trim();
+  const needsExpand=original.length>420 || original.split('\n').length>7;
+
   return `
   <article class="propertyCard" data-id="${esc(p.id)}">
     <div class="propertyTop">
       <div class="chips">
-        ${p.operation ? `<span class="chip gold">${esc(p.operation)}</span>` : ''}
-        ${p.property_type ? `<span class="chip">${esc(p.property_type)}</span>` : ''}
-        ${(p.appearances||1)>1 ? `<span class="chip">${p.appearances} apariciones</span>` : ''}
+        ${p.operation?`<span class="chip gold">${esc(p.operation)}</span>`:''}
+        ${p.property_type?`<span class="chip">${esc(p.property_type)}</span>`:''}
+        ${(p.appearances||1)>1?`<span class="chip">${p.appearances} apariciones</span>`:''}
       </div>
       <span class="recency ${r.cls}">${esc(r.label)}</span>
     </div>
     <h3>${esc(propertyTitle(p))}</h3>
-    <div class="zone">${esc(p.zone || 'Zona no detectada')}</div>
+    <div class="zone">${esc(p.zone||'Zona no detectada')}</div>
     <div class="price">${esc(formatMoney(p.price_usd))}</div>
-    ${metas.length ? `<div class="meta">${metas.map(x=>`<span>${esc(x)}</span>`).join('')}</div>` : ''}
-    ${featureLabels(p).length ? `<div class="features">${featureLabels(p).map(x=>`<span class="feature">${esc(x)}</span>`).join('')}</div>` : ''}
-    <div class="sourceLine">${esc(sourceText(p))}</div>
-    <div class="cardActions">
-      <button class="action detail" data-id="${esc(p.id)}">Ver publicación</button>
+    ${metas.length?`<div class="meta">${metas.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}
+    ${featureLabels(p).length?`<div class="features">${featureLabels(p).map(x=>`<span class="feature">${esc(x)}</span>`).join('')}</div>`:''}
+    <div class="quickFacts">
+      <div class="who"><b>${esc(sender)}</b><small>${esc(group)}</small></div>
+      <span class="seen">${esc(p.date||'')} ${esc(p.time||'')}</span>
+    </div>
+    <div class="originalInline">
+      <div class="originalInlineHead"><b>Mensaje original del chat</b><span>${original.length.toLocaleString('es-VE')} caracteres</span></div>
+      <div class="originalPreview">${esc(original||'Sin texto original disponible.')}</div>
+      ${needsExpand?`<button class="expandOriginal" data-id="${esc(p.id)}">Mostrar mensaje completo ↓</button>`:''}
+    </div>
+    <div class="cardActions v042">
+      <button class="action detail" data-id="${esc(p.id)}">Ver ficha</button>
       <button class="action whatsapp" data-id="${esc(p.id)}" ${phone?'':'disabled'}>WhatsApp</button>
       <button class="action favorite ${fav?'active':''}" data-id="${esc(p.id)}">${fav?'♥':'♡'}</button>
     </div>
@@ -98,7 +168,18 @@ function cardHTML(p) {
 }
 
 function bindCardActions(container) {
-  container.querySelectorAll('.detail').forEach(btn => btn.onclick = () => openDetail(btn.dataset.id));
+  container.querySelectorAll('.expandOriginal').forEach(btn=>btn.onclick=()=>{
+    const box=btn.closest('.originalInline');
+    const card=btn.closest('.propertyCard');
+    if(!box) return;
+    const expanded=box.classList.toggle('expanded');
+    btn.textContent=expanded?'Contraer mensaje ↑':'Mostrar mensaje completo ↓';
+    if(card) rememberSearchPosition(card.dataset.id);
+  });
+  container.querySelectorAll('.detail').forEach(btn => btn.onclick = () => {
+    rememberSearchPosition(btn.dataset.id);
+    openDetail(btn.dataset.id);
+  });
   container.querySelectorAll('.favorite').forEach(btn => btn.onclick = async () => {
     const nowFav = await toggleFavorite(btn.dataset.id);
     if (nowFav) favoriteIds.add(btn.dataset.id); else favoriteIds.delete(btn.dataset.id);
@@ -108,6 +189,7 @@ function bindCardActions(container) {
     if ($('#viewSaved').classList.contains('active')) renderSaved();
   });
   container.querySelectorAll('.whatsapp').forEach(btn => btn.onclick = () => {
+    rememberSearchPosition(btn.dataset.id);
     const p = allProperties.find(x => x.id === btn.dataset.id);
     const num = whatsappNumber(effectivePhone(p));
     if (!num) return;
@@ -149,6 +231,7 @@ function runSearch(resetVisible=true) {
   $('#resultCount').textContent = currentResults.length.toLocaleString('es-VE');
   $('#resultHint').textContent = currentResults.length ? 'Base local · orden aplicada' : 'Sin coincidencias';
   renderResults();
+  rememberSearchPosition();
 }
 function renderResults() {
   const box = $('#results');
@@ -157,7 +240,7 @@ function renderResults() {
   bindCardActions(box);
   $('#loadMore').hidden = currentResults.length <= visibleCount;
 }
-$('#loadMore').onclick = () => { visibleCount += 30; renderResults(); };
+$('#loadMore').onclick = () => { visibleCount += 30; renderResults(); rememberSearchPosition(); };
 $('#searchBtn').onclick = () => runSearch();
 $('#q').addEventListener('keydown', e => { if(e.key === 'Enter') { e.preventDefault(); runSearch(); }});
 $('#sortMode').onchange = () => runSearch();
@@ -201,7 +284,8 @@ async function openDetail(id) {
     window.location.href = `https://wa.me/${num}?text=${msg}`;
   };
 }
-$('#closeDialog').onclick = () => $('#detailDialog').close();
+$('#closeDialog').onclick = () => { $('#detailDialog').close(); restoreSearchPosition(); };
+$('#detailDialog').addEventListener('close',()=>restoreSearchPosition());
 
 async function renderSaved() {
   const box = $('#savedResults');
@@ -228,8 +312,14 @@ function processZipWithWorker(file, group, progressCb) {
 
 async function saveProcessedResult(m, group, fileName, progressCb) {
   const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
-  const summary={group,file_name:fileName,chat_file:m.entryName,messages:m.result.messages,
-    detected:m.result.properties_detected,unique:m.result.unique.length,added:saved.added,updated:saved.updated};
+  const summary={group,file_name:fileName,chat_file:m.entryName,
+    messages:m.result.messages,
+    messages_total:m.result.messages_total ?? m.result.messages,
+    skipped_age:m.result.messages_skipped_age ?? 0,
+    max_age_days:m.result.max_age_days ?? 45,
+    cutoff_date:m.result.cutoff_date ?? null,
+    detected:m.result.properties_detected,unique:m.result.unique.length,
+    added:saved.added,updated:saved.updated};
   await addImport(summary);
   return summary;
 }
@@ -265,9 +355,9 @@ $('#importBtn').addEventListener('click', async () => {
     });
     setStatus('Importación completada',100);
     $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>Importación completada</h3>
-      <div class="summaryGrid"><div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes</span></div>
+      <div class="summaryGrid"><div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes ≤45 días</span></div>
+      <div><b>${summary.skipped_age.toLocaleString('es-VE')}</b><span>antiguos omitidos</span></div>
       <div><b>${summary.detected.toLocaleString('es-VE')}</b><span>publicaciones</span></div>
-      <div><b>${summary.unique.toLocaleString('es-VE')}</b><span>textos únicos</span></div>
       <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>`;
     $('#resultBox').hidden=false; await loadData();
   } catch(e) { setStatus(`Error: ${e.message}`,0); }
@@ -283,20 +373,29 @@ async function refreshStatsOnly() {
 async function refreshRecent() {
   const recent = await getRecentImports();
   $('#recent').innerHTML = recent.length ? recent.map(r=>`<div class="recentItem"><div><b>${esc(r.group)}</b>
-    <small>${new Date(r.imported_at).toLocaleString('es-VE')}</small></div><span>+${Number(r.added||0).toLocaleString('es-VE')}</span></div>`).join('')
+    <small>${new Date(r.imported_at).toLocaleString('es-VE')} · ${Number(r.messages||0).toLocaleString('es-VE')} recientes${r.skipped_age?` · ${Number(r.skipped_age).toLocaleString('es-VE')} omitidos`:''}</small></div><span>+${Number(r.added||0).toLocaleString('es-VE')}</span></div>`).join('')
     : '<p class="muted">Aún no has importado grupos.</p>';
 }
 async function loadData() {
+  await purgeOldProperties(45);
   allProperties = await getAllProperties();
   favoriteIds = await getFavoriteIds();
   await refreshStatsOnly();
   await refreshRecent();
   buildZoneOptions();
-  currentResults = sortProperties(allProperties,'recent');
-  $('#resultCount').textContent = currentResults.length.toLocaleString('es-VE');
-  $('#resultHint').textContent = 'Mostrando las más recientes';
-  visibleCount=30;
+  const restored=restoreSearchFormState();
+  if(restored){
+    currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);
+    $('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');
+    $('#resultHint').textContent='Búsqueda restaurada';
+  }else{
+    currentResults=sortProperties(allProperties,'recent');
+    $('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');
+    $('#resultHint').textContent='Mostrando las más recientes';
+    visibleCount=30;
+  }
   renderResults();
+  if(restored) restoreSearchPosition();
   if ($('#viewSaved').classList.contains('active')) renderSaved();
 }
 $('#resetBtn').onclick = async () => {
@@ -378,7 +477,7 @@ $('#processPending').onclick=async()=>{
       const file=new File([blob],entry.name,{type:'application/zip'});
       const group=groupFromName(entry.name);
       const {summary}=await importOneZip(file,group,(p)=>{
-        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando ${entry.name}`;
+        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando últimos 45 días · ${entry.name}`;
         if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Guardando ${entry.name} · ${p.done}/${p.total}`;
       });
       $('#dropboxProgressDetail').textContent=`Moviendo ${entry.name} a ${s.processedPath}`;
@@ -413,6 +512,13 @@ async function initDropbox() {
 }
 initDropbox();
 
+
+window.addEventListener('pagehide',()=>rememberSearchPosition());
+window.addEventListener('pageshow',e=>{ if(e.persisted) restoreSearchPosition(); });
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden') rememberSearchPosition();
+  else if(document.visibilityState==='visible') restoreSearchPosition();
+});
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 loadData();
