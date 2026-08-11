@@ -121,7 +121,7 @@ function sourceText(p) {
   return `${s.sender || p.sender || 'Corredor'} · ${s.group || p.group || 'Grupo'} · ${p.date || ''}`;
 }
 function cardHTML(p) {
-  const r = recencyInfo(p.date);
+  const r = recencyInfo(p);
   const phone = effectivePhone(p);
   const fav = favoriteIds.has(p.id);
 

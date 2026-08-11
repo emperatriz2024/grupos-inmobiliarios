@@ -1,3 +1,4 @@
+import { parseFlexibleDate, propertyTimestamp } from './date-utils.js';
 
 const ACCENTS = {á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
 
@@ -9,22 +10,26 @@ export function norm(s='') {
     .trim();
 }
 
-export function parseDateDMY(s='') {
-  const m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if (!m) return 0;
-  let y = Number(m[3]);
-  if (y < 100) y += 2000;
-  return new Date(y, Number(m[2])-1, Number(m[1])).getTime();
+export function parseDateDMY(s='', order='auto') {
+  return parseFlexibleDate(s,order,'MDY');
 }
 
-export function recencyInfo(dateStr, now = Date.now()) {
-  const ts = parseDateDMY(dateStr);
-  if (!ts) return { days: 9999, label: 'Fecha no disponible', cls: 'expired' };
-  const days = Math.max(0, Math.floor((now - ts) / 86400000));
-  if (days <= 7) return { days, label: days === 0 ? 'Hoy' : `${days} d`, cls: 'recent' };
-  if (days <= 21) return { days, label: `${days} d`, cls: 'valid' };
-  if (days <= 60) return { days, label: `${days} d · verificar`, cls: 'verify' };
-  return { days, label: `${days} d · fuera de vigencia`, cls: 'expired' };
+export function recencyInfo(value, now = Date.now()) {
+  let ts=0;
+  if(value && typeof value==='object') ts=propertyTimestamp(value);
+  else ts=parseFlexibleDate(value,'auto','MDY');
+
+  if(!ts) return {days:9999,label:'Fecha no disponible',cls:'expired'};
+  const today=new Date(now); today.setHours(0,0,0,0);
+  const then=new Date(ts); then.setHours(0,0,0,0);
+  const days=Math.floor((today.getTime()-then.getTime())/86400000);
+
+  // A future date is invalid data, not “Hoy”.
+  if(days < 0) return {days:9999,label:'Fecha inválida',cls:'expired'};
+  if(days <= 7) return {days,label:days===0?'Hoy':`${days} d`,cls:'recent'};
+  if(days <= 21) return {days,label:`${days} d`,cls:'valid'};
+  if(days <= 60) return {days,label:`${days} d · verificar`,cls:'verify'};
+  return {days,label:`${days} d · fuera de vigencia`,cls:'expired'};
 }
 
 export function formatMoney(v) {
@@ -49,7 +54,7 @@ export function effectivePhone(p) {
 export function matchesFilters(p, f={}) {
   // REGLA DURA: ninguna tarjeta con fecha válida >45 días puede aparecer.
   // También ocultamos registros sin fecha interpretable para evitar inventario incierto.
-  const hardRecency = recencyInfo(p.date);
+  const hardRecency = recencyInfo(p);
   if (!Number.isFinite(hardRecency.days) || hardRecency.days > 60) return false;
 
   const hay = norm([
@@ -95,7 +100,7 @@ export function matchesFilters(p, f={}) {
 
   if (f.only_phone && !effectivePhone(p)) return false;
   if (f.max_age_days) {
-    const r = recencyInfo(p.date);
+    const r = recencyInfo(p);
     if (r.days > Number(f.max_age_days)) return false;
   }
   return true;
@@ -110,7 +115,7 @@ export function sortProperties(list, mode='recent') {
   } else if (mode === 'appearances') {
     arr.sort((a,b) => (b.appearances||0) - (a.appearances||0));
   } else {
-    arr.sort((a,b) => parseDateDMY(b.date) - parseDateDMY(a.date) || String(b.time||'').localeCompare(String(a.time||'')));
+    arr.sort((a,b) => propertyTimestamp(b) - propertyTimestamp(a) || String(b.time||'').localeCompare(String(a.time||'')));
   }
   return arr;
 }

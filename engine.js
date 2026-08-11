@@ -1,3 +1,4 @@
+import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
 */
@@ -24,13 +25,9 @@ export function normalizeText(s='') {
 
 const START_RE = /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?\]\s*(.*?):\s*(.*)$/i;
 
-function parseMessageDate(dateStr) {
-  const m = String(dateStr).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if (!m) return null;
-  let year = Number(m[3]);
-  if (year < 100) year += 2000;
-  const d = new Date(year, Number(m[2]) - 1, Number(m[1]));
-  return Number.isNaN(d.getTime()) ? null : d;
+function parseMessageDate(dateStr, order='MDY') {
+  const ts=parseFlexibleDate(dateStr,order,'MDY');
+  return ts ? new Date(ts) : null;
 }
 
 function cutoffForDays(maxAgeDays, now=Date.now()) {
@@ -44,6 +41,9 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
   const maxAgeDays = Number(options.maxAgeDays ?? 60);
   const now = options.now ?? Date.now();
   const cutoff = maxAgeDays > 0 ? cutoffForDays(maxAgeDays, now) : null;
+  // WhatsApp export follows the device locale. Your current exports are MDY,
+  // but we detect it automatically so the engine also supports DMY exports.
+  const dateOrder = detectDateOrderFromText(text, 'MDY');
 
   const rows = [];
   let current = null;
@@ -66,7 +66,7 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
       flush();
       totalMessages++;
 
-      const msgDate = parseMessageDate(m[1]);
+      const msgDate = parseMessageDate(m[1], dateOrder);
       if (cutoff && msgDate && msgDate < cutoff) {
         skippedOld++;
         current = null; // no acumulamos ni las líneas del mensaje viejo
@@ -80,6 +80,8 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
 
       current = {
         date: m[1],
+        date_iso: toISODate(m[1], dateOrder, 'MDY'),
+        date_order: dateOrder,
         time: `${String(hour).padStart(2,'0')}:${m[3]}:${m[4] || '00'}`,
         sender: m[6].replace(/^~\s*/, '').trim(),
         group,
@@ -94,6 +96,7 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
   rows.totalMessages = totalMessages;
   rows.skippedOld = skippedOld;
   rows.maxAgeDays = maxAgeDays;
+  rows.dateOrder = dateOrder;
   rows.cutoffDate = cutoff ? cutoff.toISOString().slice(0,10) : null;
   return rows;
 }
@@ -215,7 +218,7 @@ export function extractProperty(message) {
   let zone=null; for(const z of ZONES){if(new RegExp(`(^|\\W)${esc(normalizeText(z))}(?=$|\\W)`,'i').test(n)){zone=z;break;}}
   const price=extractPrice(message.text);
   const rec={
-    group:message.group,date:message.date,time:message.time,sender:message.sender,
+    group:message.group,date:message.date,date_iso:message.date_iso,date_order:message.date_order,time:message.time,sender:message.sender,
     operation,property_type:propertyType,zone,residence:extractResidence(message.text),price_usd:price,
     area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mts2|mts\s*2|mts?\s+cuadrados?|metros\s*cuadrados?)\b/i]),
     bedrooms:firstNumber(n,[/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?)\b/i,/\bhabitaciones?\s*[:\-]?\s*(\d{1,2})\b/i]),
@@ -236,10 +239,11 @@ export function extractProperty(message) {
   return rec;
 }
 
-function messageDateTime(dateStr, timeStr='00:00:00') {
-  const d = parseMessageDate(dateStr);
-  if (!d) return 0;
-  const p = String(timeStr).split(':').map(Number);
+function messageDateTime(dateStr, timeStr='00:00:00', dateIso=null, dateOrder='MDY') {
+  const baseTs=dateIso ? parseFlexibleDate(dateIso,'auto','MDY') : parseFlexibleDate(dateStr,dateOrder,'MDY');
+  if(!baseTs) return 0;
+  const d=new Date(baseTs);
+  const p=String(timeStr).split(':').map(Number);
   d.setHours(p[0]||0,p[1]||0,p[2]||0,0);
   return d.getTime();
 }
@@ -256,7 +260,7 @@ export function processChatText(text, group='Grupo', options={}) {
 
   const unique=new Map();
   for(const r of properties){
-    const source={group:r.group,sender:r.sender,date:r.date,time:r.time,phone:r.phone};
+    const source={group:r.group,sender:r.sender,date:r.date,date_iso:r.date_iso,date_order:r.date_order,time:r.time,phone:r.phone};
     if(!unique.has(r.id)) {
       unique.set(r.id,{...r,appearances:1,sources:[source]});
     } else {
@@ -265,8 +269,8 @@ export function processChatText(text, group='Grupo', options={}) {
       x.sources.push(source);
 
       // La tarjeta principal usa SIEMPRE la publicación más reciente.
-      if (messageDateTime(r.date,r.time) > messageDateTime(x.date,x.time)) {
-        x.date=r.date; x.time=r.time; x.sender=r.sender; x.group=r.group;
+      if (messageDateTime(r.date,r.time,r.date_iso,r.date_order) > messageDateTime(x.date,x.time,x.date_iso,x.date_order)) {
+        x.date=r.date; x.date_iso=r.date_iso; x.date_order=r.date_order; x.time=r.time; x.sender=r.sender; x.group=r.group;
         if (r.phone) x.phone=r.phone;
       }
     }
@@ -278,6 +282,7 @@ export function processChatText(text, group='Grupo', options={}) {
     messages_skipped_age:messages.skippedOld ?? 0,
     max_age_days:maxAgeDays,
     cutoff_date:messages.cutoffDate ?? null,
+    date_order:messages.dateOrder ?? 'MDY',
     properties_detected:properties.length,
     unique:[...unique.values()]
   };

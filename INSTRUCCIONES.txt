@@ -1,6 +1,7 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.4
+ACTUALIZACIÓN ACUMULATIVA v0.4.5 — FECHAS CORREGIDAS
 
 Sube TODOS estos archivos al MISMO repositorio GitHub:
+date-utils.js
 engine.js
 worker.js
 db.js
@@ -14,10 +15,13 @@ manifest.webmanifest
 
 Commit changes.
 Espera GitHub Pages.
-Abre Safari y recarga una vez la URL.
-Luego cierra/reabre la PWA.
+Abre la URL en Safari y recarga una vez.
+Cierra y vuelve a abrir Grupos Inmobiliarios.
 
-Debe decir v0.4.4.
+Debe mostrar v0.4.5.
 
-NO vacíes la base local.
-NO necesitas configurar Dropbox otra vez.
+IMPORTANTE:
+- NO pulses “Vaciar toda la base local”.
+- NO necesitas reimportar para que 3/31/26 y 5/31/26 desaparezcan:
+  la app migrará/depurará la base existente al abrir.
+- Dropbox sigue configurado.

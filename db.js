@@ -1,3 +1,4 @@
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 2;
@@ -183,11 +184,8 @@ export async function toggleFavorite(id) {
 }
 
 
-function parseLocalDate(dateStr='') {
-  const m=String(dateStr).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if(!m) return 0;
-  let y=Number(m[3]); if(y<100)y+=2000;
-  return new Date(y,Number(m[2])-1,Number(m[1])).getTime();
+function parseLocalDate(dateStr='', order='auto') {
+  return parseFlexibleDate(dateStr,order,'MDY');
 }
 
 export async function purgeOldProperties(maxAgeDays=60) {
@@ -196,7 +194,8 @@ export async function purgeOldProperties(maxAgeDays=60) {
   cutoff.setHours(0,0,0,0);
   cutoff.setDate(cutoff.getDate()-Number(maxAgeDays));
   const cutoffTs=cutoff.getTime();
-  let removed=0, refreshed=0;
+
+  let removed=0, refreshed=0, migrated=0, oldSourcesRemoved=0;
 
   await new Promise((resolve,reject)=>{
     const tx=db.transaction([PROP_STORE,FAV_STORE],'readwrite');
@@ -208,41 +207,78 @@ export async function purgeOldProperties(maxAgeDays=60) {
     req.onsuccess=()=>{
       const c=req.result;
       if(!c) return;
+
       const p=c.value;
-      const candidates=[
-        {date:p.date,time:p.time,sender:p.sender,group:p.group,phone:p.phone},
-        ...(p.sources||[])
-      ].filter(x=>parseLocalDate(x.date));
+      const allRaw=[
+        p.date,
+        ...(p.sources||[]).map(s=>s.date)
+      ].filter(Boolean);
 
-      candidates.sort((a,b)=>{
-        const ta=parseLocalDate(a.date), tb=parseLocalDate(b.date);
-        if(ta!==tb) return tb-ta;
-        return String(b.time||'').localeCompare(String(a.time||''));
-      });
+      // Existing records came from the same WhatsApp export. Infer order from
+      // unambiguous dates; if all are ambiguous, current app defaults to MDY.
+      const inferredOrder=p.date_order || detectDateOrderFromDates(allRaw,'MDY');
 
-      const latest=candidates[0];
-      const latestTs=latest ? parseLocalDate(latest.date) : 0;
+      const rawSources=(p.sources||[]).length ? p.sources : [{
+        group:p.group,sender:p.sender,date:p.date,date_iso:p.date_iso,
+        date_order:p.date_order,time:p.time,phone:p.phone
+      }];
 
-      if(latestTs && latestTs < cutoffTs){
+      const normalizedSources=rawSources.map(s=>{
+        const order=s.date_order || inferredOrder;
+        const iso=s.date_iso || toISODate(s.date,order,'MDY');
+        const ts=iso ? parseFlexibleDate(iso,'auto','MDY') : parseFlexibleDate(s.date,order,'MDY');
+        return {...s,date_order:order,date_iso:iso,_ts:ts};
+      }).filter(s=>s._ts);
+
+      const recentSources=normalizedSources.filter(s=>s._ts>=cutoffTs);
+      oldSourcesRemoved += Math.max(0, normalizedSources.length-recentSources.length);
+
+      if(!recentSources.length){
         c.delete();
         favs.delete(p.id);
         removed++;
-      } else if(latest && (latest.date!==p.date || latest.time!==p.time)){
-        c.update({...p,date:latest.date,time:latest.time,
-          sender:latest.sender||p.sender,group:latest.group||p.group,
-          phone:latest.phone||p.phone});
-        refreshed++;
+        c.continue();
+        return;
       }
+
+      recentSources.sort((a,b)=>{
+        if(a._ts!==b._ts) return b._ts-a._ts;
+        return String(b.time||'').localeCompare(String(a.time||''));
+      });
+
+      const latest=recentSources[0];
+      const cleanSources=recentSources.map(({_ts,...s})=>s);
+
+      const updated={
+        ...p,
+        date:latest.date,
+        date_iso:latest.date_iso,
+        date_order:latest.date_order || inferredOrder,
+        time:latest.time || p.time,
+        sender:latest.sender || p.sender,
+        group:latest.group || p.group,
+        phone:latest.phone || p.phone,
+        sources:cleanSources,
+        appearances:Math.max(1,cleanSources.length)
+      };
+
+      if(!p.date_iso || p.date_order!==updated.date_order) migrated++;
+      c.update(updated);
+      refreshed++;
       c.continue();
     };
+
     tx.oncomplete=resolve;
     tx.onerror=()=>reject(tx.error);
     tx.onabort=()=>reject(tx.error);
   });
-  db.close();
-  return {removed,refreshed,cutoff:cutoff.toISOString().slice(0,10)};
-}
 
+  db.close();
+  return {
+    removed,refreshed,migrated,oldSourcesRemoved,
+    cutoff:cutoff.toISOString().slice(0,10)
+  };
+}
 export async function clearDatabase() {
   const db = await openDB();
   const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE];
