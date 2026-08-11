@@ -1,3 +1,5 @@
+import { isDemandRequest, listingIntentScore } from './intent-utils.js';
+import { KNOWN_ZONES, extractLocationTerms, bestZone } from './location-utils.js';
 import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
@@ -114,32 +116,25 @@ const MONEY_RE = /(?:us\s*\$|usd\s*\$?|\$)\s*\d|\b\d{2,3}(?:[.,]\d{3})+\s*\$|\b\
 
 export function isPropertyPost(text) {
   const n = normalizeText(text);
-  if (n.length < 25) return false;
+  if (n.length < 20) return false;
   if (SYSTEM_BITS.some(x => n.includes(x))) return false;
   if (['imagen omitida','video omitido','audio omitido','sticker omitido','documento omitido','gif omitido'].includes(n)) return false;
-  const hits = (n.match(RE_TERMS) || []).length;
-  return hits >= 2 || (hits >= 1 && MONEY_RE.test(n));
+  if (isDemandRequest(text)) return false;
+  // Deliberately inclusive: false negatives are more expensive than imperfect fields.
+  return listingIntentScore(text) >= 3;
 }
 
 const TYPES = [
   ['Apartamento', /\b(apartamento|apto\.?)\b/i],
   ['Anexo', /\banexo\b/i],
-  ['Townhouse', /\b(town\s*house|townhouse|th)\b/i],
+  ['Townhouse', /\b(town\s*house|townhouse|town\s*home|townhome|t\s*\/\s*h|th)\b/i],
   ['Penthouse', /\b(pent\s*house|penthouse|ph)\b/i],
-  ['Casa', /\b(casa|quinta)\b/i],
+  ['Casa', /\b(casa|quinta|aparto[\s-]?quinta)\b/i],
   ['Terreno', /\b(terreno|parcela|lote)\b/i],
   ['Local comercial', /\blocal(?:\s+comercial)?\b/i],
   ['Oficina', /\boficina\b/i],
   ['Galpón', /\bgalpon\b/i]
 ];
-
-const ZONES = [
- 'Pueblo de San Diego','Valles de Camoruco','Altos de Guataparo','Valle de Oro','Las Chimeneas',
- 'Trigal Norte','Trigal Centro','La Trigaleña','Trigaleña','Mañongo','Naguanagua','Tazajal','El Rincón',
- 'Manantial','San Diego','El Parral','Los Mangos','El Bosque','Prebo','La Viña','Guataparo','Guaparo',
- 'La Granja','Agua Blanca','Trigal Sur','Sabana Larga','Los Faroles','La Esmeralda','La Cumaca',
- 'Paso Real','Tulipán','Piedra Pintada','Valle Blanco'
-].sort((a,b)=>b.length-a.length);
 
 function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function parseNumber(raw) {
@@ -161,24 +156,27 @@ function parseNumber(raw) {
   return Number(x);
 }
 
-function extractPrice(text) {
+function extractPrice(text, operation=null) {
   const t=cleanText(text);
   const found=[];
   const pats=[
     /(?:US\s*\$|USD\s*\$?|\$)\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)/gi,
     /\b([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{2,7})\s*(?:US\$|USD|\$)/gi,
     /\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*k\b/gi,
+    /\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*mil\b/gi,
     /\b(?:precio(?:\s+de\s+(?:venta|inversion))?|ref(?:erencia)?\.?|canon)\s*[:.\-]?\s*(?:us\s*\$|usd)?\s*([0-9]{2,3}(?:[.,][0-9]{3})+|[0-9]{2,7})/gi
   ];
   pats.forEach((rx,idx)=>{
-    for (const m of t.matchAll(rx)) {
-      let v = parseNumber(m[1]);
-      if (idx===2) v*=1000;
-      if (v>=50 && v<=50000000) found.push({pos:m.index,value:v,priority:idx===3?-1:0});
+    for(const m of t.matchAll(rx)){
+      let v=parseNumber(m[1]);
+      if(idx===2 || idx===3) v*=1000;
+      if(v>=10 && v<=50000000) found.push({pos:m.index,value:v,priority:idx===4?-1:0});
     }
   });
   found.sort((a,b)=>a.priority-b.priority || a.pos-b.pos);
-  return found[0]?.value ?? null;
+  let value=found[0]?.value ?? null;
+  if(operation==='Venta' && value!=null && value>=10 && value<1000) value*=1000;
+  return value;
 }
 
 function firstNumber(n, patterns) {
@@ -215,11 +213,12 @@ export function extractProperty(message) {
   if(rent && !sale) operation='Alquiler'; else if(sale && !rent) operation='Venta';
   else if(rent && sale) operation = rent.index < sale.index ? 'Alquiler':'Venta';
   let propertyType=null; for(const [label,rx] of TYPES){if(rx.test(n)){propertyType=label;break;}}
-  let zone=null; for(const z of ZONES){if(new RegExp(`(^|\\W)${esc(normalizeText(z))}(?=$|\\W)`,'i').test(n)){zone=z;break;}}
-  const price=extractPrice(message.text);
+  const locationTerms=extractLocationTerms(message.text);
+  const zone=bestZone(message.text, locationTerms[0]||null);
+  const price=extractPrice(message.text, operation);
   const rec={
     group:message.group,date:message.date,date_iso:message.date_iso,date_order:message.date_order,time:message.time,sender:message.sender,
-    operation,property_type:propertyType,zone,residence:extractResidence(message.text),price_usd:price,
+    operation,property_type:propertyType,zone,location_terms:locationTerms,residence:extractResidence(message.text),price_usd:price,
     area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mts2|mts\s*2|mts?\s+cuadrados?|metros\s*cuadrados?)\b/i]),
     bedrooms:firstNumber(n,[/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?)\b/i,/\bhabitaciones?\s*[:\-]?\s*(\d{1,2})\b/i]),
     bathrooms:firstNumber(n,[/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?)\b/i,/\bbanos?\s*[:\-]?\s*(\d{1,2})/i]),
@@ -248,14 +247,40 @@ function messageDateTime(dateStr, timeStr='00:00:00', dateIso=null, dateOrder='M
   return d.getTime();
 }
 
+function splitMultiListingMessage(message){
+  const text=String(message.text||'');
+  if(isDemandRequest(text)) return [];
+  const rx=/^\s*(\d{1,2})\s*[\)\.]\s+/gm;
+  const marks=[...text.matchAll(rx)];
+  if(marks.length<2) return [message];
+  const header=text.slice(0,marks[0].index).trim();
+  const parts=[];
+  for(let i=0;i<marks.length;i++){
+    const from=marks[i].index+marks[i][0].length;
+    const to=i+1<marks.length?marks[i+1].index:text.length;
+    const body=text.slice(from,to).trim();
+    const candidate=(header?header+'\n':'')+body;
+    if(candidate.length>=35 && isPropertyPost(candidate)) parts.push({...message,text:candidate});
+  }
+  // Only split if at least two genuine listing fragments were found; otherwise preserve original.
+  return parts.length>=2?parts:[message];
+}
+
 export function processChatText(text, group='Grupo', options={}) {
   const maxAgeDays = Number(options.maxAgeDays ?? 60);
   const messages = parseWhatsAppText(text, group, {maxAgeDays, now: options.now ?? Date.now()});
 
   const properties=[];
+  let requestsSkipped=0;
+  let multiItemsCreated=0;
   for(const m of messages){
-    const r=extractProperty(m);
-    if(r) properties.push(r);
+    if(isDemandRequest(m.text)){ requestsSkipped++; continue; }
+    const parts=splitMultiListingMessage(m);
+    if(parts.length>1) multiItemsCreated += parts.length;
+    for(const part of parts){
+      const r=extractProperty(part);
+      if(r) properties.push(r);
+    }
   }
 
   const unique=new Map();
@@ -283,6 +308,8 @@ export function processChatText(text, group='Grupo', options={}) {
     max_age_days:maxAgeDays,
     cutoff_date:messages.cutoffDate ?? null,
     date_order:messages.dateOrder ?? 'MDY',
+    requests_skipped:requestsSkipped,
+    multi_items_created:multiItemsCreated,
     properties_detected:properties.length,
     unique:[...unique.values()]
   };

@@ -198,3 +198,8 @@
     align-items:flex-start;
   }
 }
+
+/* v0.4.7 multiselección */
+.fullSpan{grid-column:1/-1}.multiField{background:#0a0a0a;border:1px solid #272727;border-radius:13px;padding:10px}.multiFieldHead{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}.multiFieldHead b{font-size:10px;color:#aaa}.multiFieldHead span{font-size:9px;color:var(--gold2)}.multiChips{display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow:auto}.multiChoice{position:relative}.multiChoice input{position:absolute;opacity:0;pointer-events:none}.multiChoice span{display:block;border:1px solid #303030;background:#111;color:#aaa;border-radius:999px;padding:7px 10px;font-size:10px}.multiChoice input:checked+span{background:#2b2512;border-color:#6b5720;color:var(--gold2);font-weight:800}.zoneSearch{width:100%;background:#080808;border:1px solid #292929;border-radius:10px;color:#eee;padding:10px 11px;font-size:12px;margin-bottom:8px;outline:none}.filterGrid>.multiField+label{} 
+
+.reindexButton{width:100%;margin-top:8px;border:1px solid #38301a;background:#100f0b;color:#b9a45c;border-radius:11px;padding:11px 10px;font-size:10px;font-weight:800}.reindexButton:disabled{opacity:.4}

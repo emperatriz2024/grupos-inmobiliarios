@@ -1,18 +1,5 @@
-ACTUALIZACIÓN v0.4.6 — MENSAJE WHATSAPP
-
-Sube al MISMO repositorio GitHub:
-- app.js
-- index.html
-- sw.js
-
-Commit changes y espera GitHub Pages.
-
-Nuevo mensaje automático:
-
-Hola colega, envíame esta propiedad:
-
-[MENSAJE ORIGINAL EXACTO DEL CHAT]
-
-Gracias.
-
-Se aplica tanto desde la tarjeta como desde la ficha completa.
+ACTUALIZACIÓN ACUMULATIVA v0.4.7
+Sube TODOS los archivos al MISMO repositorio GitHub y haz Commit changes.
+Recarga GitHub Pages y vuelve a abrir la PWA.
+No vacíes la base local ni reconfigures Dropbox.
+Después de actualizar, usa Importar → Reindexar CHAT_PROCESADOS una sola vez para recuperar captaciones omitidas por motores anteriores.

@@ -1,3 +1,5 @@
+import { isDemandRequest } from './intent-utils.js';
+import { extractLocationTerms, bestZone } from './location-utils.js';
 import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
@@ -209,6 +211,9 @@ export async function purgeOldProperties(maxAgeDays=60) {
       if(!c) return;
 
       const p=c.value;
+      if(isDemandRequest(p.text||'')){
+        c.delete(); favs.delete(p.id); removed++; c.continue(); return;
+      }
       const allRaw=[
         p.date,
         ...(p.sources||[]).map(s=>s.date)
@@ -249,8 +254,11 @@ export async function purgeOldProperties(maxAgeDays=60) {
       const latest=recentSources[0];
       const cleanSources=recentSources.map(({_ts,...s})=>s);
 
+      const locationTerms=(p.location_terms&&p.location_terms.length)?p.location_terms:extractLocationTerms(p.text||'',p.zone);
       const updated={
         ...p,
+        zone:p.zone||bestZone(p.text||'',locationTerms[0]||null),
+        location_terms:locationTerms,
         date:latest.date,
         date_iso:latest.date_iso,
         date_order:latest.date_order || inferredOrder,

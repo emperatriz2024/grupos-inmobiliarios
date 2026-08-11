@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.4.6</div>
+      <div class="version">v0.4.7</div>
     </header>
 
     <section class="stats">
@@ -49,17 +49,15 @@
               <option>Venta</option><option>Alquiler</option>
             </select>
           </label>
-          <label>Tipo
-            <select id="propertyType">
-              <option value="">Todos</option>
-              <option>Apartamento</option><option>Townhouse</option><option>Penthouse</option>
-              <option>Casa</option><option>Terreno</option><option>Local comercial</option>
-              <option>Oficina</option><option>Galpón</option><option>Anexo</option>
-            </select>
-          </label>
-          <label>Zona
-            <select id="zone"><option value="">Todas</option></select>
-          </label>
+          <div class="multiField fullSpan">
+            <div class="multiFieldHead"><b>Tipos de inmueble</b><span id="typeSelectedCount">Todos</span></div>
+            <div id="propertyTypeOptions" class="multiChips"></div>
+          </div>
+          <div class="multiField fullSpan">
+            <div class="multiFieldHead"><b>Zonas</b><span id="zoneSelectedCount">Todas</span></div>
+            <input id="zoneSearch" class="zoneSearch" placeholder="Buscar zona..." autocomplete="off" />
+            <div id="zoneOptions" class="multiChips zoneChips"></div>
+          </div>
           <label>Residencia
             <input id="residence" placeholder="Nombre..." />
           </label>
@@ -162,6 +160,7 @@
             <button id="refreshDropbox" class="ghost">Actualizar lista</button>
             <button id="processPending" class="primary">Procesar pendientes</button>
           </div>
+          <button id="reindexProcessed" class="reindexButton">↻ Reindexar CHAT_PROCESADOS con el motor actual</button>
           <div id="dropboxProgress" class="syncProgress" hidden>
             <div class="row"><b id="dropboxProgressTitle">Sincronizando…</b><span id="dropboxProgressCount"></span></div>
             <progress id="dropboxProgressBar"></progress>

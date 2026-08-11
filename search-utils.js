@@ -1,3 +1,5 @@
+import { isDemandRequest } from './intent-utils.js';
+import { extractLocationTerms, normLoc } from './location-utils.js';
 import { parseFlexibleDate, propertyTimestamp } from './date-utils.js';
 
 const ACCENTS = {á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
@@ -56,6 +58,7 @@ export function matchesFilters(p, f={}) {
   // También ocultamos registros sin fecha interpretable para evitar inventario incierto.
   const hardRecency = recencyInfo(p);
   if (!Number.isFinite(hardRecency.days) || hardRecency.days > 60) return false;
+  if (isDemandRequest(p.text || '')) return false;
 
   const hay = norm([
     p.operation, p.property_type, p.zone, p.residence, p.sender, p.group,
@@ -69,8 +72,14 @@ export function matchesFilters(p, f={}) {
   }
 
   if (f.operation && p.operation !== f.operation) return false;
-  if (f.property_type && p.property_type !== f.property_type) return false;
-  if (f.zone && norm(p.zone || '') !== norm(f.zone)) return false;
+  const types=Array.isArray(f.property_types)?f.property_types.filter(Boolean):[];
+  if(types.length && !types.includes(p.property_type)) return false;
+
+  const zones=Array.isArray(f.zones)?f.zones.filter(Boolean):[];
+  if(zones.length){
+    const locationHay=normLoc([p.zone,p.residence,...(p.location_terms||[]),...extractLocationTerms(p.text||'',p.zone),p.text].filter(Boolean).join(' '));
+    if(!zones.some(z=>locationHay.includes(normLoc(z)))) return false;
+  }
 
   const residence = norm(f.residence || '');
   if (residence && !norm(p.residence || '').includes(residence) && !norm(p.text || '').includes(residence)) return false;

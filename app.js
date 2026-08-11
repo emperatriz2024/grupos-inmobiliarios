@@ -7,6 +7,7 @@ import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
 } from './search-utils.js';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, downloadDropboxFile, moveDropboxFile,
@@ -29,8 +30,9 @@ function rememberSearchPosition(cardId='') {
     if(cardId) sessionStorage.setItem(SEARCH_CARD_KEY,cardId);
     sessionStorage.setItem(SEARCH_STATE_KEY,JSON.stringify({
       visibleCount,
-      q:$('#q')?.value||'', operation:$('#operation')?.value||'', propertyType:$('#propertyType')?.value||'',
-      zone:$('#zone')?.value||'', residence:$('#residence')?.value||'', minPrice:$('#minPrice')?.value||'',
+      q:$('#q')?.value||'', operation:$('#operation')?.value||'',
+      propertyTypes:getSelectedValues('propertyTypeOptions'), zones:getSelectedValues('zoneOptions'),
+      residence:$('#residence')?.value||'', minPrice:$('#minPrice')?.value||'',
       maxPrice:$('#maxPrice')?.value||'', bedrooms:$('#bedrooms')?.value||'', bathrooms:$('#bathrooms')?.value||'',
       parking:$('#parking')?.value||'', minArea:$('#minArea')?.value||'', maxArea:$('#maxArea')?.value||'',
       maxAge:$('#maxAge')?.value||'', sortMode:$('#sortMode')?.value||'recent',
@@ -47,7 +49,8 @@ function restoreSearchFormState(){
     if(!s) return false;
     const v=(id,val)=>{const el=$('#'+id); if(el) el.value=val??'';};
     const c=(id,val)=>{const el=$('#'+id); if(el) el.checked=!!val;};
-    v('q',s.q);v('operation',s.operation);v('propertyType',s.propertyType);v('zone',s.zone);v('residence',s.residence);
+    v('q',s.q);v('operation',s.operation);v('residence',s.residence);
+    setSelectedValues('propertyTypeOptions',s.propertyTypes||[]); setSelectedValues('zoneOptions',s.zones||[]); updateMultiCounts();
     v('minPrice',s.minPrice);v('maxPrice',s.maxPrice);v('bedrooms',s.bedrooms);v('bathrooms',s.bathrooms);v('parking',s.parking);
     v('minArea',s.minArea);v('maxArea',s.maxArea);v('maxAge',s.maxAge);v('sortMode',s.sortMode);
     c('planta100',s.planta100);c('planta',s.planta);c('pozo',s.pozo);c('tanque',s.tanque);c('amoblado',s.amoblado);
@@ -125,9 +128,9 @@ function featureLabels(p) {
   if (p.piscina) out.push('Piscina');
   return out;
 }
-function propertyTitle(p) {
-  return p.residence || p.property_type || 'Propiedad';
-}
+function displayZone(p){ return p.zone || bestZone(p.text||'',null) || 'Zona no detectada'; }
+function propertyTitle(p) { return p.residence || p.property_type || 'Propiedad'; }
+
 function sourceText(p) {
   const s = (p.sources || [])[0] || {};
   return `${s.sender || p.sender || 'Corredor'} · ${s.group || p.group || 'Grupo'} · ${p.date || ''}`;
@@ -163,7 +166,7 @@ function cardHTML(p) {
     <div class="cardMainGrid">
       <div class="cardCore">
         <h3>${esc(propertyTitle(p))}</h3>
-        <div class="zone">${esc(p.zone || 'Zona no detectada')}</div>
+        <div class="zone">${esc(displayZone(p))}</div>
         <div class="price">${esc(formatMoney(p.price_usd))}</div>
       </div>
 
@@ -233,8 +236,8 @@ function getFilters() {
   return {
     q: $('#q').value,
     operation: $('#operation').value,
-    property_type: $('#propertyType').value,
-    zone: $('#zone').value,
+    property_types: getSelectedValues('propertyTypeOptions'),
+    zones: getSelectedValues('zoneOptions'),
     residence: $('#residence').value,
     min_price: $('#minPrice').value,
     max_price: $('#maxPrice').value,
@@ -276,15 +279,28 @@ $('#searchBtn').onclick = () => runSearch();
 $('#q').addEventListener('keydown', e => { if(e.key === 'Enter') { e.preventDefault(); runSearch(); }});
 $('#sortMode').onchange = () => runSearch();
 $('#clearFilters').onclick = () => {
-  ['q','operation','propertyType','zone','residence','minPrice','maxPrice','bedrooms','bathrooms','parking','minArea','maxArea','maxAge'].forEach(id => $('#'+id).value='');
+  ['q','operation','residence','minPrice','maxPrice','bedrooms','bathrooms','parking','minArea','maxArea','maxAge'].forEach(id => $('#'+id).value='');
   ['planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id => $('#'+id).checked=false);
+  document.querySelectorAll('#propertyTypeOptions input,#zoneOptions input').forEach(x=>x.checked=false); updateMultiCounts();
   runSearch();
 };
 
-function buildZoneOptions() {
-  const zones = [...new Set(allProperties.map(p=>p.zone).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  $('#zone').innerHTML = `<option value="">Todas</option>` + zones.map(z=>`<option>${esc(z)}</option>`).join('');
+const PROPERTY_TYPES=['Apartamento','Townhouse','Penthouse','Casa','Terreno','Local comercial','Oficina','Galpón','Anexo'];
+function getSelectedValues(containerId){return [...document.querySelectorAll(`#${containerId} input:checked`)].map(x=>x.value);}
+function setSelectedValues(containerId,values=[]){const wanted=new Set(values);document.querySelectorAll(`#${containerId} input`).forEach(x=>x.checked=wanted.has(x.value));}
+function choiceHTML(value,group){return `<label class="multiChoice"><input type="checkbox" value="${esc(value)}" data-group="${group}"><span>${esc(value)}</span></label>`;}
+function updateMultiCounts(){const t=getSelectedValues('propertyTypeOptions').length,z=getSelectedValues('zoneOptions').length;$('#typeSelectedCount').textContent=t?`${t} seleccionados`:'Todos';$('#zoneSelectedCount').textContent=z?`${z} seleccionadas`:'Todas';}
+function bindMultiChoices(){document.querySelectorAll('#propertyTypeOptions input,#zoneOptions input').forEach(x=>x.onchange=()=>{updateMultiCounts();rememberSearchPosition();});}
+function buildTypeOptions(){ $('#propertyTypeOptions').innerHTML=PROPERTY_TYPES.map(x=>choiceHTML(x,'type')).join(''); }
+function allLocationTerms(p){return [...new Set([p.zone,...(p.location_terms||[]),...extractLocationTerms(p.text||'',p.zone)].filter(Boolean))];}
+function buildZoneOptions(){
+  const previous=new Set(getSelectedValues('zoneOptions'));
+  const zones=[...new Set(allProperties.flatMap(allLocationTerms).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  $('#zoneOptions').innerHTML=zones.map(z=>choiceHTML(z,'zone')).join('');
+  setSelectedValues('zoneOptions',[...previous]); bindMultiChoices(); updateMultiCounts();
 }
+function filterZoneChoices(q=''){const x=normLoc(q);document.querySelectorAll('#zoneOptions .multiChoice').forEach(l=>{l.style.display=!x||normLoc(l.textContent).includes(x)?'':'none';});}
+
 
 async function openDetail(id) {
   const p = allProperties.find(x=>x.id===id);
@@ -414,7 +430,8 @@ async function loadData() {
   favoriteIds = await getFavoriteIds();
   await refreshStatsOnly();
   await refreshRecent();
-  buildZoneOptions();
+  buildTypeOptions(); buildZoneOptions(); bindMultiChoices();
+  $('#zoneSearch').oninput=()=>filterZoneChoices($('#zoneSearch').value);
   const restored=restoreSearchFormState();
   if(restored){
     currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);
@@ -490,6 +507,44 @@ $('#disconnectDropbox').onclick=()=>{
   dropboxDisconnect(); pendingDropboxFiles=[]; renderDropboxState();
 };
 $('#refreshDropbox').onclick=()=>refreshDropboxPending();
+
+$('#reindexProcessed').onclick=async()=>{
+  const s=getDropboxSettings();
+  if(!confirm(`¿Reindexar los ZIP de ${s.processedPath}?\n\nEl motor solo analizará los últimos 60 días y recuperará captaciones que versiones anteriores pudieron omitir.`)) return;
+  $('#reindexProcessed').disabled=true; $('#processPending').disabled=true; $('#refreshDropbox').disabled=true;
+  $('#dropboxProgress').hidden=false;
+  try{
+    const files=await listPendingZips(s.processedPath);
+    $('#dropboxProgressBar').max=Math.max(files.length,1);
+    let ok=0,failed=0;
+    for(let i=0;i<files.length;i++){
+      const entry=files[i];
+      $('#dropboxProgressBar').value=i;
+      $('#dropboxProgressTitle').textContent='Reindexando chats procesados';
+      $('#dropboxProgressCount').textContent=`${i+1}/${files.length}`;
+      $('#dropboxProgressDetail').textContent=`Leyendo últimos 60 días · ${entry.name}`;
+      try{
+        const blob=await downloadDropboxFile(entry.path_lower||entry.path_display);
+        const file=new File([blob],entry.name,{type:'application/zip'});
+        await importOneZip(file,groupFromName(entry.name),(p)=>{
+          if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando ${entry.name}`;
+          if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Actualizando índice · ${p.done}/${p.total}`;
+        });
+        ok++;
+      }catch(e){failed++;console.error('reindex',entry.name,e);}
+    }
+    $('#dropboxProgressBar').value=files.length;
+    $('#dropboxProgressTitle').textContent='Reindexación terminada';
+    $('#dropboxProgressCount').textContent=`${ok} OK${failed?` · ${failed} error`:''}`;
+    $('#dropboxProgressDetail').textContent='Los archivos permanecen en CHAT_PROCESADOS. La base fue actualizada con el motor actual.';
+    await loadData();
+  }catch(e){
+    $('#dropboxProgressTitle').textContent='No pude reindexar';
+    $('#dropboxProgressDetail').textContent=e.message;
+  }finally{
+    $('#reindexProcessed').disabled=false; $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
+  }
+};
 
 $('#processPending').onclick=async()=>{
   if(!pendingDropboxFiles.length){await refreshDropboxPending(); if(!pendingDropboxFiles.length) return;}
