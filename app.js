@@ -89,6 +89,18 @@ function esc(s = '') {
 function groupFromName(name = '') {
   return name.replace(/\.zip$/i, '').replace(/^WhatsApp Chat\s*-?\s*/i, '').trim() || 'Grupo inmobiliario';
 }
+
+function buildWhatsAppMessage(p) {
+  const original = (p?.text || '').trim();
+  return [
+    'Hola colega, envíame esta propiedad:',
+    '',
+    original || 'Publicación original no disponible.',
+    '',
+    'Gracias.'
+  ].join('\n');
+}
+
 function setStatus(text, pct = null) {
   $('#statusBox').hidden = false;
   $('#statusText').textContent = text;
@@ -212,7 +224,7 @@ function bindCardActions(container) {
     const p = allProperties.find(x => x.id === btn.dataset.id);
     const num = whatsappNumber(effectivePhone(p));
     if (!num) return;
-    const msg = encodeURIComponent(`Hola, vi tu publicación de ${p.property_type || 'una propiedad'}${p.zone ? ' en '+p.zone : ''}${p.residence ? ', '+p.residence : ''}. ¿Sigue disponible?`);
+    const msg = encodeURIComponent(buildWhatsAppMessage(p));
     window.location.href = `https://wa.me/${num}?text=${msg}`;
   });
 }
@@ -300,7 +312,7 @@ async function openDetail(id) {
   $('#detailDialog').showModal();
   if (phone) $('#detailWhatsApp').onclick = () => {
     const num = whatsappNumber(phone);
-    const msg = encodeURIComponent(`Hola, vi tu publicación de ${p.property_type || 'una propiedad'}${p.zone ? ' en '+p.zone : ''}${p.residence ? ', '+p.residence : ''}. ¿Sigue disponible?`);
+    const msg = encodeURIComponent(buildWhatsAppMessage(p));
     window.location.href = `https://wa.me/${num}?text=${msg}`;
   };
 }

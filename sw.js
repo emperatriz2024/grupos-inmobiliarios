@@ -1,5 +1,5 @@
 
-const CACHE='grupos-inmobiliarios-v045-date-fix';
+const CACHE='grupos-inmobiliarios-v046-whatsapp';
 const ASSETS=['./','./index.html','./styles.css','./app.js','./db.js','./worker.js','./engine.js',
 './zip-reader.js','./search-utils.js','./date-utils.js','./dropbox.js','./manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));

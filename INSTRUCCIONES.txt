@@ -1,27 +1,18 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.5 — FECHAS CORREGIDAS
+ACTUALIZACIÓN v0.4.6 — MENSAJE WHATSAPP
 
-Sube TODOS estos archivos al MISMO repositorio GitHub:
-date-utils.js
-engine.js
-worker.js
-db.js
-search-utils.js
-index.html
-styles.css
-app.js
-sw.js
-dropbox.js
-manifest.webmanifest
+Sube al MISMO repositorio GitHub:
+- app.js
+- index.html
+- sw.js
 
-Commit changes.
-Espera GitHub Pages.
-Abre la URL en Safari y recarga una vez.
-Cierra y vuelve a abrir Grupos Inmobiliarios.
+Commit changes y espera GitHub Pages.
 
-Debe mostrar v0.4.5.
+Nuevo mensaje automático:
 
-IMPORTANTE:
-- NO pulses “Vaciar toda la base local”.
-- NO necesitas reimportar para que 3/31/26 y 5/31/26 desaparezcan:
-  la app migrará/depurará la base existente al abrir.
-- Dropbox sigue configurado.
+Hola colega, envíame esta propiedad:
+
+[MENSAJE ORIGINAL EXACTO DEL CHAT]
+
+Gracias.
+
+Se aplica tanto desde la tarjeta como desde la ficha completa.
