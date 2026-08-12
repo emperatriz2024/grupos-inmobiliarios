@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0412" />
+  <link rel="stylesheet" href="./styles.css?v=0500" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.4.12 PRO</div>
+      <div class="version">v0.5.0 CORE</div>
     </header>
 
     <section class="stats">
@@ -177,6 +177,17 @@
         </div>
       </section>
 
+      <section class="card radarCoreCard">
+        <div class="sectionTitle"><span>◎</span><div><h2>Radar Core</h2><p>Nueva capa multi-fuente. Tu inventario actual de WhatsApp permanece intacto.</p></div></div>
+        <div class="radarCoreStats">
+          <div><strong id="radarMasterCount">0</strong><span>inmuebles maestros</span></div>
+          <div><strong id="radarSourceCount">0</strong><span>publicaciones fuente</span></div>
+          <div><strong id="radarBuyerCount">0</strong><span>compradores</span></div>
+          <div><strong id="radarMatchCount">0</strong><span>matches</span></div>
+        </div>
+        <small class="smartLocationNote">Base preparada para Instagram, portales, Marketplace asistido y matching de compradores en próximas versiones.</small>
+      </section>
+
       <section class="card contactsCard">
         <div class="sectionTitle"><span>👥</span><div><h2>Directorio de captadores</h2><p>Se construye automáticamente desde CONTACTOS_PROCESADOS.</p></div></div>
         <div class="contactFlow"><span>CONTACTOS_PROCESADOS</span><b>→</b><span>Directorio local</span><b>→</b><span>WhatsApp automático</span></div>
@@ -212,7 +223,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.4.9 · 60 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -260,6 +271,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0412"></script>
+  <script type="module" src="./app.js?v=0500"></script>
 </body>
 </html>

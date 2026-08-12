@@ -4,22 +4,23 @@ import {
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties,
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
-  linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations
-} from './db.js?v=0412';
+  linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations,
+  syncRadarCore, getRadarCoreStats
+} from './db.js?v=0500';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0412';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0412';
-import { isDemandRequest } from './intent-utils.js?v=0412';
-import { consolidateProperties } from './dedupe-utils.js?v=0412';
+} from './search-utils.js?v=0500';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0500';
+import { isDemandRequest } from './intent-utils.js?v=0500';
+import { consolidateProperties } from './dedupe-utils.js?v=0500';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0412';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0412';
-import { normLocation } from './location-catalog.js?v=0412';
+} from './dropbox.js?v=0500';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0500';
+import { normLocation } from './location-catalog.js?v=0500';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -433,7 +434,7 @@ async function renderSaved() {
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0412',{type:'module'});
+    const worker = new Worker('./worker.js?v=0500',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -554,10 +555,17 @@ async function loadData() {
   const rawProperties=await getAllProperties();
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
   const consolidated=consolidateProperties(valid);
+  await syncRadarCore(valid,consolidated);
+  const radarStats=await getRadarCoreStats();
   contactDirectory=await getAllContacts();contactIndex=buildContactIndex(contactDirectory);
   allProperties=consolidated.map(annotateContactResolution);
   favoriteIds=await getFavoriteIds();
-  await refreshStatsOnly(allProperties.length);await refreshRecent();await refreshContactStats();buildZoneCatalog();updateSelectorUI();
+  await refreshStatsOnly(allProperties.length);await refreshRecent();await refreshContactStats();
+  if($('#radarMasterCount'))$('#radarMasterCount').textContent=radarStats.masters.toLocaleString('es-VE');
+  if($('#radarSourceCount'))$('#radarSourceCount').textContent=radarStats.sources.toLocaleString('es-VE');
+  if($('#radarBuyerCount'))$('#radarBuyerCount').textContent=radarStats.buyers.toLocaleString('es-VE');
+  if($('#radarMatchCount'))$('#radarMatchCount').textContent=radarStats.matches.toLocaleString('es-VE');
+  buildZoneCatalog();updateSelectorUI();
   const restored=restoreSearchFormState();
   if(restored){currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Búsqueda restaurada';}
   else{currentResults=sortProperties(allProperties,'recent');$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent=`${allProperties.length.toLocaleString('es-VE')} inmuebles únicos`;visibleCount=30;}
@@ -823,5 +831,5 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0411')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0412').catch(()=>{});
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0500')).map(k=>caches.delete(k)))).catch(()=>{});}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0500').catch(()=>{});

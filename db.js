@@ -1,11 +1,11 @@
-import { isDemandRequest } from './intent-utils.js?v=0412';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0412';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0412';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0412';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0412';
+import { isDemandRequest } from './intent-utils.js?v=0500';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0500';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0500';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0500';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0500';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -14,6 +14,15 @@ const MUNICIPALITY_STORE='municipalities';
 const ZONE_STORE='zones';
 const COMPLEX_STORE='complexes';
 const LOCATION_PENDING_STORE='location_pending';
+// Radar Core v0.5.0: the legacy WhatsApp inventory remains untouched.
+// These stores form the new multi-source layer that can later receive Instagram,
+// portals, Marketplace-assisted captures and server synchronization.
+const MASTER_STORE='master_properties';
+const SOURCE_POST_STORE='source_posts';
+const BUYER_STORE='buyers';
+const MATCH_STORE='matches';
+const SYNC_QUEUE_STORE='sync_queue';
+
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -42,6 +51,40 @@ function openDB() {
       if(!db.objectStoreNames.contains(LOCATION_PENDING_STORE)){
         const lp=db.createObjectStore(LOCATION_PENDING_STORE,{keyPath:'id'});
         lp.createIndex('status','status',{unique:false});lp.createIndex('kind','kind',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(MASTER_STORE)){
+        const s=db.createObjectStore(MASTER_STORE,{keyPath:'id'});
+        s.createIndex('operation','operation',{unique:false});
+        s.createIndex('property_type','property_type',{unique:false});
+        s.createIndex('municipality_id','municipality_id',{unique:false});
+        s.createIndex('zone_id','zone_id',{unique:false});
+        s.createIndex('complex_id','complex_id',{unique:false});
+        s.createIndex('status','status',{unique:false});
+        s.createIndex('last_seen_at','last_seen_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(SOURCE_POST_STORE)){
+        const s=db.createObjectStore(SOURCE_POST_STORE,{keyPath:'id'});
+        s.createIndex('master_id','master_id',{unique:false});
+        s.createIndex('source_type','source_type',{unique:false});
+        s.createIndex('legacy_property_id','legacy_property_id',{unique:false});
+        s.createIndex('published_at','published_at',{unique:false});
+        s.createIndex('agent_phone','agent_phone',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(BUYER_STORE)){
+        const s=db.createObjectStore(BUYER_STORE,{keyPath:'id'});
+        s.createIndex('status','status',{unique:false});
+        s.createIndex('updated_at','updated_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(MATCH_STORE)){
+        const s=db.createObjectStore(MATCH_STORE,{keyPath:'id'});
+        s.createIndex('buyer_id','buyer_id',{unique:false});
+        s.createIndex('master_id','master_id',{unique:false});
+        s.createIndex('score','score',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(SYNC_QUEUE_STORE)){
+        const s=db.createObjectStore(SYNC_QUEUE_STORE,{keyPath:'id',autoIncrement:true});
+        s.createIndex('status','status',{unique:false});
+        s.createIndex('created_at','created_at',{unique:false});
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -414,9 +457,145 @@ export async function purgeOldProperties(maxAgeDays=60) {
     cutoff:cutoff.toISOString().slice(0,10)
   };
 }
+// ---------- Radar Core v0.5.0 -------------------------------------------------
+// Stable, deterministic 32-bit hash used only for internal IDs (not security).
+function radarHash(value=''){
+  let h=2166136261;
+  for(const ch of String(value)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}
+  return (h>>>0).toString(36);
+}
+function sourceDateTime(source={},fallback={}){
+  const iso=source.date_iso||fallback.date_iso||null;
+  const raw=source.date||fallback.date||null;
+  const order=source.date_order||fallback.date_order||'MDY';
+  const ts=iso?parseFlexibleDate(iso,'auto','MDY'):parseFlexibleDate(raw,order,'MDY');
+  if(!ts)return fallback.last_seen_at||fallback.first_seen_at||new Date().toISOString();
+  const d=new Date(ts),parts=String(source.time||fallback.time||'00:00:00').split(':').map(Number);
+  d.setHours(parts[0]||0,parts[1]||0,parts[2]||0,0);return d.toISOString();
+}
+function legacySources(p={}){
+  const rows=(p.sources&&p.sources.length)?p.sources:[{group:p.group,sender:p.sender,date:p.date,date_iso:p.date_iso,date_order:p.date_order,time:p.time,phone:p.phone}];
+  return rows.filter(Boolean);
+}
+function masterSnapshot(p={},id,existing=null){
+  const now=new Date().toISOString();
+  return {
+    ...(existing||{}),id,
+    operation:p.operation||existing?.operation||null,property_type:p.property_type||existing?.property_type||null,
+    municipality_id:p.municipality_id||existing?.municipality_id||null,municipality:p.municipality||existing?.municipality||null,
+    zone_id:p.zone_id||existing?.zone_id||null,zone:p.zone||existing?.zone||null,
+    complex_id:p.complex_id||existing?.complex_id||null,residence:p.residence||existing?.residence||null,
+    price_usd:p.price_usd??existing?.price_usd??null,area_m2:p.area_m2??existing?.area_m2??null,
+    bedrooms:p.bedrooms??existing?.bedrooms??null,bathrooms:p.bathrooms??existing?.bathrooms??null,parking:p.parking??existing?.parking??null,
+    planta_electrica:!!(p.planta_electrica||existing?.planta_electrica),planta_100:!!(p.planta_100||existing?.planta_100),
+    pozo:!!(p.pozo||existing?.pozo),tanque:!!(p.tanque||existing?.tanque),amoblado:!!(p.amoblado||existing?.amoblado),
+    financiamiento:!!(p.financiamiento||existing?.financiamiento),piscina:!!(p.piscina||existing?.piscina),
+    status:existing?.status||'active_unverified',vigency_score:existing?.vigency_score??null,
+    probable_captor_id:existing?.probable_captor_id||null,captor_score:existing?.captor_score??null,
+    legacy_ids:[...new Set([...(existing?.legacy_ids||[]),...(p.merged_ids||[p.id]).filter(Boolean)])],
+    source_types:[...new Set([...(existing?.source_types||[]),'whatsapp'])],
+    created_at:existing?.created_at||now,updated_at:now,
+    first_seen_at:existing?.first_seen_at||p.first_seen_at||now,last_seen_at:p.last_seen_at||existing?.last_seen_at||now
+  };
+}
+async function allByIndex(store,indexName,key){
+  return reqP(store.index(indexName).getAll(key));
+}
+
+// Builds/refreshes the parallel multi-source layer from the current WhatsApp DB.
+// It never rewrites or deletes legacy `properties` records.
+export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
+  const db=await openDB(),now=new Date().toISOString();
+  let mastersCreated=0,mastersUpdated=0,mastersMerged=0,sourcesUpserted=0;
+
+  // Load the parallel layer once, compute changes in memory, then commit in a
+  // single IndexedDB transaction. This matters on iPhone with large inventories.
+  const existingSources=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).getAll());
+  const allMasters=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll());
+  const postMap=new Map(existingSources.map(x=>[x.id,x]));
+  const masterMap=new Map(allMasters.map(x=>[x.id,x]));
+  const legacyToMasters=new Map();
+  for(const src of existingSources){
+    if(!src.legacy_property_id||!src.master_id)continue;
+    if(!legacyToMasters.has(src.legacy_property_id))legacyToMasters.set(src.legacy_property_id,new Set());
+    legacyToMasters.get(src.legacy_property_id).add(src.master_id);
+  }
+  const rawMap=new Map(rawRecords.map(x=>[x.id,x]));
+  const mastersToDelete=new Set();
+  const touchedMasters=new Set();
+
+  for(const consolidated of consolidatedRecords){
+    const legacyIds=[...new Set((consolidated.merged_ids||[consolidated.id]).filter(Boolean))];
+    const linked=[...new Set(legacyIds.flatMap(id=>[...(legacyToMasters.get(id)||[])]))].filter(id=>masterMap.has(id)&&!mastersToDelete.has(id));
+    let masterId=linked[0]||`mp_${radarHash(legacyIds.slice().sort().join('|')||consolidated.id||now)}`;
+    let existing=masterMap.get(masterId)||null;
+
+    if(linked.length>1){
+      const candidates=linked.map(id=>masterMap.get(id)).filter(Boolean).sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||'')));
+      masterId=candidates[0]?.id||masterId;existing=masterMap.get(masterId)||existing;
+      for(const duplicateId of linked.filter(id=>id!==masterId)){
+        mastersToDelete.add(duplicateId);masterMap.delete(duplicateId);mastersMerged++;
+        for(const [postId,post] of postMap){
+          if(post.master_id===duplicateId)postMap.set(postId,{...post,master_id:masterId,updated_at:now});
+        }
+        for(const [legacyId,set] of legacyToMasters){if(set.delete(duplicateId))set.add(masterId);}
+      }
+    }
+
+    const master=masterSnapshot(consolidated,masterId,existing);
+    masterMap.set(masterId,master);touchedMasters.add(masterId);
+    if(existing)mastersUpdated++;else mastersCreated++;
+
+    for(const legacyId of legacyIds){
+      const p=rawMap.get(legacyId);if(!p)continue;
+      for(const src of legacySources(p)){
+        const sourceKey=[legacyId,src.group||p.group||'',src.sender||p.sender||'',src.date_iso||src.date||p.date_iso||p.date||'',src.time||p.time||'',src.phone||p.phone||''].join('|');
+        const postId=`src_wa_${radarHash(sourceKey)}`,old=postMap.get(postId);
+        postMap.set(postId,{
+          ...(old||{}),id:postId,master_id:masterId,source_type:'whatsapp',legacy_property_id:legacyId,
+          channel_name:src.group||p.group||null,agent_name:src.sender||p.sender||null,agent_phone:src.phone||p.phone||null,
+          published_at:sourceDateTime(src,p),detected_at:old?.detected_at||p.first_seen_at||now,last_detected_at:p.last_seen_at||old?.last_detected_at||now,
+          external_id:null,external_url:null,external_code:null,original_text:p.text||'',normalized_text:p.normalized||'',
+          observed_price:p.price_usd??null,observed_area_m2:p.area_m2??null,observed_residence:p.residence||null,
+          municipality_id:p.municipality_id||null,zone_id:p.zone_id||null,complex_id:p.complex_id||null,
+          created_at:old?.created_at||now,updated_at:now
+        });
+        sourcesUpserted++;
+        if(!legacyToMasters.has(legacyId))legacyToMasters.set(legacyId,new Set());legacyToMasters.get(legacyId).add(masterId);
+      }
+    }
+  }
+
+  const counts=new Map();for(const post of postMap.values())if(!mastersToDelete.has(post.master_id))counts.set(post.master_id,(counts.get(post.master_id)||0)+1);
+  for(const masterId of touchedMasters){const m=masterMap.get(masterId);if(m)masterMap.set(masterId,{...m,source_count:counts.get(masterId)||0,updated_at:now});}
+
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction([MASTER_STORE,SOURCE_POST_STORE],'readwrite'),ms=tx.objectStore(MASTER_STORE),ss=tx.objectStore(SOURCE_POST_STORE);
+    for(const id of mastersToDelete)ms.delete(id);
+    for(const masterId of touchedMasters){const m=masterMap.get(masterId);if(m)ms.put(m);}
+    // Existing historical source posts are not deleted; only current/changed rows
+    // are put again. This preserves the future price/publication history.
+    for(const post of postMap.values()){
+      if(touchedMasters.has(post.master_id)||post.updated_at===now)ss.put(post);
+    }
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();return {mastersCreated,mastersUpdated,mastersMerged,sourcesUpserted};
+}
+
+export async function getRadarCoreStats(){
+  const db=await openDB(),tx=db.transaction([MASTER_STORE,SOURCE_POST_STORE,BUYER_STORE,MATCH_STORE,SYNC_QUEUE_STORE],'readonly');
+  const [masters,sources,buyers,matches,queue]=await Promise.all([
+    reqP(tx.objectStore(MASTER_STORE).count()),reqP(tx.objectStore(SOURCE_POST_STORE).count()),reqP(tx.objectStore(BUYER_STORE).count()),reqP(tx.objectStore(MATCH_STORE).count()),reqP(tx.objectStore(SYNC_QUEUE_STORE).count())
+  ]);db.close();return {masters,sources,buyers,matches,queue};
+}
+
+export async function getMasterProperties(){const db=await openDB(),rows=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll());db.close();return rows;}
+export async function getSourcePostsByMaster(masterId){const db=await openDB(),tx=db.transaction(SOURCE_POST_STORE,'readonly'),rows=await allByIndex(tx.objectStore(SOURCE_POST_STORE),'master_id',masterId);db.close();return rows;}
+
 export async function clearDatabase() {
   const db = await openDB();
-  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE, CONTACT_STORE, MUNICIPALITY_STORE, ZONE_STORE, COMPLEX_STORE, LOCATION_PENDING_STORE];
+  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE, CONTACT_STORE, MUNICIPALITY_STORE, ZONE_STORE, COMPLEX_STORE, LOCATION_PENDING_STORE, MASTER_STORE, SOURCE_POST_STORE, BUYER_STORE, MATCH_STORE, SYNC_QUEUE_STORE];
   await Promise.all(stores.map(name => new Promise((resolve, reject) => {
     const tx = db.transaction(name, 'readwrite');
     tx.oncomplete = resolve;

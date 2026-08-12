@@ -1,7 +1,7 @@
 {
-  "name": "Grupos Inmobiliarios",
-  "short_name": "Grupos Inm.",
-  "description": "Buscador local de publicaciones inmobiliarias desde chats de WhatsApp.",
+  "name": "Radar Inmobiliario",
+  "short_name": "Radar Inm.",
+  "description": "Radar inmobiliario multi-fuente con inventario de WhatsApp y base preparada para compradores.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
