@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0502';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0502';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0502';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0502';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0502';
+import { isDemandRequest } from './intent-utils.js?v=0511';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0511';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0511';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0511';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0511';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
@@ -160,6 +160,35 @@ export async function mergeProperties(records, onProgress) {
 
   db.close();
   return { added, updated };
+}
+
+
+export async function patchPropertyPriceAudits(records=[]){
+  if(!records.length)return {updated:0};
+  const db=await openDB();let updated=0;const BATCH=250;
+  for(let i=0;i<records.length;i+=BATCH){
+    const batch=records.slice(i,i+BATCH);
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(PROP_STORE,'readwrite'),store=tx.objectStore(PROP_STORE);
+      for(const rec of batch){
+        const req=store.get(rec.id);
+        req.onsuccess=()=>{
+          const old=req.result;if(!old)return;
+          store.put({...old,
+            price_usd:rec.price_usd??null,
+            price_confidence:rec.price_confidence||'missing',
+            price_audit_status:rec.price_audit_status||'ok',
+            price_evidence:rec.price_evidence||null,
+            price_audit_version:'0511',
+            price_audited:true
+          });updated++;
+        };
+      }
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+    await new Promise(r=>setTimeout(r,0));
+  }
+  db.close();return {updated};
 }
 
 export async function addImport(summary) {
@@ -485,7 +514,12 @@ function masterSnapshot(p={},id,existing=null){
     municipality_id:p.municipality_id||existing?.municipality_id||null,municipality:p.municipality||existing?.municipality||null,
     zone_id:p.zone_id||existing?.zone_id||null,zone:p.zone||existing?.zone||null,
     complex_id:p.complex_id||existing?.complex_id||null,residence:p.residence||existing?.residence||null,
-    price_usd:p.price_usd??existing?.price_usd??null,area_m2:p.area_m2??existing?.area_m2??null,
+    price_usd:p.price_audited===true?(p.price_usd??null):(p.price_usd??existing?.price_usd??null),
+    price_confidence:p.price_confidence||existing?.price_confidence||null,
+    price_audit_status:p.price_audit_status||existing?.price_audit_status||null,
+    price_evidence:p.price_evidence||existing?.price_evidence||null,
+    price_audited:p.price_audited===true||existing?.price_audited===true,
+    area_m2:p.area_m2??existing?.area_m2??null,
     bedrooms:p.bedrooms??existing?.bedrooms??null,bathrooms:p.bathrooms??existing?.bathrooms??null,parking:p.parking??existing?.parking??null,
     planta_electrica:!!(p.planta_electrica||existing?.planta_electrica),planta_100:!!(p.planta_100||existing?.planta_100),
     pozo:!!(p.pozo||existing?.pozo),tanque:!!(p.tanque||existing?.tanque),amoblado:!!(p.amoblado||existing?.amoblado),
@@ -684,7 +718,7 @@ export async function exportDatabaseSnapshot(){
   return {
     format:'radar-inmobiliario-backup',
     backup_version:1,
-    app_version:'0.5.1',
+    app_version:'0.5.1.1',
     db_name:DB_NAME,
     db_version:DB_VERSION,
     created_at:new Date().toISOString(),

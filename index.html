@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0510" />
+  <link rel="stylesheet" href="./styles.css?v=0511" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.1 CORE</div>
+      <div class="version">v0.5.1.1 CORE</div>
     </header>
 
     <section class="stats">
@@ -134,7 +134,7 @@
         <div>
           <div class="eyebrow buyersEyebrow">RADAR COMERCIAL</div>
           <h2>Mis Compradores</h2>
-          <p>Guarda lo que busca cada cliente y deja que Radar compare automáticamente contra tus inmuebles únicos.</p>
+          <p>Guarda lo que busca cada cliente. El modo estricto separa coincidencias reales de alternativas y datos por verificar.</p>
         </div>
         <button id="newBuyerBtn" class="primary buyerNewBtn" type="button">＋ Nuevo comprador</button>
       </div>
@@ -284,7 +284,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.1 · 60 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.1.1 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -366,6 +366,13 @@
               </label>
               <label>Precio máximo
                 <input id="buyerMaxPrice" type="number" inputmode="numeric" placeholder="80000">
+              </label>
+              <label>Tolerancia sobre el tope
+                <select id="buyerBudgetTolerance">
+                  <option value="0" selected>Estricto · 0%</option>
+                  <option value="5">Permitir +5%</option>
+                  <option value="10">Permitir +10%</option>
+                </select>
               </label>
               <label>Habitaciones mín.
                 <select id="buyerMinBedrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
@@ -453,6 +460,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0510"></script>
+  <script type="module" src="./app.js?v=0511"></script>
 </body>
 </html>

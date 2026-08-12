@@ -1,13 +1,12 @@
-RADAR INMOBILIARIO v0.5.1 — MIS COMPRADORES (DEV)
-===================================================
+RADAR INMOBILIARIO v0.5.1.1 — MATCHING ESTRICTO + PRECIO (DEV)
+================================================================
 
-1. Subir SOLO a la rama radar-v050-dev.
-2. No tocar main/principal todavía.
-3. Reemplazar todos los archivos homónimos con los de este ZIP.
-4. Subir también el archivo NUEVO: buyer-utils.js.
-5. Netlify debe redesplegar automáticamente.
-6. Verificar que arriba diga v0.5.1 CORE.
-7. Confirmar que siguen los inmuebles, publicaciones, contactos y respaldo Dropbox.
-8. Abrir la nueva pestaña Compradores.
-9. Crear UN comprador de prueba y verificar sus matches.
-10. No migrar a main hasta aprobar el flujo completo.
+1. Subir SOLO a radar-v050-dev.
+2. No tocar main/principal.
+3. Reemplazar todos los archivos homónimos.
+4. Netlify redesplegará automáticamente.
+5. Verificar v0.5.1.1 CORE.
+6. NO reimportar los chats: al primer arranque se reauditan los precios existentes.
+7. Abrir el mismo comprador de prueba y volver a guardar para recalcular matches.
+8. En 90%+ solo deben quedar propiedades que cumplan los criterios duros conocidos.
+9. Revisar varios inmuebles cuyo mensaje original tenga un precio explícito y comprobar que el valor de la tarjeta coincida.

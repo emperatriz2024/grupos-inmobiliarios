@@ -157,29 +157,112 @@ function parseNumber(raw) {
   return Number(x);
 }
 
-function extractPrice(text, operation=null) {
-  const t=cleanText(text);
-  const found=[];
-  const pats=[
-    /(?:US\s*\$|USD\s*\$?|\$)\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)/gi,
-    /\b([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{2,7})\s*(?:US\$|USD|\$)/gi,
-    /\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*k\b/gi,
-    /\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*mil\b/gi,
-    /\b(?:precio(?:\s+de\s+(?:venta|inversion))?|ref(?:erencia)?\.?|canon)\s*[:.\-]?\s*(?:us\s*\$|usd)?\s*([0-9]{2,3}(?:[.,][0-9]{3})+|[0-9]{2,7})/gi
-  ];
-  pats.forEach((rx,idx)=>{
-    for(const m of t.matchAll(rx)){
-      let v=parseNumber(m[1]);
-      if(idx===2 || idx===3) v*=1000;
-      if(v>=10 && v<=50000000) found.push({pos:m.index,value:v,priority:idx===4?-1:0});
-    }
-  });
-  found.sort((a,b)=>a.priority-b.priority || a.pos-b.pos);
-  let value=found[0]?.value ?? null;
-  if(operation==='Venta' && value!=null && value>=10 && value<1000) value*=1000;
-  return value;
+function priceContextFlags(line=''){
+  const n=normalizeText(line);
+  return {
+    negative:/\b(condominio|mantenimiento|mensualidad|cuota|reserva|apartado|honorarios|comision|contrato|deposito|adelantad[oa]s?|gastos?|servicios?)\b/i.test(n),
+    current:/\b(ahora|oferta|nuevo\s+precio|precio\s+actual|rebaja|remate|precio\s+final)\b/i.test(n),
+    old:/\b(antes|precio\s+anterior|precio\s+viejo)\b/i.test(n),
+    sale:/\b(precio|precio\s+de\s+venta|venta|vendo|vende|ref(?:erencia)?|inversion|valor)\b/i.test(n),
+    rent:/\b(canon|alquiler|mensual)\b/i.test(n)
+  };
 }
 
+export function extractPriceDetailed(text, operation=null) {
+  const raw=cleanText(text);
+  const candidates=[];
+  const add=(line,lineIndex,pos,rawValue,value,kind,baseScore)=>{
+    if(!Number.isFinite(value)||value<=0||value>50000000)return;
+    const flags=priceContextFlags(line);
+    let score=baseScore;
+    if(flags.negative) score-=90;
+    if(flags.current) score+=18;
+    if(flags.old) score-=18;
+    if(operation==='Venta'&&flags.sale)score+=14;
+    if(operation==='Alquiler'&&flags.rent)score+=14;
+    candidates.push({line:line.trim(),lineIndex,pos,raw:rawValue,value,kind,score,flags});
+  };
+
+  raw.split('\n').slice(0,35).forEach((line,lineIndex)=>{
+    // Highest confidence: explicit commercial label near the amount.
+    const explicit=/\b(precio(?:\s+de\s+(?:venta|inversion))?|ref(?:erencia)?\.?|inversion|valor(?:\s+de\s+venta)?|canon)\s*[:.\-]?\s*(?:us\s*\$|usd\s*\$?|\$)?\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)(?:\s*(k|mil))?/gi;
+    for(const m of line.matchAll(explicit)){
+      let v=parseNumber(m[2]); const shorthand=!!m[3];
+      if(shorthand)v*=1000;
+      else if(operation==='Venta'&&v>=10&&v<1000)v*=1000; // "Precio 130" => 130k; only explicit context.
+      add(line,lineIndex,m.index,m[0],v,'explicit',125);
+    }
+
+    // Explicit shorthand: 130k / 130 mil. Safe for sale prices.
+    const short=/\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*(k|mil)\b/gi;
+    for(const m of line.matchAll(short)){
+      add(line,lineIndex,m.index,m[0],parseNumber(m[1])*1000,'shorthand',105);
+    }
+
+    // Currency amounts. Important guardrail:
+    // "$70" in a SALE is NOT converted to $70,000 unless the line itself says price/ref/venta.
+    const currency=/(?:US\s*\$|USD\s*\$?|\$)\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)/gi;
+    for(const m of line.matchAll(currency)){
+      let v=parseNumber(m[1]);
+      const flags=priceContextFlags(line);
+      if(operation==='Venta'&&v<1000){
+        if(flags.sale) v*=1000;
+        else continue; // likely condo fee, service, reservation, etc.
+      }
+      add(line,lineIndex,m.index,m[0],v,'currency',72);
+    }
+
+    const currencyAfter=/\b([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{2,7})\s*(?:US\$|USD|\$)/gi;
+    for(const m of line.matchAll(currencyAfter)){
+      let v=parseNumber(m[1]);
+      const flags=priceContextFlags(line);
+      if(operation==='Venta'&&v<1000){
+        if(flags.sale)v*=1000; else continue;
+      }
+      add(line,lineIndex,m.index,m[0],v,'currency',70);
+    }
+  });
+
+  const usable=candidates.filter(c=>c.score>=35).sort((a,b)=>b.score-a.score || a.lineIndex-b.lineIndex || a.pos-b.pos);
+  if(!usable.length) return {value:null,confidence:'missing',status:'missing',evidence:null,candidates:[]};
+
+  const best=usable[0];
+  const peers=usable.filter(c=>c.score>=best.score-8);
+  const materiallyDifferent=peers.filter(c=>Math.abs(c.value-best.value)/Math.max(c.value,best.value)>.12);
+  const ambiguous=materiallyDifferent.length>0;
+
+  let confidence=best.score>=115?'high':best.score>=85?'medium':'low';
+  if(ambiguous&&confidence==='high')confidence='medium';
+  if(ambiguous&&confidence==='medium')confidence='low';
+
+  return {
+    value:best.value,
+    confidence,
+    status:ambiguous?'ambiguous':'ok',
+    evidence:best.line||best.raw,
+    candidates:usable.slice(0,8).map(c=>({value:c.value,score:c.score,kind:c.kind,line:c.line}))
+  };
+}
+
+function extractPrice(text, operation=null) {
+  return extractPriceDetailed(text,operation).value;
+}
+
+export function auditExistingPropertyPrice(property={}){
+  const detail=extractPriceDetailed(property.text||'',property.operation||null);
+  const old=property.price_usd==null?null:Number(property.price_usd);
+  const next=detail.value==null?null:Number(detail.value);
+  const changed=(old==null)!=(next==null)||(old!=null&&next!=null&&Math.abs(old-next)>0.01);
+  return {
+    ...property,
+    price_usd:next,
+    price_confidence:detail.confidence,
+    price_audit_status:changed?'corrected':detail.status,
+    price_evidence:detail.evidence,
+    price_audit_version:'0511',
+    price_audited:true
+  };
+}
 function firstNumber(n, patterns) {
   for (const rx of patterns) {
     const m=n.match(rx); if(m) return parseNumber(m[1]);
@@ -224,7 +307,8 @@ export function extractProperty(message, options={}) {
   const smartLocation=resolveLocationRecord(message.text,options.locationCatalog||null,{existingComplex:residenceDetected});
   const locationTerms=smartLocation.location_terms?.length?smartLocation.location_terms:extractLocationTerms(message.text);
   const zone=smartLocation.zone||bestZone(message.text,locationTerms[0]||null);
-  const price=extractPrice(message.text, operation);
+  const priceDetail=extractPriceDetailed(message.text, operation);
+  const price=priceDetail.value;
   const rec={
     group:message.group,date:message.date,date_iso:message.date_iso,date_order:message.date_order,time:message.time,sender:message.sender,
     operation,property_type:propertyType,
@@ -232,6 +316,7 @@ export function extractProperty(message, options={}) {
     zone_id:smartLocation.zone_id,zone,zone_detected:smartLocation.zone_detected,zone_detected_norm:smartLocation.zone_detected_norm,zone_confidence:smartLocation.zone_confidence,zone_matches:smartLocation.zone_matches,
     complex_id:smartLocation.complex_id,complex_detected:smartLocation.complex_detected,complex_detected_norm:smartLocation.complex_detected_norm,complex_confidence:smartLocation.complex_confidence,location_requires_review:smartLocation.requires_review,
     location_terms:locationTerms,residence:smartLocation.complex||smartLocation.complex_detected||null,price_usd:price,
+    price_confidence:priceDetail.confidence,price_audit_status:priceDetail.status,price_evidence:priceDetail.evidence,price_audit_version:'0511',price_audited:true,
     area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|mts?|metros(?:\s+cuadrados?)?)\b/i]),
     bedrooms:firstNumber(n,[/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?)\b/i,/\bhabitaciones?\s*[:\-]?\s*(\d{1,2})\b/i]),
     bathrooms:firstNumber(n,[/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?)\b/i,/\bbanos?\s*[:\-]?\s*(\d{1,2})/i]),

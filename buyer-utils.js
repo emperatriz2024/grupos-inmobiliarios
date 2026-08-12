@@ -115,55 +115,100 @@ function featuresScore(buyer, master){
 }
 
 export function scoreBuyerMaster(buyer, master) {
-  const reasons=[],gaps=[];
-  let earned=0,possible=0;
+  const reasons=[],gaps=[],hardFails=[],unknownHard=[];
+  const tolerance=Math.max(0,Math.min(10,Number(buyer.budget_tolerance||0)))/100;
 
-  for(const gate of [operationGate(buyer,master),typeGate(buyer,master),locationGate(buyer,master)]){
-    if(!gate.pass)return null;
-    earned+=gate.earned||0;possible+=gate.possible||0;
-    if(gate.reason)reasons.push(gate.reason);
-  }
+  // Hard gates: operation, type, exact selected location.
+  const op=operationGate(buyer,master);
+  if(!op.pass)return null;if(op.reason)reasons.push(op.reason);
 
-  const ps=priceScore(buyer,master);if(!ps.pass)return null;
-  earned+=ps.earned;possible+=ps.possible;reasons.push(...ps.reasons);gaps.push(...ps.gaps);
+  const type=typeGate(buyer,master);
+  if(!type.pass)return null;if(type.reason)reasons.push(type.reason);
 
-  const numeric=[
-    ['Habitaciones', num(master.bedrooms), num(buyer.min_bedrooms), 8, 1],
-    ['Baños', num(master.bathrooms), num(buyer.min_bathrooms), 5, 1],
-    ['Puestos', num(master.parking), num(buyer.min_parking), 5, 1]
-  ];
-  for(const [label,value,target,weight,tolerance] of numeric){
-    const r=criterionScore(value,target,weight,{higherIsBetter:true,tolerance});
-    earned+=r.earned;possible+=r.possible;
-    if(target!=null){
-      if(!r.gap) reasons.push(`${label} cumplen`);
-      else gaps.push(`${label}: ${r.gap}`);
+  const loc=locationGate(buyer,master);
+  if(!loc.pass)return null;if(loc.reason)reasons.push(loc.reason);
+
+  // Budget is hard in strict mode. Small over-budget options may survive only as alternatives.
+  const minP=num(buyer.min_price),maxP=num(buyer.max_price),price=num(master.price_usd);
+  if(minP!=null||maxP!=null){
+    if(price==null) unknownHard.push('Precio no detectado');
+    else{
+      if(maxP!=null&&price>maxP*(1+tolerance)){
+        const over=(price-maxP)/maxP;
+        if(over>.15)return null;
+        hardFails.push(`Sobre presupuesto: $${Math.round(price-maxP).toLocaleString('es-VE')}`);
+      }else if(minP!=null&&price<minP) gaps.push('Precio por debajo del rango objetivo');
+      else reasons.push('Dentro del presupuesto');
     }
   }
 
-  const ar=areaScore(buyer,master);
-  earned+=ar.earned;possible+=ar.possible;reasons.push(...ar.reasons);gaps.push(...ar.gaps);
+  const hardMinimums=[
+    ['Habitaciones',num(master.bedrooms),num(buyer.min_bedrooms)],
+    ['Baños',num(master.bathrooms),num(buyer.min_bathrooms)],
+    ['Puestos',num(master.parking),num(buyer.min_parking)]
+  ];
+  for(const [label,value,target] of hardMinimums){
+    if(target==null)continue;
+    if(value==null)unknownHard.push(`${label}: dato no detectado`);
+    else if(value<target)hardFails.push(`${label}: ${value}, mínimo ${target}`);
+    else reasons.push(`${label} cumplen`);
+  }
 
-  const fs=featuresScore(buyer,master);
-  earned+=fs.earned;possible+=fs.possible;reasons.push(...fs.reasons);gaps.push(...fs.gaps);
+  // Required features are hard. False means "not confirmed in text", not necessarily physically absent.
+  for(const f of buyer.required_features||[]){
+    const label=BUYER_FEATURES.find(x=>x[0]===f)?.[1]||f;
+    if(bool(master[f]))reasons.push(`${label} confirmado`);
+    else unknownHard.push(`${label}: no confirmado`);
+  }
 
-  // Recency is always useful, but lightly weighted.
-  possible+=5;
+  // Area remains a soft criterion unless explicitly supplied.
+  let soft=0,softPossible=0;
+  const minA=num(buyer.min_area),maxA=num(buyer.max_area),area=num(master.area_m2);
+  if(minA!=null||maxA!=null){
+    softPossible+=3;
+    if(area==null)gaps.push('Metraje no detectado');
+    else if((minA!=null&&area<minA)||(maxA!=null&&area>maxA))gaps.push(`Metraje fuera del rango (${area} m²)`);
+    else{soft+=3;reasons.push('Metraje dentro del rango');}
+  }
+
+  const desired=buyer.desired_features||[];
+  if(desired.length){
+    softPossible+=3;
+    const hits=desired.filter(f=>bool(master[f]));
+    soft+=3*(hits.length/desired.length);
+    for(const f of hits.slice(0,3))reasons.push(`Deseable: ${BUYER_FEATURES.find(x=>x[0]===f)?.[1]||f}`);
+  }
+
+  softPossible+=4;
   const days=recencyDays(master);
-  if(days<=7){earned+=5;reasons.push('Publicado esta semana');}
-  else if(days<=21){earned+=4;reasons.push('Publicación reciente');}
-  else if(days<=45)earned+=3;
-  else if(days<=60)earned+=2;
+  if(days<=7){soft+=4;reasons.push('Publicado esta semana');}
+  else if(days<=21){soft+=3.5;reasons.push('Publicación reciente');}
+  else if(days<=45)soft+=2;
+  else if(days<=60)soft+=1;
 
-  // Broad buyer profiles can otherwise have a tiny denominator.
-  if(possible<30){possible=30;earned=Math.min(earned+10,possible);}
+  let score,tier,match_kind,strict_ok=false;
 
-  const score=Math.max(0,Math.min(100,Math.round((earned/possible)*100)));
-  if(score<55)return null;
+  if(hardFails.length){
+    // Known violation of a hard rule. Visible only as a commercial alternative.
+    score=Math.min(69,55+Math.round((softPossible?soft/softPossible:0)*14));
+    tier='alternativa';match_kind='alternativa';
+    gaps.unshift(...hardFails);
+  }else if(unknownHard.length){
+    // Potential match, but missing evidence means it cannot be "excellent".
+    score=Math.min(79,70+Math.round((softPossible?soft/softPossible:0)*9));
+    tier='revisar';match_kind='por_verificar';
+    gaps.unshift(...unknownHard);
+  }else{
+    // Every hard criterion that the buyer asked for is known and satisfied.
+    strict_ok=true;match_kind='estricto';tier='excelente';
+    const bonus=softPossible?Math.round((soft/softPossible)*8):8;
+    score=Math.min(100,92+bonus);
+  }
 
-  const tier=score>=90?'excelente':score>=80?'fuerte':score>=70?'buena':'revisar';
   return {
-    score,tier,reasons:[...new Set(reasons)].slice(0,7),gaps:[...new Set(gaps)].slice(0,6),
+    score,tier,match_kind,strict_ok,
+    reasons:[...new Set(reasons)].slice(0,10),
+    gaps:[...new Set(gaps)].slice(0,8),
     recency_days:days
   };
 }
@@ -172,7 +217,11 @@ export function calculateBuyerMatches(buyer, masters=[]) {
   return masters.map(master=>{
     const scored=scoreBuyerMaster(buyer,master);
     return scored?{master,...scored}:null;
-  }).filter(Boolean).sort((a,b)=>b.score-a.score || a.recency_days-b.recency_days);
+  }).filter(Boolean).sort((a,b)=>
+    Number(b.strict_ok)-Number(a.strict_ok) ||
+    b.score-a.score ||
+    a.recency_days-b.recency_days
+  );
 }
 
 export function buyerCriteriaText(buyer={}, locationCatalog={}) {

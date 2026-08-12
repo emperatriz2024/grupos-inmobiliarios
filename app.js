@@ -8,22 +8,22 @@ import {
   syncRadarCore, getRadarCoreStats, getMasterProperties,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=0510';
+} from './db.js?v=0511';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0510';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0510';
-import { isDemandRequest } from './intent-utils.js?v=0510';
-import { consolidateProperties } from './dedupe-utils.js?v=0510';
+} from './search-utils.js?v=0511';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0511';
+import { isDemandRequest } from './intent-utils.js?v=0511';
+import { consolidateProperties } from './dedupe-utils.js?v=0511';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0510';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0510';
-import { normLocation } from './location-catalog.js?v=0510';
-import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0510';
+} from './dropbox.js?v=0511';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0511';
+import { normLocation } from './location-catalog.js?v=0511';
+import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0511';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -210,6 +210,8 @@ function cardHTML(p) {
         <h3>${esc(propertyTitle(p))}</h3>
         <div class="zone">${esc(displayZone(p))}</div>
         <div class="price">${esc(formatMoney(p.price_usd))}</div>
+        ${p.price_audit_status==='ambiguous'?`<div class="priceAuditFlag">△ Precio ambiguo · verificar mensaje</div>`:''}
+        ${p.price_audit_status==='corrected'?`<div class="priceAuditFlag ok">✓ Precio revalidado desde el mensaje</div>`:''}
       </div>
 
       <div class="cardMetaColumn">
@@ -498,6 +500,7 @@ function fillBuyerForm(buyer=null){
   $('#buyerOperation').value=b.operation||'';
   $('#buyerMinPrice').value=b.min_price||'';
   $('#buyerMaxPrice').value=b.max_price||'';
+  $('#buyerBudgetTolerance').value=String(b.budget_tolerance??0);
   $('#buyerMinBedrooms').value=b.min_bedrooms||'';
   $('#buyerMinBathrooms').value=b.min_bathrooms||'';
   $('#buyerMinParking').value=b.min_parking||'';
@@ -523,7 +526,7 @@ function collectBuyerForm(){
     property_types:buyerSelected('buyerTypeChecks'),
     municipality_ids:buyerSelected('buyerMunicipalityChecks'),
     zone_ids:buyerSelected('buyerZoneChecks'),
-    min_price:buyerNumber('buyerMinPrice'),max_price:buyerNumber('buyerMaxPrice'),
+    min_price:buyerNumber('buyerMinPrice'),max_price:buyerNumber('buyerMaxPrice'),budget_tolerance:Number($('#buyerBudgetTolerance').value||0),
     min_bedrooms:buyerNumber('buyerMinBedrooms'),min_bathrooms:buyerNumber('buyerMinBathrooms'),min_parking:buyerNumber('buyerMinParking'),
     min_area:buyerNumber('buyerMinArea'),max_area:buyerNumber('buyerMaxArea'),
     required_features:required,desired_features:desired,notes:$('#buyerNotes').value.trim()
@@ -536,7 +539,7 @@ async function recalculateBuyerMatches(buyer){
   const masters=await getMasterProperties();
   const matches=calculateBuyerMatches(buyer,masters);
   await replaceBuyerMatches(buyer.id,matches.map(m=>({
-    master_id:m.master.id,score:m.score,tier:m.tier,reasons:m.reasons,gaps:m.gaps,recency_days:m.recency_days
+    master_id:m.master.id,score:m.score,tier:m.tier,match_kind:m.match_kind,strict_ok:m.strict_ok,reasons:m.reasons,gaps:m.gaps,recency_days:m.recency_days
   })));
   return matches.length;
 }
@@ -602,7 +605,9 @@ function renderBuyersList(){
 async function openBuyerDialog(buyer=null){
   fillBuyerForm(buyer);$('#buyerDialog').showModal();
 }
-function matchTierLabel(t){return t==='excelente'?'Excelente':t==='fuerte'?'Muy fuerte':t==='buena'?'Buena':'Revisar';}
+function matchTierLabel(t){
+  return t==='excelente'?'Cumple criterios':t==='alternativa'?'Alternativa':'Por verificar';
+}
 function masterMatchCard(master,match){
   const metas=[];
   if(master.area_m2)metas.push(`${master.area_m2} m²`);
@@ -614,7 +619,7 @@ function masterMatchCard(master,match){
     <div class="matchMain">
       <div class="matchTitleRow"><div><h3>${buyerEsc(master.residence||master.property_type||'Inmueble')}</h3><p>${buyerEsc([master.zone,master.municipality].filter(Boolean).join(' · ')||'Ubicación por revisar')}</p></div><b>${buyerEsc(formatMoney(master.price_usd))}</b></div>
       ${metas.length?`<div class="matchMeta">${metas.map(x=>`<span>${buyerEsc(x)}</span>`).join('')}</div>`:''}
-      <div class="matchReasons">${(match.reasons||[]).slice(0,4).map(x=>`<span>✓ ${buyerEsc(x)}</span>`).join('')}</div>
+      <div class="matchReasons">${(match.reasons||[]).slice(0,6).map(x=>`<span>✓ ${buyerEsc(x)}</span>`).join('')}</div>
       ${(match.gaps||[]).length?`<div class="matchGaps">${match.gaps.slice(0,3).map(x=>`<span>△ ${buyerEsc(x)}</span>`).join('')}</div>`:''}
       <button class="viewMatchedProperty ghost" data-master="${buyerEsc(master.id)}">Ver propiedad</button>
     </div>
@@ -680,7 +685,7 @@ $('#deleteBuyerBtn')?.addEventListener('click',async()=>{
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0510',{type:'module'});
+    const worker = new Worker('./worker.js?v=0511',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -798,7 +803,16 @@ $('#refreshLocationCatalog')?.addEventListener('click',async()=>{locationCatalog
 async function loadData() {
   if(!locationCatalog.zones?.length){await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();}
   await purgeOldProperties(60);
-  const rawProperties=await getAllProperties();
+  let rawProperties=await getAllProperties();
+  const priceAuditNeeded=rawProperties.filter(p=>p.price_audit_version!=='0511');
+  if(priceAuditNeeded.length){
+    const audited=priceAuditNeeded.map(auditExistingPropertyPrice);
+    await patchPropertyPriceAudits(audited);
+    rawProperties=await getAllProperties();
+    const corrected=audited.filter((p,i)=>p.price_audit_status==='corrected').length;
+    const ambiguous=audited.filter(p=>p.price_audit_status==='ambiguous').length;
+    localStorage.setItem('gi_price_audit_0511',JSON.stringify({at:new Date().toISOString(),checked:audited.length,corrected,ambiguous}));
+  }
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
   const consolidated=consolidateProperties(valid);
   await syncRadarCore(valid,consolidated);
@@ -1232,5 +1246,5 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0510')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0510').catch(()=>{});
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0511').catch(()=>{});
