@@ -7,21 +7,21 @@ import {
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations,
   syncRadarCore, getRadarCoreStats,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=0502';
+} from './db.js?v=05021';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0502';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0502';
-import { isDemandRequest } from './intent-utils.js?v=0502';
-import { consolidateProperties } from './dedupe-utils.js?v=0502';
+} from './search-utils.js?v=05021';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=05021';
+import { isDemandRequest } from './intent-utils.js?v=05021';
+import { consolidateProperties } from './dedupe-utils.js?v=05021';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0502';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0502';
-import { normLocation } from './location-catalog.js?v=0502';
+} from './dropbox.js?v=05021';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=05021';
+import { normLocation } from './location-catalog.js?v=05021';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -438,7 +438,7 @@ async function renderSaved() {
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0502',{type:'module'});
+    const worker = new Worker('./worker.js?v=05021',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -607,9 +607,27 @@ function renderBackupState(){
 function backupFileName(createdAt=new Date().toISOString()){
   return `radar-respaldo-${createdAt.replace(/[:.]/g,'-')}.json`;
 }
-function downloadTextFile(text,name){
-  const blob=new Blob([text],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+let preparedBackup=null;
+
+function clearPreparedBackup(){
+  if(preparedBackup?.url){try{URL.revokeObjectURL(preparedBackup.url);}catch{}}
+  preparedBackup=null;
+  const box=$('#backupReadyBox');if(box)box.hidden=true;
+  const link=$('#backupDirectLink');if(link){link.hidden=true;link.removeAttribute('href');}
+}
+function prepareBackupFile(snapshot,text){
+  clearPreparedBackup();
+  const name=backupFileName(snapshot.created_at);
+  const blob=new Blob([text],{type:'application/json'});
+  let file=null;
+  try{file=new File([blob],name,{type:'application/json',lastModified:Date.now()});}catch{}
+  const url=URL.createObjectURL(blob);
+  preparedBackup={snapshot,text,name,blob,file,url};
+  const box=$('#backupReadyBox');if(box)box.hidden=false;
+  if($('#backupReadyName'))$('#backupReadyName').textContent=name;
+  if($('#backupReadySize'))$('#backupReadySize').textContent=prettySize(blob.size);
+  const link=$('#backupDirectLink');
+  if(link){link.href=url;link.download=name;link.hidden=false;}
 }
 async function buildBackup(){
   setBackupStatus('Preparando respaldo completo…','working');
@@ -618,11 +636,43 @@ async function buildBackup(){
 async function downloadLocalBackup(){
   try{
     const snapshot=await buildBackup(),text=JSON.stringify(snapshot);
-    downloadTextFile(text,backupFileName(snapshot.created_at));
-    rememberBackup('archivo',snapshot.created_at);
+    prepareBackupFile(snapshot,text);
     const x=backupSnapshotSummary(snapshot);
-    setBackupStatus(`Respaldo descargado: ${x.masters.toLocaleString('es-VE')} inmuebles maestros · ${x.sources.toLocaleString('es-VE')} publicaciones fuente.`,'ok');
+    setBackupStatus(`Respaldo listo: ${x.masters.toLocaleString('es-VE')} inmuebles maestros · ${x.sources.toLocaleString('es-VE')} publicaciones fuente. Ahora toca “Guardar en Archivos”.`,'ok');
   }catch(e){setBackupStatus(`No pude crear el respaldo: ${e.message}`,'error');}
+}
+async function savePreparedBackup(){
+  if(!preparedBackup)return setBackupStatus('Primero toca “Preparar respaldo”.','warn');
+  const {snapshot,file}=preparedBackup;
+
+  // En iPhone el flujo más fiable es abrir el menú nativo de compartir
+  // desde un segundo toque del usuario, cuando el archivo ya está preparado.
+  if(file && navigator.share){
+    try{
+      const shareData={files:[file],title:'Respaldo Radar Inmobiliario'};
+      if(!navigator.canShare || navigator.canShare(shareData)){
+        await navigator.share(shareData);
+        rememberBackup('archivo',snapshot.created_at);
+        setBackupStatus('Menú de iPhone abierto. Si elegiste “Guardar en Archivos”, el respaldo quedó guardado.','ok');
+        return;
+      }
+    }catch(e){
+      if(e?.name==='AbortError'){
+        setBackupStatus('No se guardó el respaldo porque cerraste el menú de compartir.','warn');
+        return;
+      }
+      console.warn('Web Share no disponible para archivo; uso descarga directa.',e);
+    }
+  }
+
+  // Respaldo alternativo: el enlace ya está creado y este clic ocurre
+  // directamente dentro del gesto del usuario.
+  const link=$('#backupDirectLink');
+  if(link?.href){
+    link.click();
+    rememberBackup('archivo',snapshot.created_at);
+    setBackupStatus('Descarga solicitada. Si tu navegador no muestra el archivo, usa “Descarga directa” o abre la app en Safari.','ok');
+  }else setBackupStatus('No pude preparar el archivo para guardar. Vuelve a prepararlo.','error');
 }
 async function restoreSnapshotWithConfirmation(snapshot,sourceLabel){
   const x=backupSnapshotSummary(snapshot),when=x.created_at?new Date(x.created_at).toLocaleString('es-VE'):'fecha desconocida';
@@ -656,6 +706,13 @@ async function maybeAutoBackup(){
   return ok;
 }
 $('#downloadBackup')?.addEventListener('click',downloadLocalBackup);
+$('#saveBackupFile')?.addEventListener('click',savePreparedBackup);
+$('#backupDirectLink')?.addEventListener('click',()=>{
+  if(preparedBackup){
+    rememberBackup('archivo',preparedBackup.snapshot.created_at);
+    setBackupStatus('Descarga directa solicitada. Revisa Descargas/Archivos.','ok');
+  }
+});
 $('#restoreLocalBackup')?.addEventListener('click',()=>$('#backupFileInput')?.click());
 $('#backupFileInput')?.addEventListener('change',async e=>{
   const file=e.target.files?.[0];if(!file)return;
@@ -932,4 +989,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0502')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0502').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=050211').catch(()=>{});

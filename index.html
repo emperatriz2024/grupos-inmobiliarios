@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0502" />
+  <link rel="stylesheet" href="./styles.css?v=05021" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.0.2 CORE</div>
+      <div class="version">v0.5.0.2.1 CORE</div>
     </header>
 
     <section class="stats">
@@ -199,10 +199,18 @@
           <div><strong id="backupScopeLabel">Base completa</strong><span>inmuebles · fuentes · contactos · favoritos</span></div>
         </div>
         <div class="backupActions">
-          <button id="downloadBackup" class="ghost" type="button">↓ Descargar respaldo</button>
+          <button id="downloadBackup" class="ghost" type="button">1. Preparar respaldo</button>
           <button id="restoreLocalBackup" class="ghost" type="button">↥ Restaurar archivo</button>
           <button id="backupDropboxNow" class="primary" type="button">☁ Guardar en Dropbox</button>
           <button id="restoreDropboxBackup" class="ghost" type="button">↻ Restaurar desde Dropbox</button>
+        </div>
+        <div id="backupReadyBox" class="backupReadyBox" hidden>
+          <div class="backupReadyFile">
+            <div><b id="backupReadyName">Respaldo preparado</b><small id="backupReadySize"></small></div>
+          </div>
+          <button id="saveBackupFile" class="primary" type="button">2. Guardar en Archivos</button>
+          <a id="backupDirectLink" class="ghost backupDirectLink" href="#" download hidden>Descarga directa</a>
+          <small class="backupIOSHint">En iPhone se abrirá el menú de compartir. Elige <b>Guardar en Archivos</b> y selecciona iCloud Drive o “En mi iPhone”.</small>
         </div>
         <input id="backupFileInput" type="file" accept=".json,application/json" hidden />
         <label class="backupAuto"><input id="autoBackupDropbox" type="checkbox"> <span>Respaldo automático en Dropbox después de cada importación</span></label>
@@ -244,7 +252,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0.2 · 60 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0.2.1 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -292,6 +300,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0502"></script>
+  <script type="module" src="./app.js?v=05021"></script>
 </body>
 </html>

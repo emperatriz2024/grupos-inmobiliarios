@@ -1,12 +1,10 @@
-RADAR INMOBILIARIO v0.5.0.2 CORE DEV
-=====================================
+RADAR INMOBILIARIO v0.5.0.2.1 CORE DEV — iPhone Backup Fix
+============================================================
 
-1. Subir todos los archivos a la rama radar-v050-dev.
+1. Subir SOLO a la rama radar-v050-dev.
 2. No tocar main/principal.
-3. Esperar el deploy automático de Netlify.
-4. Verificar arriba: v0.5.0.2 CORE.
-5. En Importar debe aparecer “Respaldo del Radar”.
-6. Antes de conectar Dropbox, registrar exactamente esta Redirect URI en tu app de Dropbox:
-   https://radar-inmobiliario-dev.netlify.app/
-7. El botón “Descargar respaldo” funciona incluso sin Dropbox.
-8. El respaldo automático de Dropbox solo funciona después de conectar Dropbox y activarlo.
+3. Reemplazar los archivos homónimos con los de este ZIP.
+4. Netlify redesplegará automáticamente.
+5. Verificar que la app muestre v0.5.0.2.1 CORE.
+6. Probar: Importar > Respaldo del Radar > Preparar respaldo > Guardar en Archivos.
+7. En el menú de iPhone elegir Guardar en Archivos.
