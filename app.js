@@ -1,6 +1,6 @@
 
 import {
-  mergeProperties, addImport, getStats, getRecentImports, clearDatabase,
+  mergeProperties, patchPropertyPriceAudits, addImport, getStats, getRecentImports, clearDatabase,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties,
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
@@ -8,22 +8,23 @@ import {
   syncRadarCore, getRadarCoreStats, getMasterProperties,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=0511';
+} from './db.js?v=0512';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0511';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0511';
-import { isDemandRequest } from './intent-utils.js?v=0511';
-import { consolidateProperties } from './dedupe-utils.js?v=0511';
+} from './search-utils.js?v=0512';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0512';
+import { isDemandRequest } from './intent-utils.js?v=0512';
+import { consolidateProperties } from './dedupe-utils.js?v=0512';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0511';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0511';
-import { normLocation } from './location-catalog.js?v=0511';
-import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0511';
+} from './dropbox.js?v=0512';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0512';
+import { normLocation } from './location-catalog.js?v=0512';
+import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0512';
+import { auditExistingPropertyPrice } from './engine.js?v=0512';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -685,7 +686,7 @@ $('#deleteBuyerBtn')?.addEventListener('click',async()=>{
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0511',{type:'module'});
+    const worker = new Worker('./worker.js?v=0512',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1247,4 +1248,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0511').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0512').catch(()=>{});

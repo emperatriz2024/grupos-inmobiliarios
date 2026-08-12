@@ -1,6 +1,6 @@
-import { isDemandRequest } from './intent-utils.js?v=0502';
-import { extractLocationTerms, normLoc } from './location-utils.js?v=0502';
-import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=0502';
+import { isDemandRequest } from './intent-utils.js?v=0512';
+import { extractLocationTerms, normLoc } from './location-utils.js?v=0512';
+import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=0512';
 
 const ACCENTS = {á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
 

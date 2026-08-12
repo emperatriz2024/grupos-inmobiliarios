@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0511';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0511';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0511';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0511';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0511';
+import { isDemandRequest } from './intent-utils.js?v=0512';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0512';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0512';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0512';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0512';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
