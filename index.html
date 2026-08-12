@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=05021" />
+  <link rel="stylesheet" href="./styles.css?v=0510" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.0.2.1 CORE</div>
+      <div class="version">v0.5.1 CORE</div>
     </header>
 
     <section class="stats">
@@ -129,6 +129,38 @@
       <button id="loadMore" class="ghost loadMore" hidden>Mostrar más</button>
     </section>
 
+    <section id="viewBuyers" class="view">
+      <div class="buyersHero">
+        <div>
+          <div class="eyebrow buyersEyebrow">RADAR COMERCIAL</div>
+          <h2>Mis Compradores</h2>
+          <p>Guarda lo que busca cada cliente y deja que Radar compare automáticamente contra tus inmuebles únicos.</p>
+        </div>
+        <button id="newBuyerBtn" class="primary buyerNewBtn" type="button">＋ Nuevo comprador</button>
+      </div>
+
+      <section class="buyerStats">
+        <div><strong id="buyersActiveCount">0</strong><span>activos</span></div>
+        <div><strong id="buyersHotCount">0</strong><span>urgentes</span></div>
+        <div><strong id="buyersMatchesCount">0</strong><span>matches</span></div>
+      </section>
+
+      <div class="buyerToolbar">
+        <label class="buyerSearch"><span>⌕</span><input id="buyerSearchInput" placeholder="Buscar comprador..." autocomplete="off"></label>
+        <select id="buyerStatusFilter">
+          <option value="">Todos</option>
+          <option value="active">Activos</option>
+          <option value="paused">Pausados</option>
+          <option value="closed">Cerrados</option>
+        </select>
+      </div>
+
+      <section id="buyersList"></section>
+      <div id="buyersEmpty" class="empty" hidden>
+        Todavía no has creado compradores. Toca <b>Nuevo comprador</b> para comenzar el matching.
+      </div>
+    </section>
+
     <section id="viewImport" class="view">
       <section class="card dropboxCard">
         <div class="sectionTitle">
@@ -182,14 +214,14 @@
         <div class="radarCoreStats">
           <div class="radarMetric primaryMetric"><strong id="radarMasterCount">0</strong><span>inmuebles maestros</span><small>inventario único</small></div>
           <div class="radarMetric"><strong id="radarSourceCount">0</strong><span>publicaciones fuente</span><small>apariciones detectadas</small></div>
-          <div class="radarMetric"><strong id="radarBuyerCount">0</strong><span>compradores</span><small>próximo módulo</small></div>
-          <div class="radarMetric"><strong id="radarMatchCount">0</strong><span>matches</span><small>próximo módulo</small></div>
+          <div class="radarMetric"><strong id="radarBuyerCount">0</strong><span>compradores</span><small>perfiles activos y pausados</small></div>
+          <div class="radarMetric"><strong id="radarMatchCount">0</strong><span>matches</span><small>coincidencias calculadas</small></div>
         </div>
         <div class="radarInsight">
           <div><span>Promedio de apariciones por inmueble</span><strong><b id="radarAvgAppearances">0,0</b>×</strong></div>
           <small id="radarGroupingNote">Sin publicaciones vinculadas todavía.</small>
         </div>
-        <small class="smartLocationNote">Base preparada para Instagram, portales, Marketplace asistido y matching de compradores en próximas versiones.</small>
+        <small class="smartLocationNote">Radar ya cruza compradores con inmuebles maestros. Las fuentes externas seguirán entrando en próximas versiones.</small>
       </section>
 
       <section class="card backupCard">
@@ -213,7 +245,7 @@
           <small class="backupIOSHint">En iPhone se abrirá el menú de compartir. Elige <b>Guardar en Archivos</b> y selecciona iCloud Drive o “En mi iPhone”.</small>
         </div>
         <input id="backupFileInput" type="file" accept=".json,application/json" hidden />
-        <label class="backupAuto"><input id="autoBackupDropbox" type="checkbox"> <span>Respaldo automático en Dropbox después de cada importación</span></label>
+        <label class="backupAuto"><input id="autoBackupDropbox" type="checkbox"> <span>Respaldo automático en Dropbox después de importaciones y cambios de compradores</span></label>
         <div id="backupStatus" class="backupStatus">El respaldo no incluye contraseñas ni tokens de Dropbox.</div>
       </section>
 
@@ -252,7 +284,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0.2.1 · 60 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.1 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -270,6 +302,126 @@
       <section id="savedResults"></section>
       <div id="savedEmpty" class="empty" hidden>No has guardado propiedades todavía.</div>
     </section>
+
+    <dialog id="buyerDialog" class="buyerDialog">
+      <form id="buyerForm" method="dialog" class="buyerForm">
+        <div class="dialogHead buyerDialogHead">
+          <div><span>PERFIL DE BÚSQUEDA</span><h2 id="buyerDialogTitle">Nuevo comprador</h2></div>
+          <button id="closeBuyerDialog" type="button">×</button>
+        </div>
+        <div class="buyerFormBody">
+          <input id="buyerId" type="hidden">
+
+          <section class="buyerFormSection">
+            <h3>Cliente</h3>
+            <div class="buyerFormGrid">
+              <label class="fullSpan">Nombre *
+                <input id="buyerName" required placeholder="Ej. María González">
+              </label>
+              <label>WhatsApp
+                <input id="buyerPhone" inputmode="tel" placeholder="0412-0000000">
+              </label>
+              <label>Urgencia
+                <select id="buyerUrgency">
+                  <option value="alta">Alta</option>
+                  <option value="media" selected>Media</option>
+                  <option value="baja">Baja</option>
+                </select>
+              </label>
+              <label>Estado
+                <select id="buyerStatus">
+                  <option value="active">Activo</option>
+                  <option value="paused">Pausado</option>
+                  <option value="closed">Cerrado</option>
+                </select>
+              </label>
+              <label>Operación
+                <select id="buyerOperation">
+                  <option value="">Compra o alquiler</option>
+                  <option value="Venta">Compra</option>
+                  <option value="Alquiler">Alquiler</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Tipo de inmueble</h3>
+            <div id="buyerTypeChecks" class="buyerCheckGrid"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Ubicación</h3>
+            <p class="buyerHelp">Puedes seleccionar varios municipios y varias zonas. Si eliges zonas, Radar les dará prioridad exacta.</p>
+            <div id="buyerMunicipalityChecks" class="buyerChoiceList compactChoiceList"></div>
+            <div class="buyerZoneSearchWrap"><input id="buyerZoneSearch" placeholder="Filtrar zonas..."></div>
+            <div id="buyerZoneChecks" class="buyerChoiceList zoneChoiceList"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Presupuesto y espacios</h3>
+            <div class="buyerFormGrid">
+              <label>Precio mínimo
+                <input id="buyerMinPrice" type="number" inputmode="numeric" placeholder="0">
+              </label>
+              <label>Precio máximo
+                <input id="buyerMaxPrice" type="number" inputmode="numeric" placeholder="80000">
+              </label>
+              <label>Habitaciones mín.
+                <select id="buyerMinBedrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+              </label>
+              <label>Baños mín.
+                <select id="buyerMinBathrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+              </label>
+              <label>Puestos mín.
+                <select id="buyerMinParking"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option></select>
+              </label>
+              <label>m² mínimo
+                <input id="buyerMinArea" type="number" inputmode="numeric" placeholder="0">
+              </label>
+              <label>m² máximo
+                <input id="buyerMaxArea" type="number" inputmode="numeric" placeholder="500">
+              </label>
+            </div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Características obligatorias</h3>
+            <p class="buyerHelp">Si no están confirmadas en una publicación, Radar baja el puntaje pero no elimina automáticamente el inmueble.</p>
+            <div id="buyerRequiredFeatures" class="buyerCheckGrid"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Características deseables</h3>
+            <div id="buyerDesiredFeatures" class="buyerCheckGrid"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Notas</h3>
+            <textarea id="buyerNotes" rows="4" placeholder="Ej. Cliente con liquidez inmediata, visita después de las 4 p. m..."></textarea>
+          </section>
+
+          <div class="buyerFormActions">
+            <button id="deleteBuyerBtn" type="button" class="dangerBuyerBtn" hidden>Eliminar comprador</button>
+            <button id="saveBuyerBtn" type="submit" class="primary">Guardar y calcular matches</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="buyerMatchesDialog" class="buyerMatchesDialog">
+      <div class="dialogHead">
+        <div><span>MATCHING AUTOMÁTICO</span><h2 id="buyerMatchesTitle">Coincidencias</h2></div>
+        <button id="closeBuyerMatchesDialog" type="button">×</button>
+      </div>
+      <div class="buyerMatchesSummary" id="buyerMatchesSummary"></div>
+      <div class="buyerMatchFilters">
+        <button class="matchFilterBtn active" data-min-score="0">Todos</button>
+        <button class="matchFilterBtn" data-min-score="90">90%+</button>
+        <button class="matchFilterBtn" data-min-score="80">80%+</button>
+      </div>
+      <div id="buyerMatchesList" class="buyerMatchesList"></div>
+    </dialog>
 
     <dialog id="multiSelectorDialog" class="multiSelectorDialog">
       <div class="selectorSheet">
@@ -296,10 +448,11 @@
 
   <nav class="bottomNav">
     <button data-view="viewSearch" class="active"><span>⌕</span>Buscar</button>
+    <button data-view="viewBuyers"><span>◎</span>Compradores</button>
     <button data-view="viewImport"><span>＋</span>Importar</button>
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=05021"></script>
+  <script type="module" src="./app.js?v=0510"></script>
 </body>
 </html>

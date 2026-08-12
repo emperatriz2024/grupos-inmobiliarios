@@ -5,23 +5,25 @@ import {
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations,
-  syncRadarCore, getRadarCoreStats,
+  syncRadarCore, getRadarCoreStats, getMasterProperties,
+  getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=05021';
+} from './db.js?v=0510';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=05021';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=05021';
-import { isDemandRequest } from './intent-utils.js?v=05021';
-import { consolidateProperties } from './dedupe-utils.js?v=05021';
+} from './search-utils.js?v=0510';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0510';
+import { isDemandRequest } from './intent-utils.js?v=0510';
+import { consolidateProperties } from './dedupe-utils.js?v=0510';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=05021';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=05021';
-import { normLocation } from './location-catalog.js?v=05021';
+} from './dropbox.js?v=0510';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0510';
+import { normLocation } from './location-catalog.js?v=0510';
+import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0510';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -39,6 +41,10 @@ let selectedZones=new Set();
 let zoneCatalog=[];
 let selectorMode=null;
 let selectorDraft=new Set();
+let buyers=[];
+let allBuyerMatches=[];
+let currentMatchBuyerId=null;
+let buyerMatchMinScore=0;
 const SEARCH_SCROLL_KEY='gi_search_scroll_v042';
 const SEARCH_CARD_KEY='gi_search_card_v042';
 const SEARCH_STATE_KEY='gi_search_state_v042';
@@ -149,6 +155,7 @@ function showView(id) {
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === id));
   document.querySelectorAll('.bottomNav button').forEach(b => b.classList.toggle('active', b.dataset.view === id));
   if (id === 'viewSaved') renderSaved();
+  if (id === 'viewBuyers') refreshBuyersData();
 }
 document.querySelectorAll('.bottomNav button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
 
@@ -436,9 +443,244 @@ async function renderSaved() {
 }
 
 
+
+// ---------- Mis Compradores v0.5.1 -------------------------------------------
+const BUYER_TYPES=['Apartamento','Townhouse','Casa','Penthouse','Terreno','Local comercial','Oficina','Galpón'];
+
+function buyerEsc(v=''){return esc(v);}
+function buyerSelected(containerId){
+  return [...document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)].map(x=>x.value);
+}
+function buyerValue(id){
+  const el=$('#'+id),v=el?.value?.trim?.()??el?.value;
+  return v===''||v==null?null:v;
+}
+function buyerNumber(id){
+  const v=buyerValue(id),n=Number(v);return Number.isFinite(n)&&n>0?n:null;
+}
+function buyerStatusLabel(status){
+  return status==='paused'?'Pausado':status==='closed'?'Cerrado':'Activo';
+}
+function buyerUrgencyLabel(u){return u==='alta'?'Urgente':u==='baja'?'Baja':'Media';}
+
+function renderBuyerTypeChecks(selected=[]){
+  const set=new Set(selected||[]),box=$('#buyerTypeChecks');if(!box)return;
+  box.innerHTML=BUYER_TYPES.map(t=>`<label><input type="checkbox" value="${buyerEsc(t)}" ${set.has(t)?'checked':''}> ${buyerEsc(t)}</label>`).join('');
+}
+function renderBuyerFeatureChecks(required=[],desired=[]){
+  const req=new Set(required||[]),des=new Set(desired||[]);
+  const html=set=>BUYER_FEATURES.map(([key,label])=>`<label><input type="checkbox" value="${buyerEsc(key)}" ${set.has(key)?'checked':''}> ${buyerEsc(label)}</label>`).join('');
+  if($('#buyerRequiredFeatures'))$('#buyerRequiredFeatures').innerHTML=html(req);
+  if($('#buyerDesiredFeatures'))$('#buyerDesiredFeatures').innerHTML=html(des);
+}
+function renderBuyerMunicipalities(selected=[]){
+  const set=new Set(selected||[]),box=$('#buyerMunicipalityChecks');if(!box)return;
+  box.innerHTML=(locationCatalog.municipalities||[]).filter(m=>m.activo!==false).map(m=>`<label><input type="checkbox" value="${buyerEsc(m.id)}" ${set.has(m.id)?'checked':''}> ${buyerEsc(m.nombre)}</label>`).join('');
+  box.querySelectorAll('input').forEach(x=>x.addEventListener('change',()=>renderBuyerZones(buyerSelected('buyerZoneChecks'))));
+}
+function renderBuyerZones(selected=[]){
+  const set=new Set(selected||[]),box=$('#buyerZoneChecks');if(!box)return;
+  const munSet=new Set(buyerSelected('buyerMunicipalityChecks'));
+  const q=normLoc($('#buyerZoneSearch')?.value||'');
+  let zones=(locationCatalog.zones||[]).filter(z=>z.activo!==false);
+  if(munSet.size)zones=zones.filter(z=>munSet.has(z.municipio_id));
+  if(q)zones=zones.filter(z=>normLoc(z.nombre).includes(q));
+  zones=zones.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  box.innerHTML=zones.map(z=>`<label><input type="checkbox" value="${buyerEsc(z.id)}" ${set.has(z.id)?'checked':''}> <span>${buyerEsc(z.nombre)}</span><small>${buyerEsc((locationCatalog.municipalities||[]).find(m=>m.id===z.municipio_id)?.nombre||'')}</small></label>`).join('');
+}
+function fillBuyerForm(buyer=null){
+  const b=buyer||{};
+  $('#buyerId').value=b.id||'';
+  $('#buyerName').value=b.name||'';
+  $('#buyerPhone').value=b.phone||'';
+  $('#buyerUrgency').value=b.urgency||'media';
+  $('#buyerStatus').value=b.status||'active';
+  $('#buyerOperation').value=b.operation||'';
+  $('#buyerMinPrice').value=b.min_price||'';
+  $('#buyerMaxPrice').value=b.max_price||'';
+  $('#buyerMinBedrooms').value=b.min_bedrooms||'';
+  $('#buyerMinBathrooms').value=b.min_bathrooms||'';
+  $('#buyerMinParking').value=b.min_parking||'';
+  $('#buyerMinArea').value=b.min_area||'';
+  $('#buyerMaxArea').value=b.max_area||'';
+  $('#buyerNotes').value=b.notes||'';
+  $('#buyerDialogTitle').textContent=b.id?'Editar comprador':'Nuevo comprador';
+  $('#deleteBuyerBtn').hidden=!b.id;
+  $('#buyerZoneSearch').value='';
+  renderBuyerTypeChecks(b.property_types||[]);
+  renderBuyerFeatureChecks(b.required_features||[],b.desired_features||[]);
+  renderBuyerMunicipalities(b.municipality_ids||[]);
+  renderBuyerZones(b.zone_ids||[]);
+}
+function collectBuyerForm(){
+  const name=$('#buyerName').value.trim();
+  if(!name)throw new Error('Escribe el nombre del comprador.');
+  const required=buyerSelected('buyerRequiredFeatures');
+  const desired=buyerSelected('buyerDesiredFeatures').filter(x=>!required.includes(x));
+  return {
+    id:$('#buyerId').value||undefined,name,phone:$('#buyerPhone').value.trim(),
+    urgency:$('#buyerUrgency').value,status:$('#buyerStatus').value,operation:$('#buyerOperation').value||null,
+    property_types:buyerSelected('buyerTypeChecks'),
+    municipality_ids:buyerSelected('buyerMunicipalityChecks'),
+    zone_ids:buyerSelected('buyerZoneChecks'),
+    min_price:buyerNumber('buyerMinPrice'),max_price:buyerNumber('buyerMaxPrice'),
+    min_bedrooms:buyerNumber('buyerMinBedrooms'),min_bathrooms:buyerNumber('buyerMinBathrooms'),min_parking:buyerNumber('buyerMinParking'),
+    min_area:buyerNumber('buyerMinArea'),max_area:buyerNumber('buyerMaxArea'),
+    required_features:required,desired_features:desired,notes:$('#buyerNotes').value.trim()
+  };
+}
+
+async function recalculateBuyerMatches(buyer){
+  if(!buyer?.id)return 0;
+  if(buyer.status==='closed'){await replaceBuyerMatches(buyer.id,[]);return 0;}
+  const masters=await getMasterProperties();
+  const matches=calculateBuyerMatches(buyer,masters);
+  await replaceBuyerMatches(buyer.id,matches.map(m=>({
+    master_id:m.master.id,score:m.score,tier:m.tier,reasons:m.reasons,gaps:m.gaps,recency_days:m.recency_days
+  })));
+  return matches.length;
+}
+async function recalculateAllBuyerMatches({silent=true}={}){
+  const list=await getBuyers();
+  if(!list.length)return 0;
+  let total=0;
+  for(const b of list)total+=await recalculateBuyerMatches(b);
+  if(!silent)alert(`Matching actualizado: ${total.toLocaleString('es-VE')} coincidencias.`);
+  return total;
+}
+async function refreshRadarBuyerCounters(){
+  const s=await getRadarCoreStats();
+  if($('#radarBuyerCount'))$('#radarBuyerCount').textContent=s.buyers.toLocaleString('es-VE');
+  if($('#radarMatchCount'))$('#radarMatchCount').textContent=s.matches.toLocaleString('es-VE');
+}
+function buyerCardHTML(buyer,matches){
+  const top90=matches.filter(m=>m.score>=90).length,top80=matches.filter(m=>m.score>=80).length;
+  const whatsapp=buyerWhatsAppHref(buyer);
+  const urgency=buyer.urgency||'media';
+  return `<article class="buyerCard" data-id="${buyerEsc(buyer.id)}">
+    <div class="buyerCardTop">
+      <div>
+        <div class="buyerBadges">
+          <span class="buyerStatus ${buyerEsc(buyer.status||'active')}">${buyerEsc(buyerStatusLabel(buyer.status))}</span>
+          <span class="buyerUrgency ${buyerEsc(urgency)}">${buyerEsc(buyerUrgencyLabel(urgency))}</span>
+        </div>
+        <h3>${buyerEsc(buyer.name)}</h3>
+        <p>${buyerEsc(buyerCriteriaText(buyer,locationCatalog))}</p>
+      </div>
+      <div class="buyerMatchNumber"><strong>${matches.length.toLocaleString('es-VE')}</strong><span>matches</span></div>
+    </div>
+    <div class="buyerMatchBands">
+      <span><b>${top90}</b> 90%+</span><span><b>${top80}</b> 80%+</span>
+      ${buyer.max_price?`<span><b>$${Number(buyer.max_price).toLocaleString('es-VE')}</b> tope</span>`:''}
+    </div>
+    ${buyer.notes?`<div class="buyerNotesPreview">${buyerEsc(buyer.notes.slice(0,180))}${buyer.notes.length>180?'…':''}</div>`:''}
+    <div class="buyerCardActions">
+      <button class="buyerMatchesBtn primary" data-id="${buyerEsc(buyer.id)}">Ver coincidencias</button>
+      <button class="buyerEditBtn ghost" data-id="${buyerEsc(buyer.id)}">Editar</button>
+      ${whatsapp?`<a class="buyerWhatsappBtn ghost" href="${buyerEsc(whatsapp)}">WhatsApp</a>`:''}
+    </div>
+  </article>`;
+}
+async function refreshBuyersData(){
+  buyers=await getBuyers();allBuyerMatches=await getAllMatches();
+  const active=buyers.filter(b=>b.status==='active').length;
+  const hot=buyers.filter(b=>b.status==='active'&&b.urgency==='alta').length;
+  if($('#buyersActiveCount'))$('#buyersActiveCount').textContent=active.toLocaleString('es-VE');
+  if($('#buyersHotCount'))$('#buyersHotCount').textContent=hot.toLocaleString('es-VE');
+  if($('#buyersMatchesCount'))$('#buyersMatchesCount').textContent=allBuyerMatches.length.toLocaleString('es-VE');
+  renderBuyersList();
+}
+function renderBuyersList(){
+  const box=$('#buyersList');if(!box)return;
+  const q=normLoc($('#buyerSearchInput')?.value||''),status=$('#buyerStatusFilter')?.value||'';
+  const rows=buyers.filter(b=>(!status||b.status===status)&&(!q||normLoc(`${b.name} ${b.phone} ${b.notes||''}`).includes(q)));
+  $('#buyersEmpty').hidden=rows.length>0;
+  box.innerHTML=rows.map(b=>buyerCardHTML(b,allBuyerMatches.filter(m=>m.buyer_id===b.id))).join('');
+  box.querySelectorAll('.buyerMatchesBtn').forEach(btn=>btn.onclick=()=>openBuyerMatches(btn.dataset.id));
+  box.querySelectorAll('.buyerEditBtn').forEach(btn=>btn.onclick=async()=>openBuyerDialog(await getBuyer(btn.dataset.id)));
+}
+async function openBuyerDialog(buyer=null){
+  fillBuyerForm(buyer);$('#buyerDialog').showModal();
+}
+function matchTierLabel(t){return t==='excelente'?'Excelente':t==='fuerte'?'Muy fuerte':t==='buena'?'Buena':'Revisar';}
+function masterMatchCard(master,match){
+  const metas=[];
+  if(master.area_m2)metas.push(`${master.area_m2} m²`);
+  if(master.bedrooms)metas.push(`${master.bedrooms} Hab`);
+  if(master.bathrooms)metas.push(`${master.bathrooms} Baños`);
+  if(master.parking)metas.push(`${master.parking} Puestos`);
+  return `<article class="buyerMatchCard" data-master="${buyerEsc(master.id)}">
+    <div class="matchScore ${buyerEsc(match.tier)}"><strong>${match.score}%</strong><span>${buyerEsc(matchTierLabel(match.tier))}</span></div>
+    <div class="matchMain">
+      <div class="matchTitleRow"><div><h3>${buyerEsc(master.residence||master.property_type||'Inmueble')}</h3><p>${buyerEsc([master.zone,master.municipality].filter(Boolean).join(' · ')||'Ubicación por revisar')}</p></div><b>${buyerEsc(formatMoney(master.price_usd))}</b></div>
+      ${metas.length?`<div class="matchMeta">${metas.map(x=>`<span>${buyerEsc(x)}</span>`).join('')}</div>`:''}
+      <div class="matchReasons">${(match.reasons||[]).slice(0,4).map(x=>`<span>✓ ${buyerEsc(x)}</span>`).join('')}</div>
+      ${(match.gaps||[]).length?`<div class="matchGaps">${match.gaps.slice(0,3).map(x=>`<span>△ ${buyerEsc(x)}</span>`).join('')}</div>`:''}
+      <button class="viewMatchedProperty ghost" data-master="${buyerEsc(master.id)}">Ver propiedad</button>
+    </div>
+  </article>`;
+}
+async function renderBuyerMatches(){
+  const list=$('#buyerMatchesList');if(!list||!currentMatchBuyerId)return;
+  const buyer=buyers.find(b=>b.id===currentMatchBuyerId)||await getBuyer(currentMatchBuyerId);
+  const matches=(await getMatchesForBuyer(currentMatchBuyerId)).filter(m=>Number(m.score||0)>=buyerMatchMinScore);
+  const masters=await getMasterProperties(),map=new Map(masters.map(m=>[m.id,m]));
+  const rows=matches.map(m=>({m,master:map.get(m.master_id)})).filter(x=>x.master);
+  list.innerHTML=rows.length?rows.map(x=>masterMatchCard(x.master,x.m)).join(''):'<div class="empty">No hay coincidencias con este umbral.</div>';
+  list.querySelectorAll('.viewMatchedProperty').forEach(btn=>btn.onclick=()=>{
+    const master=map.get(btn.dataset.master);if(!master)return;
+    const ids=new Set(master.legacy_ids||[]);
+    const p=allProperties.find(x=>ids.has(x.id)||(x.merged_ids||[]).some(id=>ids.has(id)));
+    if(!p)return alert('La ficha original ya no está disponible en el inventario vigente.');
+    $('#buyerMatchesDialog').close();showView('viewSearch');openDetail(p.id);
+  });
+  const all=await getMatchesForBuyer(currentMatchBuyerId);
+  const n90=all.filter(m=>m.score>=90).length,n80=all.filter(m=>m.score>=80).length;
+  $('#buyerMatchesSummary').innerHTML=`<div><strong>${all.length}</strong><span>coincidencias</span></div><div><strong>${n90}</strong><span>90%+</span></div><div><strong>${n80}</strong><span>80%+</span></div>`;
+  $('#buyerMatchesTitle').textContent=buyer?.name||'Coincidencias';
+}
+async function openBuyerMatches(buyerId){
+  currentMatchBuyerId=buyerId;buyerMatchMinScore=0;
+  document.querySelectorAll('.matchFilterBtn').forEach(b=>b.classList.toggle('active',Number(b.dataset.minScore||0)===0));
+  $('#buyerMatchesDialog').showModal();await renderBuyerMatches();
+}
+
+$('#newBuyerBtn')?.addEventListener('click',()=>openBuyerDialog());
+$('#closeBuyerDialog')?.addEventListener('click',()=>$('#buyerDialog').close());
+$('#closeBuyerMatchesDialog')?.addEventListener('click',()=>$('#buyerMatchesDialog').close());
+$('#buyerZoneSearch')?.addEventListener('input',()=>renderBuyerZones(buyerSelected('buyerZoneChecks')));
+$('#buyerSearchInput')?.addEventListener('input',renderBuyersList);
+$('#buyerStatusFilter')?.addEventListener('change',renderBuyersList);
+document.querySelectorAll('.matchFilterBtn').forEach(btn=>btn.addEventListener('click',async()=>{
+  buyerMatchMinScore=Number(btn.dataset.minScore||0);
+  document.querySelectorAll('.matchFilterBtn').forEach(b=>b.classList.toggle('active',b===btn));
+  await renderBuyerMatches();
+}));
+$('#buyerForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  try{
+    const currentId=$('#buyerId').value||null,existing=currentId?await getBuyer(currentId):null;
+    const row=await saveBuyer({...existing,...collectBuyerForm()});
+    $('#saveBuyerBtn').disabled=true;$('#saveBuyerBtn').textContent='Calculando coincidencias…';
+    await recalculateBuyerMatches(row);
+    $('#buyerDialog').close();
+    await refreshBuyersData();await refreshRadarBuyerCounters();
+    await maybeAutoBackup();
+    if(row.status!=='closed')await openBuyerMatches(row.id);
+  }catch(err){alert(err.message);}
+  finally{$('#saveBuyerBtn').disabled=false;$('#saveBuyerBtn').textContent='Guardar y calcular matches';}
+});
+$('#deleteBuyerBtn')?.addEventListener('click',async()=>{
+  const id=$('#buyerId').value;if(!id)return;
+  const b=await getBuyer(id);
+  if(!confirm(`¿Eliminar a ${b?.name||'este comprador'} y sus coincidencias?`))return;
+  await deleteBuyer(id);$('#buyerDialog').close();await refreshBuyersData();await refreshRadarBuyerCounters();await maybeAutoBackup();
+});
+
+
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=05021',{type:'module'});
+    const worker = new Worker('./worker.js?v=0510',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -560,6 +802,7 @@ async function loadData() {
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
   const consolidated=consolidateProperties(valid);
   await syncRadarCore(valid,consolidated);
+  await recalculateAllBuyerMatches({silent:true});
   const radarStats=await getRadarCoreStats();
   contactDirectory=await getAllContacts();contactIndex=buildContactIndex(contactDirectory);
   allProperties=consolidated.map(annotateContactResolution);
@@ -574,6 +817,7 @@ async function loadData() {
   if($('#radarGroupingNote'))$('#radarGroupingNote').textContent=radarStats.sources
     ? `${radarStats.sources.toLocaleString('es-VE')} publicaciones vinculadas a ${radarStats.masters.toLocaleString('es-VE')} inmuebles únicos.`
     : 'Sin publicaciones vinculadas todavía.';
+  await refreshBuyersData();
   buildZoneCatalog();updateSelectorUI();
   const restored=restoreSearchFormState();
   if(restored){currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Búsqueda restaurada';}
@@ -988,5 +1232,5 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0502')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=050211').catch(()=>{});
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0510')).map(k=>caches.delete(k)))).catch(()=>{});}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0510').catch(()=>{});

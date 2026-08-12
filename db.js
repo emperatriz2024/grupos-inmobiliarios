@@ -594,6 +594,75 @@ export async function getMasterProperties(){const db=await openDB(),rows=await r
 export async function getSourcePostsByMaster(masterId){const db=await openDB(),tx=db.transaction(SOURCE_POST_STORE,'readonly'),rows=await allByIndex(tx.objectStore(SOURCE_POST_STORE),'master_id',masterId);db.close();return rows;}
 
 
+
+// ---------- Mis Compradores v0.5.1 -------------------------------------------
+export async function getBuyers(){
+  const db=await openDB(),rows=await reqP(db.transaction(BUYER_STORE,'readonly').objectStore(BUYER_STORE).getAll());db.close();
+  return rows.sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
+}
+export async function getBuyer(id){
+  const db=await openDB(),row=await reqP(db.transaction(BUYER_STORE,'readonly').objectStore(BUYER_STORE).get(id));db.close();return row||null;
+}
+export async function saveBuyer(record={}){
+  const now=new Date().toISOString();
+  const id=record.id||(`buyer_${typeof crypto!=='undefined'&&crypto.randomUUID?crypto.randomUUID():radarHash(now+Math.random())}`);
+  const row={
+    ...record,id,
+    name:String(record.name||'').trim(),
+    phone:String(record.phone||'').trim(),
+    status:record.status||'active',
+    urgency:record.urgency||'media',
+    property_types:[...new Set(record.property_types||[])],
+    municipality_ids:[...new Set(record.municipality_ids||[])],
+    zone_ids:[...new Set(record.zone_ids||[])],
+    required_features:[...new Set(record.required_features||[])],
+    desired_features:[...new Set(record.desired_features||[])],
+    created_at:record.created_at||now,updated_at:now
+  };
+  const db=await openDB();
+  await new Promise((resolve,reject)=>{const tx=db.transaction(BUYER_STORE,'readwrite');tx.objectStore(BUYER_STORE).put(row);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+  db.close();return row;
+}
+export async function deleteBuyer(id){
+  const db=await openDB();
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction([BUYER_STORE,MATCH_STORE],'readwrite');
+    tx.objectStore(BUYER_STORE).delete(id);
+    const idx=tx.objectStore(MATCH_STORE).index('buyer_id'),req=idx.openCursor(IDBKeyRange.only(id));
+    req.onsuccess=()=>{const c=req.result;if(c){c.delete();c.continue();}};
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();
+}
+export async function replaceBuyerMatches(buyerId,rows=[]){
+  const db=await openDB(),now=new Date().toISOString();
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(MATCH_STORE,'readwrite'),store=tx.objectStore(MATCH_STORE),idx=store.index('buyer_id');
+    const req=idx.openCursor(IDBKeyRange.only(buyerId));
+    req.onsuccess=()=>{const c=req.result;if(c){c.delete();c.continue();}};
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  const BATCH=250;
+  for(let i=0;i<rows.length;i+=BATCH){
+    const batch=rows.slice(i,i+BATCH);
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(MATCH_STORE,'readwrite'),store=tx.objectStore(MATCH_STORE);
+      for(const row of batch){
+        store.put({...row,id:row.id||`match_${radarHash(`${buyerId}|${row.master_id}`)}`,buyer_id:buyerId,created_at:row.created_at||now,updated_at:now});
+      }
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+  }
+  db.close();return rows.length;
+}
+export async function getMatchesForBuyer(buyerId){
+  const db=await openDB(),tx=db.transaction(MATCH_STORE,'readonly'),rows=await allByIndex(tx.objectStore(MATCH_STORE),'buyer_id',buyerId);db.close();
+  return rows.sort((a,b)=>Number(b.score||0)-Number(a.score||0));
+}
+export async function getAllMatches(){
+  const db=await openDB(),rows=await reqP(db.transaction(MATCH_STORE,'readonly').objectStore(MATCH_STORE).getAll());db.close();return rows;
+}
+
 // ---------- Radar Backup v0.5.0.2 --------------------------------------------
 const BACKUP_STORES=[
   PROP_STORE,IMPORT_STORE,FAV_STORE,CONTACT_STORE,MUNICIPALITY_STORE,ZONE_STORE,
@@ -615,7 +684,7 @@ export async function exportDatabaseSnapshot(){
   return {
     format:'radar-inmobiliario-backup',
     backup_version:1,
-    app_version:'0.5.0.2',
+    app_version:'0.5.1',
     db_name:DB_NAME,
     db_version:DB_VERSION,
     created_at:new Date().toISOString(),

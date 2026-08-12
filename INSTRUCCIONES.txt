@@ -1,10 +1,13 @@
-RADAR INMOBILIARIO v0.5.0.2.1 CORE DEV — iPhone Backup Fix
-============================================================
+RADAR INMOBILIARIO v0.5.1 — MIS COMPRADORES (DEV)
+===================================================
 
 1. Subir SOLO a la rama radar-v050-dev.
-2. No tocar main/principal.
-3. Reemplazar los archivos homónimos con los de este ZIP.
-4. Netlify redesplegará automáticamente.
-5. Verificar que la app muestre v0.5.0.2.1 CORE.
-6. Probar: Importar > Respaldo del Radar > Preparar respaldo > Guardar en Archivos.
-7. En el menú de iPhone elegir Guardar en Archivos.
+2. No tocar main/principal todavía.
+3. Reemplazar todos los archivos homónimos con los de este ZIP.
+4. Subir también el archivo NUEVO: buyer-utils.js.
+5. Netlify debe redesplegar automáticamente.
+6. Verificar que arriba diga v0.5.1 CORE.
+7. Confirmar que siguen los inmuebles, publicaciones, contactos y respaldo Dropbox.
+8. Abrir la nueva pestaña Compradores.
+9. Crear UN comprador de prueba y verificar sus matches.
+10. No migrar a main hasta aprobar el flujo completo.
