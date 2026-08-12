@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0500" />
+  <link rel="stylesheet" href="./styles.css?v=0501" />
 </head>
 <body>
   <main class="shell">
@@ -20,11 +20,11 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.0 CORE</div>
+      <div class="version">v0.5.0.1 CORE</div>
     </header>
 
     <section class="stats">
-      <div><strong id="propertyCount">0</strong><span>propiedades</span></div>
+      <div><strong id="propertyCount">0</strong><span>inmuebles únicos</span></div>
       <div><strong id="favoriteCount">0</strong><span>guardadas</span></div>
       <div><strong id="importCount">0</strong><span>grupos</span></div>
     </section>
@@ -178,12 +178,16 @@
       </section>
 
       <section class="card radarCoreCard">
-        <div class="sectionTitle"><span>◎</span><div><h2>Radar Core</h2><p>Nueva capa multi-fuente. Tu inventario actual de WhatsApp permanece intacto.</p></div></div>
+        <div class="sectionTitle"><span>◎</span><div><h2>Radar Core</h2><p>Consolidación multi-fuente: un inmueble real puede tener muchas publicaciones.</p></div></div>
         <div class="radarCoreStats">
-          <div><strong id="radarMasterCount">0</strong><span>inmuebles maestros</span></div>
-          <div><strong id="radarSourceCount">0</strong><span>publicaciones fuente</span></div>
-          <div><strong id="radarBuyerCount">0</strong><span>compradores</span></div>
-          <div><strong id="radarMatchCount">0</strong><span>matches</span></div>
+          <div class="radarMetric primaryMetric"><strong id="radarMasterCount">0</strong><span>inmuebles maestros</span><small>inventario único</small></div>
+          <div class="radarMetric"><strong id="radarSourceCount">0</strong><span>publicaciones fuente</span><small>apariciones detectadas</small></div>
+          <div class="radarMetric"><strong id="radarBuyerCount">0</strong><span>compradores</span><small>próximo módulo</small></div>
+          <div class="radarMetric"><strong id="radarMatchCount">0</strong><span>matches</span><small>próximo módulo</small></div>
+        </div>
+        <div class="radarInsight">
+          <div><span>Promedio de apariciones por inmueble</span><strong><b id="radarAvgAppearances">0,0</b>×</strong></div>
+          <small id="radarGroupingNote">Sin publicaciones vinculadas todavía.</small>
         </div>
         <small class="smartLocationNote">Base preparada para Instagram, portales, Marketplace asistido y matching de compradores en próximas versiones.</small>
       </section>
@@ -223,7 +227,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0 · 60 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0.1 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -271,6 +275,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0500"></script>
+  <script type="module" src="./app.js?v=0501"></script>
 </body>
 </html>

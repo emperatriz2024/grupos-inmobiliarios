@@ -244,3 +244,72 @@
 .selectorGroupTitle{position:sticky;top:0;z-index:2;padding:10px 10px 7px;margin:0;background:#0d0d0d;color:var(--gold2);border-bottom:1px solid #302a18;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
 .selectorOptionsList .selectorGroupTitle:not(:first-child){margin-top:8px;border-top:1px solid #242424}
 \n/* v0.5.0 CORE — Radar multi-fuente */\n.radarCoreCard{position:relative;overflow:hidden}\n.radarCoreCard::after{content:"CORE";position:absolute;right:18px;top:18px;font-size:10px;letter-spacing:.14em;font-weight:800;color:#d8b24b;border:1px solid rgba(216,178,75,.35);border-radius:999px;padding:5px 8px}\n.radarCoreStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}\n.radarCoreStats>div{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:13px;display:flex;flex-direction:column;gap:4px}\n.radarCoreStats strong{font-size:22px}.radarCoreStats span{font-size:11px;color:#aaa}\n@media(min-width:720px){.radarCoreStats{grid-template-columns:repeat(4,minmax(0,1fr))}}\n
+
+/* v0.5.0.1 — Radar Core UX polish */
+.radarCoreCard{padding-bottom:18px}
+.radarCoreStats{align-items:stretch}
+.radarCoreStats .radarMetric{
+  min-width:0;
+  padding:15px 14px;
+  gap:5px;
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.025));
+}
+.radarCoreStats .radarMetric.primaryMetric{
+  border-color:rgba(212,175,55,.36);
+  box-shadow:inset 0 0 0 1px rgba(212,175,55,.06);
+}
+.radarCoreStats .radarMetric strong{
+  display:block;
+  font-size:25px;
+  line-height:1;
+  color:var(--gold2);
+  letter-spacing:-.025em;
+}
+.radarCoreStats .radarMetric span{
+  display:block;
+  font-size:12px;
+  line-height:1.25;
+  color:#d3d3d3;
+}
+.radarCoreStats .radarMetric small{
+  display:block;
+  margin-top:2px;
+  font-size:10px;
+  line-height:1.25;
+  color:#777;
+}
+.radarInsight{
+  margin:4px 0 15px;
+  padding:14px 15px;
+  border:1px solid rgba(212,175,55,.22);
+  border-radius:15px;
+  background:rgba(212,175,55,.055);
+}
+.radarInsight>div{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.radarInsight span{
+  font-size:12px;
+  color:#b7b7b7;
+}
+.radarInsight strong{
+  flex:0 0 auto;
+  font-size:18px;
+  color:var(--gold2);
+}
+.radarInsight strong b{font-size:24px}
+.radarInsight>small{
+  display:block;
+  margin-top:7px;
+  color:#777;
+  font-size:10px;
+  line-height:1.35;
+}
+@media(max-width:390px){
+  .radarCoreStats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .radarCoreStats .radarMetric{padding:13px 11px}
+  .radarCoreStats .radarMetric strong{font-size:23px}
+}

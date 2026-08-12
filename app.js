@@ -565,6 +565,11 @@ async function loadData() {
   if($('#radarSourceCount'))$('#radarSourceCount').textContent=radarStats.sources.toLocaleString('es-VE');
   if($('#radarBuyerCount'))$('#radarBuyerCount').textContent=radarStats.buyers.toLocaleString('es-VE');
   if($('#radarMatchCount'))$('#radarMatchCount').textContent=radarStats.matches.toLocaleString('es-VE');
+  const avgAppearances=radarStats.masters>0 ? radarStats.sources/radarStats.masters : 0;
+  if($('#radarAvgAppearances'))$('#radarAvgAppearances').textContent=avgAppearances.toLocaleString('es-VE',{minimumFractionDigits:1,maximumFractionDigits:1});
+  if($('#radarGroupingNote'))$('#radarGroupingNote').textContent=radarStats.sources
+    ? `${radarStats.sources.toLocaleString('es-VE')} publicaciones vinculadas a ${radarStats.masters.toLocaleString('es-VE')} inmuebles únicos.`
+    : 'Sin publicaciones vinculadas todavía.';
   buildZoneCatalog();updateSelectorUI();
   const restored=restoreSearchFormState();
   if(restored){currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Búsqueda restaurada';}
@@ -832,4 +837,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0500')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0500').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0501').catch(()=>{});

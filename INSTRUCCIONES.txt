@@ -1,26 +1,9 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.12 PRO — JERARQUÍA TERRITORIAL
+RADAR INMOBILIARIO v0.5.0.1 CORE DEV
+=====================================
 
-IMPORTANTE:
-NO instales primero v0.4.11. v0.4.12 la sustituye.
-
-1. Descomprime este ZIP.
-2. Entra al MISMO repositorio GitHub: grupos-inmobiliarios.
-3. Upload files / Subir archivos.
-4. Sube TODOS los archivos de esta carpeta.
-5. Commit changes.
-6. Espera GitHub Pages.
-7. Abre la URL una vez en Safari y recarga.
-8. Cierra y vuelve a abrir Grupos Inmobiliarios.
-9. Debe aparecer v0.4.12 PRO.
-
-NO vacíes la base local.
-NO reconfigures Dropbox.
-NO vuelvas a importar contactos.
-
-Al entrar en Buscar:
-1. Elige uno o varios MUNICIPIOS.
-2. Abre ZONAS / SECTORES.
-3. Solo verás ubicaciones del catálogo territorial, agrupadas por municipio.
-4. Puedes tildar varias zonas simultáneamente.
-
-La primera apertura vuelve a clasificar territorialmente el inventario existente.
+1. Esta versión es de PRUEBA y debe subirse solo a la rama radar-v050-dev.
+2. No sustituir main/principal todavía.
+3. Reemplazar los archivos homónimos del repositorio con los de este ZIP.
+4. Netlify debe desplegar desde radar-v050-dev.
+5. Tras el deploy, abrir radar-inmobiliario-dev.netlify.app y verificar que arriba diga v0.5.0.1 CORE.
+6. La base local existente en ese mismo dominio se conserva; esta versión no cambia el esquema de IndexedDB.
