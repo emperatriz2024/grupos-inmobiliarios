@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0501" />
+  <link rel="stylesheet" href="./styles.css?v=0502" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.0.1 CORE</div>
+      <div class="version">v0.5.0.2 CORE</div>
     </header>
 
     <section class="stats">
@@ -192,6 +192,23 @@
         <small class="smartLocationNote">Base preparada para Instagram, portales, Marketplace asistido y matching de compradores en próximas versiones.</small>
       </section>
 
+      <section class="card backupCard">
+        <div class="sectionTitle"><span>☁</span><div><h2>Respaldo del Radar</h2><p>Protege tu inventario local y recupéralo sin volver a procesar todos los chats.</p></div></div>
+        <div class="backupStateGrid">
+          <div><strong id="backupLastLabel">Sin respaldo</strong><span>último respaldo</span></div>
+          <div><strong id="backupScopeLabel">Base completa</strong><span>inmuebles · fuentes · contactos · favoritos</span></div>
+        </div>
+        <div class="backupActions">
+          <button id="downloadBackup" class="ghost" type="button">↓ Descargar respaldo</button>
+          <button id="restoreLocalBackup" class="ghost" type="button">↥ Restaurar archivo</button>
+          <button id="backupDropboxNow" class="primary" type="button">☁ Guardar en Dropbox</button>
+          <button id="restoreDropboxBackup" class="ghost" type="button">↻ Restaurar desde Dropbox</button>
+        </div>
+        <input id="backupFileInput" type="file" accept=".json,application/json" hidden />
+        <label class="backupAuto"><input id="autoBackupDropbox" type="checkbox"> <span>Respaldo automático en Dropbox después de cada importación</span></label>
+        <div id="backupStatus" class="backupStatus">El respaldo no incluye contraseñas ni tokens de Dropbox.</div>
+      </section>
+
       <section class="card contactsCard">
         <div class="sectionTitle"><span>👥</span><div><h2>Directorio de captadores</h2><p>Se construye automáticamente desde CONTACTOS_PROCESADOS.</p></div></div>
         <div class="contactFlow"><span>CONTACTOS_PROCESADOS</span><b>→</b><span>Directorio local</span><b>→</b><span>WhatsApp automático</span></div>
@@ -227,7 +244,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0.1 · 60 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.0.2 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -275,6 +292,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0501"></script>
+  <script type="module" src="./app.js?v=0502"></script>
 </body>
 </html>

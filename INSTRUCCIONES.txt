@@ -1,9 +1,12 @@
-RADAR INMOBILIARIO v0.5.0.1 CORE DEV
+RADAR INMOBILIARIO v0.5.0.2 CORE DEV
 =====================================
 
-1. Esta versión es de PRUEBA y debe subirse solo a la rama radar-v050-dev.
-2. No sustituir main/principal todavía.
-3. Reemplazar los archivos homónimos del repositorio con los de este ZIP.
-4. Netlify debe desplegar desde radar-v050-dev.
-5. Tras el deploy, abrir radar-inmobiliario-dev.netlify.app y verificar que arriba diga v0.5.0.1 CORE.
-6. La base local existente en ese mismo dominio se conserva; esta versión no cambia el esquema de IndexedDB.
+1. Subir todos los archivos a la rama radar-v050-dev.
+2. No tocar main/principal.
+3. Esperar el deploy automático de Netlify.
+4. Verificar arriba: v0.5.0.2 CORE.
+5. En Importar debe aparecer “Respaldo del Radar”.
+6. Antes de conectar Dropbox, registrar exactamente esta Redirect URI en tu app de Dropbox:
+   https://radar-inmobiliario-dev.netlify.app/
+7. El botón “Descargar respaldo” funciona incluso sin Dropbox.
+8. El respaldo automático de Dropbox solo funciona después de conectar Dropbox y activarlo.

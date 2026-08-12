@@ -243,7 +243,15 @@
 /* v0.4.12 — jerarquía territorial */
 .selectorGroupTitle{position:sticky;top:0;z-index:2;padding:10px 10px 7px;margin:0;background:#0d0d0d;color:var(--gold2);border-bottom:1px solid #302a18;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
 .selectorOptionsList .selectorGroupTitle:not(:first-child){margin-top:8px;border-top:1px solid #242424}
-\n/* v0.5.0 CORE — Radar multi-fuente */\n.radarCoreCard{position:relative;overflow:hidden}\n.radarCoreCard::after{content:"CORE";position:absolute;right:18px;top:18px;font-size:10px;letter-spacing:.14em;font-weight:800;color:#d8b24b;border:1px solid rgba(216,178,75,.35);border-radius:999px;padding:5px 8px}\n.radarCoreStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}\n.radarCoreStats>div{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:13px;display:flex;flex-direction:column;gap:4px}\n.radarCoreStats strong{font-size:22px}.radarCoreStats span{font-size:11px;color:#aaa}\n@media(min-width:720px){.radarCoreStats{grid-template-columns:repeat(4,minmax(0,1fr))}}\n
+
+/* v0.5.0 CORE — Radar multi-fuente */
+.radarCoreCard{position:relative;overflow:hidden}
+.radarCoreCard::after{content:"CORE";position:absolute;right:18px;top:18px;font-size:10px;letter-spacing:.14em;font-weight:800;color:#d8b24b;border:1px solid rgba(216,178,75,.35);border-radius:999px;padding:5px 8px}
+.radarCoreStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}
+.radarCoreStats>div{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:13px;display:flex;flex-direction:column;gap:4px}
+.radarCoreStats strong{font-size:22px}.radarCoreStats span{font-size:11px;color:#aaa}
+@media(min-width:720px){.radarCoreStats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
 
 /* v0.5.0.1 — Radar Core UX polish */
 .radarCoreCard{padding-bottom:18px}
@@ -313,3 +321,24 @@
   .radarCoreStats .radarMetric{padding:13px 11px}
   .radarCoreStats .radarMetric strong{font-size:23px}
 }
+
+
+/* v0.5.0.2 — persistence + compact Radar grid */
+.radarCoreStats{display:grid !important;grid-template-columns:repeat(2,minmax(0,1fr)) !important;gap:9px;margin:14px 0}
+.radarCoreStats .radarMetric{border:1px solid rgba(255,255,255,.07);border-radius:14px}
+@media(min-width:720px){.radarCoreStats{grid-template-columns:repeat(4,minmax(0,1fr)) !important}}
+.backupCard{border-color:rgba(212,175,55,.28)}
+.backupStateGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0 10px}
+.backupStateGrid>div{min-width:0;background:#090909;border:1px solid #262626;border-radius:13px;padding:11px}
+.backupStateGrid strong{display:block;color:var(--gold2);font-size:12px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.backupStateGrid span{display:block;color:#777;font-size:8px;line-height:1.3;margin-top:4px}
+.backupActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.backupActions .primary,.backupActions .ghost{margin:0;min-height:48px;padding:11px 8px;font-size:11px}
+.backupActions button:disabled{opacity:.35}
+.backupAuto{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:11px;background:#0b0b0b;border:1px solid #252525;border-radius:12px;color:#aaa;font-size:10px;line-height:1.35}
+.backupAuto input{margin-top:1px;accent-color:var(--gold)}
+.backupStatus{margin-top:9px;padding:9px 10px;background:#090909;border:1px solid #222;border-radius:10px;color:#777;font-size:9px;line-height:1.4}
+.backupStatus[data-kind="ok"]{color:#9fc5a6;border-color:#26392a}
+.backupStatus[data-kind="working"]{color:#d9c77f;border-color:#423919}
+.backupStatus[data-kind="warn"]{color:#d6ad69;border-color:#493719}
+.backupStatus[data-kind="error"]{color:#d69595;border-color:#4b2929}

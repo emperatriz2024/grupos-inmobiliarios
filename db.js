@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0500';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0500';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0500';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0500';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0500';
+import { isDemandRequest } from './intent-utils.js?v=0502';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0502';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0502';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0502';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0502';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
@@ -592,6 +592,90 @@ export async function getRadarCoreStats(){
 
 export async function getMasterProperties(){const db=await openDB(),rows=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll());db.close();return rows;}
 export async function getSourcePostsByMaster(masterId){const db=await openDB(),tx=db.transaction(SOURCE_POST_STORE,'readonly'),rows=await allByIndex(tx.objectStore(SOURCE_POST_STORE),'master_id',masterId);db.close();return rows;}
+
+
+// ---------- Radar Backup v0.5.0.2 --------------------------------------------
+const BACKUP_STORES=[
+  PROP_STORE,IMPORT_STORE,FAV_STORE,CONTACT_STORE,MUNICIPALITY_STORE,ZONE_STORE,
+  COMPLEX_STORE,LOCATION_PENDING_STORE,MASTER_STORE,SOURCE_POST_STORE,BUYER_STORE,
+  MATCH_STORE,SYNC_QUEUE_STORE
+];
+
+export async function exportDatabaseSnapshot(){
+  const db=await openDB();
+  const stores={};
+  const counts={};
+  try{
+    for(const name of BACKUP_STORES){
+      const rows=await reqP(db.transaction(name,'readonly').objectStore(name).getAll());
+      stores[name]=rows;
+      counts[name]=rows.length;
+    }
+  }finally{db.close();}
+  return {
+    format:'radar-inmobiliario-backup',
+    backup_version:1,
+    app_version:'0.5.0.2',
+    db_name:DB_NAME,
+    db_version:DB_VERSION,
+    created_at:new Date().toISOString(),
+    origin:typeof location!=='undefined'?location.origin:null,
+    counts,
+    stores
+  };
+}
+
+function validateBackupSnapshot(snapshot){
+  if(!snapshot||snapshot.format!=='radar-inmobiliario-backup'||Number(snapshot.backup_version)!==1) throw new Error('Este archivo no es un respaldo válido de Radar Inmobiliario.');
+  if(!snapshot.stores||typeof snapshot.stores!=='object') throw new Error('El respaldo no contiene las tablas esperadas.');
+  for(const name of BACKUP_STORES){if(snapshot.stores[name]!=null&&!Array.isArray(snapshot.stores[name])) throw new Error(`La tabla ${name} del respaldo está dañada.`);}
+  return true;
+}
+
+async function replaceStoreRows(db,name,rows=[]){
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(name,'readwrite');
+    tx.objectStore(name).clear();
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  const BATCH=250;
+  for(let start=0;start<rows.length;start+=BATCH){
+    const batch=rows.slice(start,start+BATCH);
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(name,'readwrite'),store=tx.objectStore(name);
+      for(const row of batch) store.put(row);
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+    await new Promise(r=>setTimeout(r,0));
+  }
+}
+
+export async function restoreDatabaseSnapshot(snapshot,onProgress){
+  validateBackupSnapshot(snapshot);
+  const db=await openDB();
+  try{
+    for(let i=0;i<BACKUP_STORES.length;i++){
+      const name=BACKUP_STORES[i],rows=snapshot.stores[name]||[];
+      onProgress?.({store:name,index:i+1,total:BACKUP_STORES.length,rows:rows.length});
+      await replaceStoreRows(db,name,rows);
+    }
+  }finally{db.close();}
+  return {restored_at:new Date().toISOString(),counts:snapshot.counts||{}};
+}
+
+export function backupSnapshotSummary(snapshot){
+  validateBackupSnapshot(snapshot);
+  const c=snapshot.counts||{};
+  return {
+    properties:Number(c[PROP_STORE]||snapshot.stores?.[PROP_STORE]?.length||0),
+    masters:Number(c[MASTER_STORE]||snapshot.stores?.[MASTER_STORE]?.length||0),
+    sources:Number(c[SOURCE_POST_STORE]||snapshot.stores?.[SOURCE_POST_STORE]?.length||0),
+    contacts:Number(c[CONTACT_STORE]||snapshot.stores?.[CONTACT_STORE]?.length||0),
+    buyers:Number(c[BUYER_STORE]||snapshot.stores?.[BUYER_STORE]?.length||0),
+    matches:Number(c[MATCH_STORE]||snapshot.stores?.[MATCH_STORE]?.length||0),
+    created_at:snapshot.created_at||null
+  };
+}
 
 export async function clearDatabase() {
   const db = await openDB();

@@ -5,22 +5,23 @@ import {
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations,
-  syncRadarCore, getRadarCoreStats
-} from './db.js?v=0500';
+  syncRadarCore, getRadarCoreStats,
+  exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
+} from './db.js?v=0502';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0500';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0500';
-import { isDemandRequest } from './intent-utils.js?v=0500';
-import { consolidateProperties } from './dedupe-utils.js?v=0500';
+} from './search-utils.js?v=0502';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0502';
+import { isDemandRequest } from './intent-utils.js?v=0502';
+import { consolidateProperties } from './dedupe-utils.js?v=0502';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
-  redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0500';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0500';
-import { normLocation } from './location-catalog.js?v=0500';
+  uploadDropboxFile, redirectUri as dropboxRedirectUri
+} from './dropbox.js?v=0502';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0502';
+import { normLocation } from './location-catalog.js?v=0502';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -41,6 +42,9 @@ let selectorDraft=new Set();
 const SEARCH_SCROLL_KEY='gi_search_scroll_v042';
 const SEARCH_CARD_KEY='gi_search_card_v042';
 const SEARCH_STATE_KEY='gi_search_state_v042';
+const BACKUP_AUTO_KEY='gi_backup_auto_dropbox_v0502';
+const BACKUP_LAST_KEY='gi_backup_last_v0502';
+const BACKUP_DROPBOX_PATH='/RADAR_RESPALDOS/radar-backup-latest.json';
 
 function rememberSearchPosition(cardId='') {
   try {
@@ -434,7 +438,7 @@ async function renderSaved() {
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0500',{type:'module'});
+    const worker = new Worker('./worker.js?v=0502',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -497,7 +501,7 @@ $('#importBtn').addEventListener('click', async () => {
       <div><b>${summary.skipped_age.toLocaleString('es-VE')}</b><span>antiguos omitidos</span></div>
       <div><b>${summary.detected.toLocaleString('es-VE')}</b><span>publicaciones</span></div>
       <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>`;
-    $('#resultBox').hidden=false; await loadData();
+    $('#resultBox').hidden=false; await loadData(); await maybeAutoBackup();
   } catch(e) { setStatus(`Error: ${e.message}`,0); }
   finally { $('#importBtn').disabled=false; fileInput.disabled=false; }
 });
@@ -583,6 +587,95 @@ $('#resetBtn').onclick = async () => {
 };
 
 
+
+
+function setBackupStatus(text,kind=''){
+  const e=$('#backupStatus');if(e){e.textContent=text;e.dataset.kind=kind;}
+}
+function rememberBackup(destination,createdAt=new Date().toISOString()){
+  localStorage.setItem(BACKUP_LAST_KEY,JSON.stringify({destination,created_at:createdAt}));
+  renderBackupState();
+}
+function renderBackupState(){
+  const s=getDropboxSettings(),auto=localStorage.getItem(BACKUP_AUTO_KEY)==='1';
+  const autoEl=$('#autoBackupDropbox');if(autoEl){autoEl.checked=auto;autoEl.disabled=!s.connected;}
+  if($('#backupDropboxNow'))$('#backupDropboxNow').disabled=!s.connected;
+  if($('#restoreDropboxBackup'))$('#restoreDropboxBackup').disabled=!s.connected;
+  let last=null;try{last=JSON.parse(localStorage.getItem(BACKUP_LAST_KEY)||'null');}catch{}
+  if($('#backupLastLabel'))$('#backupLastLabel').textContent=last?.created_at?new Date(last.created_at).toLocaleString('es-VE'):'Sin respaldo';
+}
+function backupFileName(createdAt=new Date().toISOString()){
+  return `radar-respaldo-${createdAt.replace(/[:.]/g,'-')}.json`;
+}
+function downloadTextFile(text,name){
+  const blob=new Blob([text],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+async function buildBackup(){
+  setBackupStatus('Preparando respaldo completo…','working');
+  return exportDatabaseSnapshot();
+}
+async function downloadLocalBackup(){
+  try{
+    const snapshot=await buildBackup(),text=JSON.stringify(snapshot);
+    downloadTextFile(text,backupFileName(snapshot.created_at));
+    rememberBackup('archivo',snapshot.created_at);
+    const x=backupSnapshotSummary(snapshot);
+    setBackupStatus(`Respaldo descargado: ${x.masters.toLocaleString('es-VE')} inmuebles maestros · ${x.sources.toLocaleString('es-VE')} publicaciones fuente.`,'ok');
+  }catch(e){setBackupStatus(`No pude crear el respaldo: ${e.message}`,'error');}
+}
+async function restoreSnapshotWithConfirmation(snapshot,sourceLabel){
+  const x=backupSnapshotSummary(snapshot),when=x.created_at?new Date(x.created_at).toLocaleString('es-VE'):'fecha desconocida';
+  const ok=confirm(`Restaurar respaldo de ${when}?\n\n${x.masters.toLocaleString('es-VE')} inmuebles maestros\n${x.sources.toLocaleString('es-VE')} publicaciones fuente\n${x.contacts.toLocaleString('es-VE')} contactos\n\nLa base local actual será reemplazada.`);
+  if(!ok)return false;
+  setBackupStatus('Restaurando base local…','working');
+  await restoreDatabaseSnapshot(snapshot,p=>setBackupStatus(`Restaurando ${p.index}/${p.total}: ${p.store}…`,'working'));
+  locationCatalog=await getLocationCatalog();
+  await loadData();
+  rememberBackup(`restaurado:${sourceLabel}`,snapshot.created_at||new Date().toISOString());
+  setBackupStatus(`Restauración completada desde ${sourceLabel}.`,'ok');
+  return true;
+}
+async function backupToDropbox({silent=false}={}){
+  const settings=getDropboxSettings();
+  if(!settings.connected){if(!silent)setBackupStatus('Conecta Dropbox para guardar el respaldo en la nube.','warn');return false;}
+  try{
+    if(!silent)setBackupStatus('Creando respaldo y subiendo a Dropbox…','working');
+    const snapshot=await exportDatabaseSnapshot();
+    await uploadDropboxFile(BACKUP_DROPBOX_PATH,JSON.stringify(snapshot));
+    rememberBackup('dropbox',snapshot.created_at);
+    if(!silent){const x=backupSnapshotSummary(snapshot);setBackupStatus(`Dropbox actualizado: ${x.masters.toLocaleString('es-VE')} inmuebles · ${x.sources.toLocaleString('es-VE')} publicaciones.`,'ok');}
+    return true;
+  }catch(e){if(!silent)setBackupStatus(`Dropbox: ${e.message}`,'error');console.error('backup dropbox',e);return false;}
+}
+async function maybeAutoBackup(){
+  if(localStorage.getItem(BACKUP_AUTO_KEY)!=='1'||!getDropboxSettings().connected)return false;
+  setBackupStatus('Importación lista. Guardando respaldo automático en Dropbox…','working');
+  const ok=await backupToDropbox({silent:true});
+  setBackupStatus(ok?'Respaldo automático actualizado en Dropbox.':'La importación terminó, pero el respaldo automático de Dropbox falló.',ok?'ok':'warn');
+  return ok;
+}
+$('#downloadBackup')?.addEventListener('click',downloadLocalBackup);
+$('#restoreLocalBackup')?.addEventListener('click',()=>$('#backupFileInput')?.click());
+$('#backupFileInput')?.addEventListener('change',async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  try{const snapshot=JSON.parse(await file.text());await restoreSnapshotWithConfirmation(snapshot,'archivo');}
+  catch(err){setBackupStatus(`No pude restaurar el archivo: ${err.message}`,'error');}
+  finally{e.target.value='';}
+});
+$('#backupDropboxNow')?.addEventListener('click',()=>backupToDropbox({silent:false}));
+$('#restoreDropboxBackup')?.addEventListener('click',async()=>{
+  if(!getDropboxSettings().connected)return setBackupStatus('Conecta Dropbox primero.','warn');
+  try{
+    setBackupStatus('Descargando el último respaldo de Dropbox…','working');
+    const blob=await downloadDropboxFile(BACKUP_DROPBOX_PATH),snapshot=JSON.parse(await blob.text());
+    await restoreSnapshotWithConfirmation(snapshot,'Dropbox');
+  }catch(e){setBackupStatus(`No pude restaurar desde Dropbox: ${e.message}`,'error');}
+});
+$('#autoBackupDropbox')?.addEventListener('change',e=>{
+  localStorage.setItem(BACKUP_AUTO_KEY,e.target.checked?'1':'0');
+  setBackupStatus(e.target.checked?'Respaldo automático activado. Se ejecutará después de cada importación.':'Respaldo automático desactivado.','ok');
+});
 
 async function refreshContactStats(){
   const s=await getContactStats(),resolved=allProperties.filter(p=>p.phone_resolution?.source==='directorio').length;
@@ -680,6 +773,7 @@ function renderDropboxState() {
   $('#dropboxDisconnected').hidden=s.connected;
   $('#dropboxConnected').hidden=!s.connected;
   if(s.connected) $('#dropboxFolderLabel').textContent=`${s.pendingPath} → ${s.processedPath}`;
+  renderBackupState();
 }
 function renderPendingList() {
   $('#pendingCount').textContent=pendingDropboxFiles.length.toLocaleString('es-VE');
@@ -799,6 +893,7 @@ $('#processPending').onclick=async()=>{
   $('#dropboxProgressDetail').textContent=failed?'Los archivos con error permanecen en Chat pendiente.':'Los ZIP procesados fueron movidos a Procesado.';
   $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
   await refreshDropboxPending();
+  await maybeAutoBackup();
 };
 
 async function initDropbox() {
@@ -825,7 +920,7 @@ async function initDropbox() {
 }
 
 async function initApp(){
-  try{await initLocationSystem();await loadData();await initDropbox();}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
 
@@ -836,5 +931,5 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0500')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0501').catch(()=>{});
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0502')).map(k=>caches.delete(k)))).catch(()=>{});}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0502').catch(()=>{});
