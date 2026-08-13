@@ -1,7 +1,7 @@
-import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0512';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0512';
-import { resolveLocationRecord } from './location-catalog.js?v=0512';
-import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0512';
+import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0520';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0520';
+import { resolveLocationRecord } from './location-catalog.js?v=0520';
+import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0520';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
 */

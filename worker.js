@@ -1,5 +1,5 @@
-import { extractWhatsAppChat, decodeChat } from './zip-reader.js?v=0512';
-import { processChatText } from './engine.js?v=0512';
+import { extractWhatsAppChat, decodeChat } from './zip-reader.js?v=0520';
+import { processChatText } from './engine.js?v=0520';
 
 self.onmessage = async (e) => {
   const { file, group, locationCatalog } = e.data;

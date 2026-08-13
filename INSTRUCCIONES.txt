@@ -1,14 +1,16 @@
-RADAR INMOBILIARIO v0.5.1.2 — HOTFIX DEV
-=========================================
+RADAR INMOBILIARIO v0.5.2 — FUENTES EXTERNAS (DEV)
+===================================================
 
-1. Subir SOLO a la rama radar-v050-dev.
+1. Subir SOLO a radar-v050-dev.
 2. NO tocar main/principal.
-3. Reemplazar todos los archivos homónimos con este ZIP.
-4. No borrar la base local.
-5. No restaurar respaldo.
-6. No reimportar chats.
-7. Esperar el redeploy de Netlify.
-8. Abrir/recargar la app y verificar arriba: v0.5.1.2 CORE.
-9. La primera carga puede tardar un poco porque reaudita los precios existentes.
-10. Deben reaparecer los inmuebles y grupos existentes.
-11. Luego abrir el mismo comprador de prueba y recalcular los matches.
+3. Reemplazar archivos homónimos y subir el NUEVO external-source-utils.js.
+4. Verificar v0.5.2 CORE.
+5. Confirmar que el inventario anterior siga intacto.
+6. Ir a Importar → Fuentes externas.
+7. Probar primero con UNA publicación real de Instagram o Marketplace:
+   - pegar enlace,
+   - pegar descripción,
+   - analizar.
+8. No guardar si la comparación te parece incorrecta; envía captura para calibrar.
+9. Si Radar detecta posible duplicado, revisar residencia/precio/metraje antes de vincular.
+10. “Captador probable” es una inferencia, no una confirmación contractual.

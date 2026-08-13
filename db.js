@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0512';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0512';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0512';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0512';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0512';
+import { isDemandRequest } from './intent-utils.js?v=0520';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0520';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0520';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0520';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0520';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
@@ -629,6 +629,114 @@ export async function getSourcePostsByMaster(masterId){const db=await openDB(),t
 
 
 
+
+// ---------- Fuentes externas v0.5.2 ------------------------------------------
+function externalSourceId(capture={}){
+  const key=[capture.source_type||'otro',capture.external_url||'',capture.published_at||'',capture.agent_name||'',capture.original_text||''].join('|');
+  return `src_ext_${radarHash(key)}`;
+}
+
+function externalMasterSnapshot(parsed={},id,existing=null,capture={}){
+  const now=new Date().toISOString();
+  const published=capture.published_at||now;
+  const shouldRefreshPrice=!existing?.price_usd || (parsed.price_usd&&Date.parse(published)>=Date.parse(existing?.last_seen_at||'1970-01-01'));
+  return {
+    ...(existing||{}),id,
+    operation:parsed.operation||existing?.operation||null,
+    property_type:parsed.property_type||existing?.property_type||null,
+    municipality_id:parsed.municipality_id||existing?.municipality_id||null,
+    municipality:parsed.municipality||existing?.municipality||null,
+    zone_id:parsed.zone_id||existing?.zone_id||null,
+    zone:parsed.zone||existing?.zone||null,
+    complex_id:parsed.complex_id||existing?.complex_id||null,
+    residence:parsed.residence||existing?.residence||null,
+    price_usd:shouldRefreshPrice?(parsed.price_usd??existing?.price_usd??null):(existing?.price_usd??parsed.price_usd??null),
+    price_confidence:parsed.price_confidence||existing?.price_confidence||null,
+    price_audit_status:parsed.price_audit_status||existing?.price_audit_status||null,
+    price_evidence:parsed.price_evidence||existing?.price_evidence||null,
+    price_audited:parsed.price_audited===true||existing?.price_audited===true,
+    area_m2:parsed.area_m2??existing?.area_m2??null,
+    bedrooms:parsed.bedrooms??existing?.bedrooms??null,
+    bathrooms:parsed.bathrooms??existing?.bathrooms??null,
+    parking:parsed.parking??existing?.parking??null,
+    planta_electrica:!!(parsed.planta_electrica||existing?.planta_electrica),
+    planta_100:!!(parsed.planta_100||existing?.planta_100),
+    pozo:!!(parsed.pozo||existing?.pozo),
+    tanque:!!(parsed.tanque||existing?.tanque),
+    amoblado:!!(parsed.amoblado||existing?.amoblado),
+    financiamiento:!!(parsed.financiamiento||existing?.financiamiento),
+    piscina:!!(parsed.piscina||existing?.piscina),
+    status:existing?.status||'active_unverified',
+    vigency_score:existing?.vigency_score??null,
+    probable_captor_id:existing?.probable_captor_id||null,
+    captor_score:existing?.captor_score??null,
+    legacy_ids:existing?.legacy_ids||[],
+    source_types:[...new Set([...(existing?.source_types||[]),capture.source_type||'otro'])],
+    created_at:existing?.created_at||now,
+    updated_at:now,
+    first_seen_at:existing?.first_seen_at||published,
+    last_seen_at:Date.parse(published)>Date.parse(existing?.last_seen_at||'1970-01-01')?published:(existing?.last_seen_at||published)
+  };
+}
+
+export async function getAllSourcePosts(){
+  const db=await openDB(),rows=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).getAll());db.close();return rows;
+}
+export async function getExternalSourcePosts(){
+  const db=await openDB(),rows=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).getAll());db.close();
+  return rows.filter(x=>x.source_type!=='whatsapp').sort((a,b)=>String(b.published_at||b.detected_at||'').localeCompare(String(a.published_at||a.detected_at||'')));
+}
+export async function getExternalSourceStats(){
+  const rows=await getExternalSourcePosts();
+  return {
+    total:rows.length,
+    instagram:rows.filter(x=>x.source_type==='instagram').length,
+    marketplace:rows.filter(x=>x.source_type==='marketplace').length,
+    portals:rows.filter(x=>['mercadolibre','remax','rentahouse','skygroup','portal'].includes(x.source_type)).length
+  };
+}
+export async function externalUrlExists(url=''){
+  if(!url)return null;
+  const rows=await getExternalSourcePosts();
+  return rows.find(x=>String(x.external_url||'').trim()===String(url).trim())||null;
+}
+
+export async function upsertExternalCapture({capture,parsed,masterId=null,captor=null}={}){
+  if(!capture||!parsed)throw new Error('Faltan datos para guardar la fuente externa.');
+  const db=await openDB(),now=new Date().toISOString();
+  let id=masterId||null,existing=null;
+  if(id)existing=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).get(id));
+  if(!id)id=`mp_ext_${radarHash([parsed.normalized||parsed.text||'',capture.external_url||'',capture.published_at||now].join('|'))}`;
+  const master=externalMasterSnapshot(parsed,id,existing,capture);
+  if(captor){
+    master.probable_captor_name=captor.name||null;
+    master.probable_captor_phone=captor.phone||null;
+    master.captor_score=captor.score??null;
+  }
+
+  const postId=externalSourceId(capture);
+  const oldPost=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).get(postId));
+  const source={
+    ...(oldPost||{}),id:postId,master_id:id,source_type:capture.source_type||'otro',legacy_property_id:null,
+    channel_name:capture.channel_name||capture.agent_name||null,
+    agent_name:capture.agent_name||null,agent_phone:capture.agent_phone||parsed.phone||null,
+    published_at:capture.published_at||now,detected_at:oldPost?.detected_at||now,last_detected_at:now,
+    external_id:capture.external_id||null,external_url:capture.external_url||null,external_code:capture.external_code||null,
+    original_text:capture.original_text||parsed.text||'',normalized_text:parsed.normalized||'',
+    observed_price:parsed.price_usd??null,observed_area_m2:parsed.area_m2??null,observed_residence:parsed.residence||null,
+    municipality_id:parsed.municipality_id||null,zone_id:parsed.zone_id||null,complex_id:parsed.complex_id||null,
+    created_at:oldPost?.created_at||now,updated_at:now
+  };
+
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction([MASTER_STORE,SOURCE_POST_STORE],'readwrite');
+    tx.objectStore(MASTER_STORE).put(master);tx.objectStore(SOURCE_POST_STORE).put(source);
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();
+  return {master,source,linked:!!existing};
+}
+
 // ---------- Mis Compradores v0.5.1 -------------------------------------------
 export async function getBuyers(){
   const db=await openDB(),rows=await reqP(db.transaction(BUYER_STORE,'readonly').objectStore(BUYER_STORE).getAll());db.close();
@@ -718,7 +826,7 @@ export async function exportDatabaseSnapshot(){
   return {
     format:'radar-inmobiliario-backup',
     backup_version:1,
-    app_version:'0.5.1.1',
+    app_version:'0.5.2',
     db_name:DB_NAME,
     db_version:DB_VERSION,
     created_at:new Date().toISOString(),

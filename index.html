@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0512" />
+  <link rel="stylesheet" href="./styles.css?v=0520" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.1.2 CORE</div>
+      <div class="version">v0.5.2 CORE</div>
     </header>
 
     <section class="stats">
@@ -221,7 +221,95 @@
           <div><span>Promedio de apariciones por inmueble</span><strong><b id="radarAvgAppearances">0,0</b>×</strong></div>
           <small id="radarGroupingNote">Sin publicaciones vinculadas todavía.</small>
         </div>
-        <small class="smartLocationNote">Radar ya cruza compradores con inmuebles maestros. Las fuentes externas seguirán entrando en próximas versiones.</small>
+        <small class="smartLocationNote">Radar cruza compradores con inmuebles maestros y ya puede incorporar fuentes externas asistidas.</small>
+      </section>
+
+      <section class="card externalSourcesCard">
+        <div class="sectionTitle">
+          <span>⌁</span>
+          <div><h2>Fuentes externas</h2><p>Instagram · Marketplace · portales. Pega enlace + descripción y Radar busca duplicados antes de guardar.</p></div>
+        </div>
+
+        <div class="externalStats">
+          <div><strong id="externalTotalCount">0</strong><span>capturas</span></div>
+          <div><strong id="externalInstagramCount">0</strong><span>Instagram</span></div>
+          <div><strong id="externalMarketplaceCount">0</strong><span>Marketplace</span></div>
+          <div><strong id="externalPortalCount">0</strong><span>portales</span></div>
+        </div>
+
+        <div class="externalForm">
+          <div class="externalGrid">
+            <label>Fuente
+              <select id="externalSourceType">
+                <option value="instagram">Instagram</option>
+                <option value="marketplace">Facebook Marketplace</option>
+                <option value="mercadolibre">MercadoLibre</option>
+                <option value="remax">RE/MAX</option>
+                <option value="rentahouse">Rent-A-House</option>
+                <option value="skygroup">Sky Group</option>
+                <option value="portal">Otro portal</option>
+                <option value="otro">Otro</option>
+              </select>
+            </label>
+            <label>Fecha de publicación
+              <input id="externalPublishedDate" type="date">
+            </label>
+          </div>
+
+          <label>Enlace de la publicación
+            <input id="externalUrl" type="url" inputmode="url" placeholder="https://...">
+          </label>
+
+          <div class="externalGrid">
+            <label>Cuenta / asesor que publicó
+              <input id="externalAgentName" placeholder="@usuario o nombre">
+            </label>
+            <label>Teléfono si aparece
+              <input id="externalAgentPhone" inputmode="tel" placeholder="0412-...">
+            </label>
+          </div>
+
+          <label>Descripción / texto de la publicación
+            <textarea id="externalText" rows="7" placeholder="Pega aquí el copy completo de Instagram, Marketplace o el portal..."></textarea>
+          </label>
+
+          <button id="analyzeExternalSource" class="primary" type="button">Analizar publicación</button>
+        </div>
+
+        <div id="externalAnalysis" class="externalAnalysis" hidden>
+          <div class="externalAnalysisHead">
+            <div><span>ANÁLISIS</span><strong id="externalAnalysisTitle">Propiedad detectada</strong></div>
+            <span id="externalAgeBadge"></span>
+          </div>
+
+          <div id="externalFacts" class="externalFacts"></div>
+
+          <div class="externalDecision">
+            <strong id="externalDecisionLabel">—</strong>
+            <small id="externalDecisionReason"></small>
+          </div>
+
+          <div id="externalCandidateBox" class="externalCandidateBox" hidden>
+            <span>Posible inmueble maestro</span>
+            <strong id="externalCandidateName">—</strong>
+            <small id="externalCandidateMeta"></small>
+          </div>
+
+          <div id="externalCaptorBox" class="externalCaptorBox" hidden>
+            <span>Captador probable conocido</span>
+            <strong id="externalCaptorName">—</strong>
+            <small id="externalCaptorMeta"></small>
+          </div>
+
+          <div class="externalSaveActions">
+            <button id="saveExternalLinked" class="primary" type="button">Guardar y vincular</button>
+            <button id="saveExternalNew" class="ghost" type="button">Guardar como inmueble nuevo</button>
+          </div>
+          <small class="externalDisclaimer">“Captador probable” es una inferencia por antigüedad conocida, recurrencia y coincidencias entre fuentes; no certifica quién posee la captación.</small>
+        </div>
+
+        <div class="externalRecentHead"><strong>Capturas recientes</strong><button id="refreshExternalSources" class="miniGhost" type="button">Actualizar</button></div>
+        <div id="externalRecentList"></div>
       </section>
 
       <section class="card backupCard">
@@ -245,7 +333,7 @@
           <small class="backupIOSHint">En iPhone se abrirá el menú de compartir. Elige <b>Guardar en Archivos</b> y selecciona iCloud Drive o “En mi iPhone”.</small>
         </div>
         <input id="backupFileInput" type="file" accept=".json,application/json" hidden />
-        <label class="backupAuto"><input id="autoBackupDropbox" type="checkbox"> <span>Respaldo automático en Dropbox después de importaciones y cambios de compradores</span></label>
+        <label class="backupAuto"><input id="autoBackupDropbox" type="checkbox"> <span>Respaldo automático en Dropbox después de importaciones, compradores y fuentes externas</span></label>
         <div id="backupStatus" class="backupStatus">El respaldo no incluye contraseñas ni tokens de Dropbox.</div>
       </section>
 
@@ -460,6 +548,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0512"></script>
+  <script type="module" src="./app.js?v=0520"></script>
 </body>
 </html>
