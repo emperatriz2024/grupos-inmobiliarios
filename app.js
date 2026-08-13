@@ -8,24 +8,24 @@ import {
   syncRadarCore, getRadarCoreStats, getMasterProperties, getAllSourcePosts, getExternalSourcePosts, getExternalSourceStats, externalUrlExists, upsertExternalCapture,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=0520';
+} from './db.js?v=0521';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0520';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0520';
-import { isDemandRequest } from './intent-utils.js?v=0520';
-import { consolidateProperties } from './dedupe-utils.js?v=0520';
+} from './search-utils.js?v=0521';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0521';
+import { isDemandRequest } from './intent-utils.js?v=0521';
+import { consolidateProperties } from './dedupe-utils.js?v=0521';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0520';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0520';
-import { normLocation } from './location-catalog.js?v=0520';
-import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0520';
-import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0520';
-import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0520';
+} from './dropbox.js?v=0521';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0521';
+import { normLocation } from './location-catalog.js?v=0521';
+import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0521';
+import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0521';
+import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0521';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -705,6 +705,26 @@ function externalPseudoMessage(){
     text:$('#externalText').value.trim()
   };
 }
+
+function externalEvidenceHtml(p={}){
+  const labels=[
+    ['price_usd','Precio',p.price_usd?formatMoney(p.price_usd):'No detectado'],
+    ['area_m2','Metraje',p.area_m2?`${p.area_m2} m²`:'No detectado'],
+    ['bedrooms','Habitaciones',p.bedrooms!=null?String(p.bedrooms):'No detectado'],
+    ['bathrooms','Baños',p.bathrooms!=null?String(p.bathrooms):'No detectado'],
+    ['parking','Puestos',p.parking!=null?String(p.parking):'No detectado']
+  ];
+  return labels.map(([key,label,value])=>{
+    const ev=p.extraction_evidence?.[key]||null;
+    const conf=p.extraction_confidence?.[key]||'missing';
+    const cls=conf==='high'?'high':conf==='medium'?'medium':'missing';
+    return `<div class="evidenceRow ${cls}">
+      <div><b>${extEsc(label)}: ${extEsc(value)}</b><span>${conf==='high'?'alta confianza':conf==='medium'?'confianza media':'sin evidencia'}</span></div>
+      <small>${ev?`← “${extEsc(ev)}”`:'No se encontró una línea explícita para este dato.'}</small>
+    </div>`;
+  }).join('');
+}
+
 function externalFactsHtml(p={}){
   const facts=[
     p.operation,p.property_type,p.municipality,p.zone,p.residence,
@@ -768,6 +788,7 @@ async function analyzeExternalCapture(){
   };
 
   $('#externalFacts').innerHTML=externalFactsHtml(parsed);
+  $('#externalEvidence').innerHTML=externalEvidenceHtml(parsed);
   $('#externalAnalysisTitle').textContent=parsed.residence||parsed.property_type||'Propiedad detectada';
   $('#externalAgeBadge').textContent=age==null?'fecha no válida':age===0?'hoy':`${age} días`;
   $('#externalAgeBadge').className=age!=null&&age<=20?'fresh':'old';
@@ -792,6 +813,14 @@ async function analyzeExternalCapture(){
 }
 async function saveExternalCapture(forceNew=false){
   if(!externalDraft)return;
+  const p=externalDraft.parsed||{};
+  const criticalMissing=[
+    ['precio',p.price_usd],['habitaciones',p.bedrooms],['baños',p.bathrooms],['puestos',p.parking]
+  ].filter(([,v])=>v==null).map(([k])=>k);
+  if(criticalMissing.length){
+    const ok=confirm(`Faltan datos estructurados por verificar: ${criticalMissing.join(', ')}. ¿Guardar de todas formas?`);
+    if(!ok)return;
+  }
   const age=externalAgeDays($('#externalPublishedDate').value);
   if(age!=null&&age>20&&!confirm(`La publicación tiene ${age} días. Tu objetivo principal es inventario de máximo 20 días. ¿Guardar de todas formas?`))return;
 
@@ -822,7 +851,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0520',{type:'module'});
+    const worker = new Worker('./worker.js?v=0521',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1385,4 +1414,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0520').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0521').catch(()=>{});

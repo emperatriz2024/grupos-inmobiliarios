@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0520';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0520';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0520';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0520';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0520';
+import { isDemandRequest } from './intent-utils.js?v=0521';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0521';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0521';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0521';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0521';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
@@ -724,6 +724,8 @@ export async function upsertExternalCapture({capture,parsed,masterId=null,captor
     external_id:capture.external_id||null,external_url:capture.external_url||null,external_code:capture.external_code||null,
     original_text:capture.original_text||parsed.text||'',normalized_text:parsed.normalized||'',
     observed_price:parsed.price_usd??null,observed_area_m2:parsed.area_m2??null,observed_residence:parsed.residence||null,
+    observed_bedrooms:parsed.bedrooms??null,observed_bathrooms:parsed.bathrooms??null,observed_parking:parsed.parking??null,
+    extraction_evidence:parsed.extraction_evidence||null,extraction_confidence:parsed.extraction_confidence||null,
     municipality_id:parsed.municipality_id||null,zone_id:parsed.zone_id||null,complex_id:parsed.complex_id||null,
     created_at:oldPost?.created_at||now,updated_at:now
   };
@@ -826,7 +828,7 @@ export async function exportDatabaseSnapshot(){
   return {
     format:'radar-inmobiliario-backup',
     backup_version:1,
-    app_version:'0.5.2',
+    app_version:'0.5.2.1',
     db_name:DB_NAME,
     db_version:DB_VERSION,
     created_at:new Date().toISOString(),

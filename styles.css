@@ -558,3 +558,22 @@
   .externalGrid{grid-template-columns:1fr}
   .externalSaveActions{grid-template-columns:1fr}
 }
+
+
+/* v0.5.2.1 — extracción trazable */
+.externalEvidenceBlock{margin:10px 0;border:1px solid #292929;border-radius:12px;background:#090909;padding:10px}
+.externalEvidenceTitle{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:7px}
+.externalEvidenceTitle strong{font-size:10px;color:#ddd}
+.externalEvidenceTitle small{font-size:7px;color:#666;text-align:right;max-width:48%;line-height:1.35}
+.externalEvidence{display:grid;gap:6px}
+.evidenceRow{border:1px solid #242424;border-radius:9px;padding:8px;background:#0d0d0d}
+.evidenceRow>div{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.evidenceRow b{font-size:9px;color:#ddd}
+.evidenceRow span{font-size:6px;text-transform:uppercase;letter-spacing:.06em}
+.evidenceRow small{display:block;margin-top:4px;font-size:7px;color:#777;line-height:1.35}
+.evidenceRow.high{border-color:#29432d;background:#0c140d}
+.evidenceRow.high span{color:#8fbd97}
+.evidenceRow.medium{border-color:#4b411c;background:#161308}
+.evidenceRow.medium span{color:#d1b969}
+.evidenceRow.missing{border-color:#4a2921;background:#150d0a}
+.evidenceRow.missing span{color:#c98672}

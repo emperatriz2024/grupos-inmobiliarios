@@ -1,4 +1,4 @@
-import { normLocation, SEED_ZONES, SEED_LOCATION_CATALOG, resolveLocationRecord } from './location-catalog.js?v=0520';
+import { normLocation, SEED_ZONES, SEED_LOCATION_CATALOG, resolveLocationRecord } from './location-catalog.js?v=0521';
 export function normLoc(s=''){return normLocation(s);}
 export const KNOWN_ZONES=[...new Set(SEED_ZONES.flatMap(z=>[z.nombre,...(z.aliases||[])]))].sort((a,b)=>b.length-a.length);
 export function extractLocationTerms(text='',existingZone=null){

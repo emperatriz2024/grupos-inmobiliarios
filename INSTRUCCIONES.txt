@@ -1,16 +1,15 @@
-RADAR INMOBILIARIO v0.5.2 — FUENTES EXTERNAS (DEV)
-===================================================
+RADAR INMOBILIARIO v0.5.2.1 — EXTRACCIÓN TRAZABLE (DEV)
+=========================================================
 
 1. Subir SOLO a radar-v050-dev.
 2. NO tocar main/principal.
-3. Reemplazar archivos homónimos y subir el NUEVO external-source-utils.js.
-4. Verificar v0.5.2 CORE.
-5. Confirmar que el inventario anterior siga intacto.
-6. Ir a Importar → Fuentes externas.
-7. Probar primero con UNA publicación real de Instagram o Marketplace:
-   - pegar enlace,
-   - pegar descripción,
-   - analizar.
-8. No guardar si la comparación te parece incorrecta; envía captura para calibrar.
-9. Si Radar detecta posible duplicado, revisar residencia/precio/metraje antes de vincular.
-10. “Captador probable” es una inferencia, no una confirmación contractual.
+3. Reemplazar todos los archivos homónimos.
+4. Verificar arriba: v0.5.2.1 CORE.
+5. NO borrar ni restaurar la base.
+6. Volver a pegar EXACTAMENTE la misma publicación de Monte Serino.
+7. Pulsar Analizar publicación.
+8. Debe aparecer:
+   Puestos: 2
+   ← “Estacionamiento: 2 puestos”
+9. Revisar también evidencia de precio, habitaciones, baños y metraje.
+10. No guardar todavía: primero comprobar que todos los datos extraídos sean correctos.

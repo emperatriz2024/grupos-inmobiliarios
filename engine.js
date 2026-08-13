@@ -1,7 +1,7 @@
-import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0520';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0520';
-import { resolveLocationRecord } from './location-catalog.js?v=0520';
-import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0520';
+import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0521';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0521';
+import { resolveLocationRecord } from './location-catalog.js?v=0521';
+import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0521';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
 */
@@ -263,6 +263,63 @@ export function auditExistingPropertyPrice(property={}){
     price_audited:true
   };
 }
+
+function evidenceLine(raw='', index=0){
+  const lines=cleanText(raw).split('\n');
+  return String(lines[index]||'').trim();
+}
+function matchDetailed(raw='', patterns=[]){
+  const clean=cleanText(raw);
+  const lines=clean.split('\n');
+  for(const spec of patterns){
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i];
+      const normalized=normalizeText(line);
+      const m=normalized.match(spec.rx);
+      if(!m)continue;
+      const value=parseNumber(m[spec.group||1]);
+      if(value==null)continue;
+      return {
+        value,
+        evidence:line.trim(),
+        confidence:spec.confidence||'high',
+        kind:spec.kind||'explicit'
+      };
+    }
+  }
+  return {value:null,evidence:null,confidence:'missing',kind:'missing'};
+}
+
+export function extractStructuredFieldsDetailed(rawText=''){
+  // Explicit "label: value" patterns are evaluated BEFORE shorthand patterns.
+  // This prevents a nearby unrelated number from overriding a line such as:
+  // "Estacionamiento: 2 puestos".
+  const area=matchDetailed(rawText,[
+    {rx:/\b(?:area(?:\s+(?:total|de\s+construccion))?|superficie|metros?\s+cuadrados?)\s*[:\-]?\s*(\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|mts?|metros?)?\b/i,kind:'explicit'},
+    {rx:/\b(\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|metros?\s+cuadrados?)\b/i,confidence:'medium',kind:'shorthand'}
+  ]);
+
+  const bedrooms=matchDetailed(rawText,[
+    {rx:/\b(?:habitaciones?|dormitorios?|cuartos?)\s*[:\-]?\s*(\d{1,2})\b/i,kind:'explicit'},
+    {rx:/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?|dormitorios?)\b/i,confidence:'medium',kind:'shorthand'}
+  ]);
+
+  const bathrooms=matchDetailed(rawText,[
+    {rx:/\b(?:banos?|baños?)\s*[:\-]?\s*(\d{1,2})(?:[.,]5)?\b/i,kind:'explicit'},
+    {rx:/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?|baños?)\b/i,confidence:'medium',kind:'shorthand'}
+  ]);
+
+  const parking=matchDetailed(rawText,[
+    // Highest priority: label BEFORE value.
+    {rx:/\b(?:estacionamientos?|estacionamiento|puestos?(?:\s+de)?\s+estacionamiento|puestos?\s+de\s+parking|parking)\s*[:\-]?\s*(\d{1,2})\s*(?:puestos?|vehiculos?|vehículos?|carros?)?\b/i,kind:'explicit'},
+    // Common real-estate phrasing: "2 puestos", "2 puestos de estacionamiento", "2 P/E".
+    {rx:/\b(\d{1,2})\s*(?:puestos?(?:\s+de)?\s+estacionamiento|puestos?|p\s*\/?\s*e|estacionamientos?)\b/i,confidence:'medium',kind:'shorthand'},
+    {rx:/\bpuestos?\s*[:\-]?\s*(\d{1,2})\b/i,confidence:'medium',kind:'explicit'}
+  ]);
+
+  return {area_m2:area,bedrooms,bathrooms,parking};
+}
+
 function firstNumber(n, patterns) {
   for (const rx of patterns) {
     const m=n.match(rx); if(m) return parseNumber(m[1]);
@@ -309,6 +366,7 @@ export function extractProperty(message, options={}) {
   const zone=smartLocation.zone||bestZone(message.text,locationTerms[0]||null);
   const priceDetail=extractPriceDetailed(message.text, operation);
   const price=priceDetail.value;
+  const structured=extractStructuredFieldsDetailed(message.text);
   const rec={
     group:message.group,date:message.date,date_iso:message.date_iso,date_order:message.date_order,time:message.time,sender:message.sender,
     operation,property_type:propertyType,
@@ -317,10 +375,24 @@ export function extractProperty(message, options={}) {
     complex_id:smartLocation.complex_id,complex_detected:smartLocation.complex_detected,complex_detected_norm:smartLocation.complex_detected_norm,complex_confidence:smartLocation.complex_confidence,location_requires_review:smartLocation.requires_review,
     location_terms:locationTerms,residence:smartLocation.complex||smartLocation.complex_detected||null,price_usd:price,
     price_confidence:priceDetail.confidence,price_audit_status:priceDetail.status,price_evidence:priceDetail.evidence,price_audit_version:'0511',price_audited:true,
-    area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|mts?|metros(?:\s+cuadrados?)?)\b/i]),
-    bedrooms:firstNumber(n,[/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?)\b/i,/\bhabitaciones?\s*[:\-]?\s*(\d{1,2})\b/i]),
-    bathrooms:firstNumber(n,[/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?)\b/i,/\bbanos?\s*[:\-]?\s*(\d{1,2})/i]),
-    parking:firstNumber(n,[/\b(\d{1,2})\s*(?:p\s*\/?\s*e|puestos?(?:\s+de)?\s+estacionamiento|estacionamientos?)\b/i,/\bpuestos?\s*[:\-]?\s*(\d{1,2})/i]),
+    area_m2:structured.area_m2.value,
+    bedrooms:structured.bedrooms.value,
+    bathrooms:structured.bathrooms.value,
+    parking:structured.parking.value,
+    extraction_evidence:{
+      price:priceDetail.evidence||null,
+      area_m2:structured.area_m2.evidence||null,
+      bedrooms:structured.bedrooms.evidence||null,
+      bathrooms:structured.bathrooms.evidence||null,
+      parking:structured.parking.evidence||null
+    },
+    extraction_confidence:{
+      price:priceDetail.confidence||'missing',
+      area_m2:structured.area_m2.confidence,
+      bedrooms:structured.bedrooms.confidence,
+      bathrooms:structured.bathrooms.confidence,
+      parking:structured.parking.confidence
+    },
     phone:extractPhone(message.text),
     planta_electrica:/\bplanta\s+(?:electrica|100|50|total|parcial)|\bplanta\s*100\s*%/i.test(n),
     planta_100:/\bplanta(?:\s+electrica)?\s*(?:100\s*%|total)\b/i.test(n),
