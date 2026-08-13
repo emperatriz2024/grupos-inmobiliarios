@@ -1,5 +1,5 @@
 
-import { normLoc } from './location-utils.js?v=0522';
+import { normLoc } from './location-utils.js?v=0530';
 
 const STOP=new Set('venta vendo vende alquiler alquilo alquila propiedad inmueble oportunidad precio ref referencia whatsapp colega asesor asesora inmobiliario inmobiliaria carabobo valencia disponible disponibilidad contacto informacion info habitaciones habitacion banos bano puestos puesto estacionamiento estacionamientos mts m2 metros con para por del de la el los las una uno un y en se'.split(' '));
 const norm=s=>normLoc(String(s||'')).replace(/\s+/g,' ').trim();

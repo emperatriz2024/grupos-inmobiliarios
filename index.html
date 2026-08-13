@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0522" />
+  <link rel="stylesheet" href="./styles.css?v=0530" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.2.2 CORE</div>
+      <div class="version">v0.5.3 CORE</div>
     </header>
 
     <section class="stats">
@@ -342,6 +342,27 @@
 
         <div class="externalRecentHead"><strong>Capturas recientes</strong><button id="refreshExternalSources" class="miniGhost" type="button">Actualizar</button></div>
         <div id="externalRecentList"></div>
+
+        <div class="freshnessPanel">
+          <div class="freshnessHead">
+            <div><span>VIGENCIA INTELIGENTE</span><strong>Propiedades externas</strong></div>
+            <button id="recheckExternalFreshness" class="miniGhost" type="button">Recalcular</button>
+          </div>
+          <p class="freshnessIntro">Radar prioriza publicaciones externas de hasta 20 días. Una confirmación manual mantiene la propiedad como vigente durante 7 días.</p>
+          <div class="freshnessStats">
+            <div><strong id="freshVerified">0</strong><span>confirmadas</span></div>
+            <div><strong id="freshRecent">0</strong><span>recientes</span></div>
+            <div><strong id="freshAction">0</strong><span>por revisar</span></div>
+            <div><strong id="freshExpired">0</strong><span>vencidas</span></div>
+          </div>
+          <div class="freshnessFilters">
+            <button type="button" data-fresh-filter="action" class="active">Revisar</button>
+            <button type="button" data-fresh-filter="all">Todas</button>
+            <button type="button" data-fresh-filter="verified">Confirmadas</button>
+            <button type="button" data-fresh-filter="expired">Vencidas</button>
+          </div>
+          <div id="externalFreshnessList"></div>
+        </div>
       </section>
 
       <section class="card backupCard">
@@ -580,6 +601,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0522"></script>
+  <script type="module" src="./app.js?v=0530"></script>
 </body>
 </html>

@@ -5,27 +5,28 @@ import {
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations,
-  syncRadarCore, getRadarCoreStats, getMasterProperties, getAllSourcePosts, getExternalSourcePosts, getExternalSourceStats, externalUrlExists, upsertExternalCapture,
+  syncRadarCore, getRadarCoreStats, getMasterProperties, getAllSourcePosts, getExternalSourcePosts, getExternalSourceStats, externalUrlExists, upsertExternalCapture, updateExternalSourceVerification, refreshExternalMasterVigency,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=0522';
+} from './db.js?v=0530';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0522';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0522';
-import { isDemandRequest } from './intent-utils.js?v=0522';
-import { consolidateProperties } from './dedupe-utils.js?v=0522';
+} from './search-utils.js?v=0530';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0530';
+import { isDemandRequest } from './intent-utils.js?v=0530';
+import { consolidateProperties } from './dedupe-utils.js?v=0530';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0522';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0522';
-import { normLocation } from './location-catalog.js?v=0522';
-import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0522';
-import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0522';
-import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0522';
+} from './dropbox.js?v=0530';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0530';
+import { normLocation } from './location-catalog.js?v=0530';
+import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0530';
+import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0530';
+import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0530';
+import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0530';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -48,6 +49,7 @@ let allBuyerMatches=[];
 let currentMatchBuyerId=null;
 let buyerMatchMinScore=0;
 let externalDraft=null;
+let externalFreshnessFilter='action';
 const SEARCH_SCROLL_KEY='gi_search_scroll_v042';
 const SEARCH_CARD_KEY='gi_search_card_v042';
 const SEARCH_STATE_KEY='gi_search_state_v042';
@@ -766,12 +768,49 @@ async function refreshExternalSourcesUI(){
   if($('#externalMarketplaceCount'))$('#externalMarketplaceCount').textContent=stats.marketplace.toLocaleString('es-VE');
   if($('#externalPortalCount'))$('#externalPortalCount').textContent=stats.portals.toLocaleString('es-VE');
 
-  const rows=(await getExternalSourcePosts()).slice(0,12),box=$('#externalRecentList');if(!box)return;
-  box.innerHTML=rows.length?rows.map(r=>`<article class="externalRecentItem">
+  const allRows=await getExternalSourcePosts();
+  const rows=allRows.slice(0,12),box=$('#externalRecentList');
+  if(box)box.innerHTML=rows.length?rows.map(r=>`<article class="externalRecentItem">
     <div><b>${extEsc(sourceLabel(r.source_type))}</b><strong>${extEsc(r.external_title||r.observed_residence||'Propiedad')}</strong><small>${extEsc([r.agent_name,r.published_at?.slice(0,10),r.observed_price?formatMoney(r.observed_price):(r.listed_price_value?`${Number(r.listed_price_value).toLocaleString('es-VE')} ${r.listed_price_currency||''}`:null)].filter(Boolean).join(' · '))}</small></div>
     ${r.external_url?`<a href="${extEsc(r.external_url)}" target="_blank" rel="noopener">Abrir</a>`:''}
   </article>`).join(''):'<div class="empty externalEmpty">Todavía no has guardado publicaciones externas.</div>';
+
+  renderExternalFreshness(allRows);
 }
+
+function renderExternalFreshness(rows=[]){
+  const stats=externalFreshnessStats(rows);
+  if($('#freshVerified'))$('#freshVerified').textContent=stats.verified.toLocaleString('es-VE');
+  if($('#freshRecent'))$('#freshRecent').textContent=stats.recent.toLocaleString('es-VE');
+  if($('#freshAction'))$('#freshAction').textContent=stats.action.toLocaleString('es-VE');
+  if($('#freshExpired'))$('#freshExpired').textContent=stats.expired.toLocaleString('es-VE');
+
+  document.querySelectorAll('[data-fresh-filter]').forEach(b=>b.classList.toggle('active',b.dataset.freshFilter===externalFreshnessFilter));
+  const list=$('#externalFreshnessList');if(!list)return;
+  const enriched=rows.map(r=>({r,f:sourceFreshness(r)}));
+  let filtered=enriched;
+  if(externalFreshnessFilter==='action')filtered=enriched.filter(x=>['verify','expired'].includes(x.f.code));
+  else if(externalFreshnessFilter==='verified')filtered=enriched.filter(x=>x.f.code==='verified');
+  else if(externalFreshnessFilter==='expired')filtered=enriched.filter(x=>x.f.code==='expired');
+  filtered=filtered.slice(0,30);
+
+  list.innerHTML=filtered.length?filtered.map(({r,f})=>`<article class="freshnessItem" data-source-id="${extEsc(r.id)}">
+    <div class="freshnessItemHead">
+      <div>
+        <b>${extEsc(sourceLabel(r.source_type))}</b>
+        <strong>${extEsc(r.external_title||r.observed_residence||'Propiedad externa')}</strong>
+        <small>${extEsc([r.publisher_name||r.agent_name,`${f.publishedDays} días desde publicación`,r.last_verified_at?`verificada hace ${f.verifiedDays} días`:null].filter(Boolean).join(' · '))}</small>
+      </div>
+      <span class="freshBadge ${f.className}">${extEsc(f.label)}</span>
+    </div>
+    <div class="freshnessActions">
+      ${!['unavailable','sold'].includes(f.code)?`<button class="confirmFresh" data-fresh-action="verified" data-source-id="${extEsc(r.id)}">✓ Confirmar vigente</button>`:`<button data-fresh-action="unverified" data-source-id="${extEsc(r.id)}">↻ Reactivar revisión</button>`}
+      <button class="markUnavailable" data-fresh-action="unavailable" data-source-id="${extEsc(r.id)}">No disponible</button>
+      ${r.external_url?`<a href="${extEsc(r.external_url)}" target="_blank" rel="noopener">Abrir publicación</a>`:'<span></span>'}
+    </div>
+  </article>`).join(''):'<div class="freshnessEmpty">No hay publicaciones en esta categoría.</div>';
+}
+
 async function analyzeExternalCapture(){
   const description=$('#externalText').value.trim();
   const text=externalCombinedText();
@@ -909,13 +948,41 @@ async function saveExternalCapture(forceNew=false){
 $('#analyzeExternalSource')?.addEventListener('click',analyzeExternalCapture);
 $('#saveExternalLinked')?.addEventListener('click',()=>saveExternalCapture(false));
 $('#saveExternalNew')?.addEventListener('click',()=>saveExternalCapture(true));
+
 $('#refreshExternalSources')?.addEventListener('click',refreshExternalSourcesUI);
+document.querySelectorAll('[data-fresh-filter]').forEach(btn=>btn.addEventListener('click',async()=>{
+  externalFreshnessFilter=btn.dataset.freshFilter||'action';
+  await refreshExternalSourcesUI();
+}));
+$('#externalFreshnessList')?.addEventListener('click',async(e)=>{
+  const btn=e.target.closest('[data-fresh-action]');if(!btn)return;
+  const id=btn.dataset.sourceId,status=btn.dataset.freshAction;
+  if(status==='unavailable'&&!confirm('¿Marcar esta publicación como NO DISPONIBLE? Dejará de considerarse vigente para matching cuando no exista otra fuente activa del mismo inmueble.'))return;
+  btn.disabled=true;
+  try{
+    await updateExternalSourceVerification(id,status);
+    await recalculateAllBuyerMatches({silent:true});
+    await refreshExternalSourcesUI();
+    await refreshBuyersData();
+    await refreshRadarBuyerCounters();
+  }catch(err){alert(err.message||'No se pudo actualizar la vigencia.');}
+  finally{btn.disabled=false;}
+});
+$('#recheckExternalFreshness')?.addEventListener('click',async()=>{
+  const changed=await refreshExternalMasterVigency();
+  await recalculateAllBuyerMatches({silent:true});
+  await refreshExternalSourcesUI();
+  await refreshBuyersData();
+  await refreshRadarBuyerCounters();
+  alert(changed?`Vigencia recalculada: ${changed} inmuebles maestros actualizados.`:'Vigencia revisada. No había cambios pendientes.');
+});
+
 $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0522',{type:'module'});
+    const worker = new Worker('./worker.js?v=0530',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1478,4 +1545,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0522').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0530').catch(()=>{});

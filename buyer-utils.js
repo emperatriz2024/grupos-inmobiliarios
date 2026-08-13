@@ -1,3 +1,4 @@
+import { masterAvailabilityGate } from './freshness-utils.js?v=0530';
 
 // Radar Inmobiliario v0.5.1 — buyer matching engine.
 // Matching is deliberately explainable: every score includes reasons and gaps.
@@ -115,7 +116,10 @@ function featuresScore(buyer, master){
 }
 
 export function scoreBuyerMaster(buyer, master) {
+  const availability=masterAvailabilityGate(master);
+  if(!availability.pass)return null;
   const reasons=[],gaps=[],hardFails=[],unknownHard=[];
+  if(availability.reason)reasons.push(availability.reason);
   const tolerance=Math.max(0,Math.min(10,Number(buyer.budget_tolerance||0)))/100;
 
   // Hard gates: operation, type, exact selected location.

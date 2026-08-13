@@ -1,27 +1,23 @@
-RADAR INMOBILIARIO v0.5.2.2 — MARKETPLACE METADATA (DEV)
-=========================================================
+RADAR INMOBILIARIO v0.5.3 — VIGENCIA INTELIGENTE (DEV)
+=======================================================
 
 1. Subir SOLO a radar-v050-dev.
 2. NO tocar main/principal.
-3. Reemplazar archivos homónimos.
-4. Verificar arriba: v0.5.2.2 CORE.
+3. Reemplazar archivos homónimos y agregar freshness-utils.js.
+4. Verificar arriba: v0.5.3 CORE.
 5. NO borrar ni restaurar la base.
 
-PRUEBA MONTESERINO:
-- Fuente: Marketplace
-- Título: Casa en venta Monteserrino, San Diego Carabobo | R-MC
-- Precio publicado: 90.000
-- Moneda real: si sabes que son USD, elegir USD; si no, dejar No confirmada
-- Publicador/vendedor: Daniela Toloza
-- Descripción: pegar el texto completo
-- Analizar publicación
+QUÉ BUSCAR:
+Importar > Fuentes externas > Vigencia Inteligente.
 
-VALIDAR:
-- 144 m²
-- 2 habitaciones
-- 1 baño
-- 2 puestos
-- Publicador mostrado: Daniela Toloza
-- Captador probable: debe mantenerse separado
-- Si precio está confirmado USD, un candidato de $25.000 NO debe clasificarse como duplicado fuerte.
-- NO guardar todavía hasta revisar el resultado.
+PRUEBA:
+- Una publicación de 0–7 días = Recién publicada.
+- 8–15 días = Vigente probable.
+- 16–20 días = Verificar vigencia.
+- >20 días = Vencida por antigüedad.
+- Confirmar vigente = queda confirmada por 7 días.
+- No disponible = deja de entrar al matching si no existe otra fuente vigente del mismo inmueble.
+
+IMPORTANTE:
+La regla WhatsApp continúa en 60 días.
+No guardar todavía la prueba de Monteserrino si deseas terminar primero la auditoría de metadata/deduplicación.

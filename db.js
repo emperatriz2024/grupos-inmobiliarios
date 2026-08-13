@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0522';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0522';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0522';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0522';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0522';
+import { isDemandRequest } from './intent-utils.js?v=0530';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0530';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0530';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0530';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0530';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
@@ -729,6 +729,10 @@ export async function upsertExternalCapture({capture,parsed,masterId=null,captor
     listed_price_raw:capture.listed_price_raw||null,
     listed_price_value:capture.listed_price_value??null,
     listed_price_currency:capture.listed_price_currency||'UNVERIFIED',
+    availability_status:oldPost?.availability_status||'unverified',
+    last_verified_at:oldPost?.last_verified_at||null,
+    verified_until:oldPost?.verified_until||null,
+    availability_note:oldPost?.availability_note||null,
     original_text:capture.original_text||parsed.text||'',normalized_text:parsed.normalized||'',
     observed_price:parsed.price_usd??null,observed_area_m2:parsed.area_m2??null,observed_residence:parsed.residence||null,
     observed_bedrooms:parsed.bedrooms??null,observed_bathrooms:parsed.bathrooms??null,observed_parking:parsed.parking??null,
@@ -745,6 +749,85 @@ export async function upsertExternalCapture({capture,parsed,masterId=null,captor
   db.close();
   return {master,source,linked:!!existing};
 }
+
+
+function _daysSinceDb(raw){
+  const t=raw?Date.parse(raw):NaN;
+  return Number.isFinite(t)?Math.max(0,Math.floor((Date.now()-t)/86400000)):9999;
+}
+function _sourceLiveForMaster(s={}){
+  if(s.source_type==='whatsapp')return _daysSinceDb(s.published_at||s.detected_at)<=60;
+  if(['unavailable','sold'].includes(s.availability_status))return false;
+  if(s.availability_status==='verified'&&s.last_verified_at&&_daysSinceDb(s.last_verified_at)<=7)return true;
+  return _daysSinceDb(s.published_at||s.detected_at)<=20;
+}
+export async function updateExternalSourceVerification(sourceId,status='verified',note=''){
+  const db=await openDB();
+  const source=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).get(sourceId));
+  if(!source){db.close();throw new Error('No se encontró la publicación externa.');}
+  const now=new Date().toISOString();
+  const updated={...source,availability_status:status,availability_note:note||null,updated_at:now};
+  if(status==='verified'){
+    updated.last_verified_at=now;
+    updated.verified_until=new Date(Date.now()+7*86400000).toISOString();
+    updated.last_detected_at=now;
+  }else if(['unavailable','sold'].includes(status)){
+    updated.last_verified_at=now;
+    updated.verified_until=null;
+  }else{
+    updated.verified_until=null;
+  }
+
+  const all=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).getAll());
+  const masterId=updated.master_id;
+  const master=masterId?await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).get(masterId)):null;
+  const related=all.filter(x=>x.master_id===masterId&&x.id!==sourceId).concat(updated);
+  const live=related.filter(_sourceLiveForMaster);
+  const hasVerified=live.some(x=>x.source_type!=='whatsapp'&&x.availability_status==='verified'&&x.last_verified_at&&_daysSinceDb(x.last_verified_at)<=7);
+  const nextMaster=master?{
+    ...master,
+    status:live.length?(hasVerified?'active_verified':'active_unverified'):'stale',
+    vigency_score:live.length?(hasVerified?100:70):0,
+    last_verified_at:hasVerified?now:(master.last_verified_at||null),
+    updated_at:now
+  }:null;
+
+  await new Promise((resolve,reject)=>{
+    const stores=nextMaster?[SOURCE_POST_STORE,MASTER_STORE]:[SOURCE_POST_STORE];
+    const tx=db.transaction(stores,'readwrite');
+    tx.objectStore(SOURCE_POST_STORE).put(updated);
+    if(nextMaster)tx.objectStore(MASTER_STORE).put(nextMaster);
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();
+  return {source:updated,master:nextMaster};
+}
+export async function refreshExternalMasterVigency(){
+  const db=await openDB();
+  const sources=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).getAll());
+  const masters=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll());
+  const changed=[];
+  for(const master of masters){
+    const related=sources.filter(x=>x.master_id===master.id);
+    if(!related.some(x=>x.source_type!=='whatsapp'))continue;
+    const live=related.filter(_sourceLiveForMaster);
+    const hasVerified=live.some(x=>x.source_type!=='whatsapp'&&x.availability_status==='verified'&&x.last_verified_at&&_daysSinceDb(x.last_verified_at)<=7);
+    const status=live.length?(hasVerified?'active_verified':'active_unverified'):'stale';
+    const vigency_score=live.length?(hasVerified?100:70):0;
+    if(master.status!==status||master.vigency_score!==vigency_score){
+      changed.push({...master,status,vigency_score,updated_at:new Date().toISOString()});
+    }
+  }
+  if(changed.length){
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(MASTER_STORE,'readwrite'),s=tx.objectStore(MASTER_STORE);
+      changed.forEach(x=>s.put(x));
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+  }
+  db.close();return changed.length;
+}
+
 
 // ---------- Mis Compradores v0.5.1 -------------------------------------------
 export async function getBuyers(){
@@ -835,7 +918,7 @@ export async function exportDatabaseSnapshot(){
   return {
     format:'radar-inmobiliario-backup',
     backup_version:1,
-    app_version:'0.5.2.2',
+    app_version:'0.5.3',
     db_name:DB_NAME,
     db_version:DB_VERSION,
     created_at:new Date().toISOString(),
