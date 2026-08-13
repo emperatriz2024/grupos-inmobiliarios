@@ -8,24 +8,24 @@ import {
   syncRadarCore, getRadarCoreStats, getMasterProperties, getAllSourcePosts, getExternalSourcePosts, getExternalSourceStats, externalUrlExists, upsertExternalCapture,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=0521';
+} from './db.js?v=0522';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0521';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0521';
-import { isDemandRequest } from './intent-utils.js?v=0521';
-import { consolidateProperties } from './dedupe-utils.js?v=0521';
+} from './search-utils.js?v=0522';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0522';
+import { isDemandRequest } from './intent-utils.js?v=0522';
+import { consolidateProperties } from './dedupe-utils.js?v=0522';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0521';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0521';
-import { normLocation } from './location-catalog.js?v=0521';
-import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0521';
-import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0521';
-import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0521';
+} from './dropbox.js?v=0522';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0522';
+import { normLocation } from './location-catalog.js?v=0522';
+import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0522';
+import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0522';
+import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0522';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -696,13 +696,32 @@ function externalAgeDays(dateStr){
   const d=new Date(t);d.setHours(0,0,0,0);
   return Math.max(0,Math.floor((today-d)/86400000));
 }
+
+function parseExternalListedPrice(raw=''){
+  const s=String(raw||'').trim();
+  if(!s)return null;
+  let x=s.replace(/[^\d.,]/g,'').trim();
+  if(!x)return null;
+  // Venezuelan/LatAm marketplace formatting often uses "." as thousands.
+  if(/^\d{1,3}(?:\.\d{3})+$/.test(x))x=x.replace(/\./g,'');
+  else if(/^\d{1,3}(?:,\d{3})+$/.test(x))x=x.replace(/,/g,'');
+  else if(x.includes(',')&&!x.includes('.'))x=x.replace(',','.');
+  const n=Number(x);
+  return Number.isFinite(n)&&n>0?n:null;
+}
+function externalCombinedText(){
+  const title=$('#externalTitle')?.value.trim()||'';
+  const desc=$('#externalText').value.trim();
+  return [title,desc].filter(Boolean).join('\n');
+}
+
 function externalPseudoMessage(){
   const date=$('#externalPublishedDate').value||isoToday();
   return {
     group:`Fuente externa · ${sourceLabel($('#externalSourceType').value)}`,
     date,date_iso:date,date_order:'YMD',time:'12:00:00',
     sender:$('#externalAgentName').value.trim()||sourceLabel($('#externalSourceType').value),
-    text:$('#externalText').value.trim()
+    text:externalCombinedText()
   };
 }
 
@@ -749,13 +768,14 @@ async function refreshExternalSourcesUI(){
 
   const rows=(await getExternalSourcePosts()).slice(0,12),box=$('#externalRecentList');if(!box)return;
   box.innerHTML=rows.length?rows.map(r=>`<article class="externalRecentItem">
-    <div><b>${extEsc(sourceLabel(r.source_type))}</b><strong>${extEsc(r.observed_residence||'Propiedad')}</strong><small>${extEsc([r.agent_name,r.published_at?.slice(0,10),r.observed_price?formatMoney(r.observed_price):null].filter(Boolean).join(' · '))}</small></div>
+    <div><b>${extEsc(sourceLabel(r.source_type))}</b><strong>${extEsc(r.external_title||r.observed_residence||'Propiedad')}</strong><small>${extEsc([r.agent_name,r.published_at?.slice(0,10),r.observed_price?formatMoney(r.observed_price):(r.listed_price_value?`${Number(r.listed_price_value).toLocaleString('es-VE')} ${r.listed_price_currency||''}`:null)].filter(Boolean).join(' · '))}</small></div>
     ${r.external_url?`<a href="${extEsc(r.external_url)}" target="_blank" rel="noopener">Abrir</a>`:''}
   </article>`).join(''):'<div class="empty externalEmpty">Todavía no has guardado publicaciones externas.</div>';
 }
 async function analyzeExternalCapture(){
-  const text=$('#externalText').value.trim();
-  if(text.length<25)return alert('Pega la descripción completa de la publicación.');
+  const description=$('#externalText').value.trim();
+  const text=externalCombinedText();
+  if(text.length<25)return alert('Pega el título y/o la descripción completa de la publicación.');
   const url=$('#externalUrl').value.trim();
   if(url){
     const dup=await externalUrlExists(url);
@@ -764,6 +784,27 @@ async function analyzeExternalCapture(){
   const msg=externalPseudoMessage();
   const parsed=extractProperty(msg,{locationCatalog});
   if(!parsed)return alert('Radar no detectó una publicación inmobiliaria clara en ese texto.');
+
+  const listedPriceRaw=$('#externalListedPrice')?.value.trim()||'';
+  const listedPriceValue=parseExternalListedPrice(listedPriceRaw);
+  const listedCurrency=$('#externalPriceCurrency')?.value||'UNVERIFIED';
+
+  parsed.listed_price_raw=listedPriceRaw||null;
+  parsed.listed_price_value=listedPriceValue;
+  parsed.price_currency=listedCurrency;
+
+  // Only a user-confirmed USD value becomes the comparable commercial price.
+  // Otherwise we preserve the platform-listed amount without pretending it is USD.
+  if(listedPriceValue&&listedCurrency==='USD'){
+    parsed.price_usd=listedPriceValue;
+    parsed.price_confidence='high';
+    parsed.price_audit_status='external_verified';
+    parsed.price_evidence=`Precio publicado (confirmado USD): ${listedPriceRaw}`;
+    parsed.extraction_evidence=parsed.extraction_evidence||{};
+    parsed.extraction_confidence=parsed.extraction_confidence||{};
+    parsed.extraction_evidence.price=parsed.price_evidence;
+    parsed.extraction_confidence.price='high';
+  }
 
   if($('#externalAgentPhone').value.trim())parsed.phone=$('#externalAgentPhone').value.trim();
   const masters=await getMasterProperties();
@@ -779,11 +820,17 @@ async function analyzeExternalCapture(){
     capture:{
       source_type:$('#externalSourceType').value,
       external_url:url||null,
+      external_title:$('#externalTitle')?.value.trim()||null,
+      listed_price_raw:listedPriceRaw||null,
+      listed_price_value:listedPriceValue,
+      listed_price_currency:listedCurrency,
       published_at:new Date(`${msg.date_iso}T12:00:00`).toISOString(),
+      publisher_name:$('#externalAgentName').value.trim()||null,
+      publisher_phone:$('#externalAgentPhone').value.trim()||parsed.phone||null,
       agent_name:$('#externalAgentName').value.trim()||null,
       agent_phone:$('#externalAgentPhone').value.trim()||parsed.phone||null,
       channel_name:$('#externalAgentName').value.trim()||sourceLabel($('#externalSourceType').value),
-      original_text:text
+      original_text:description
     }
   };
 
@@ -793,13 +840,23 @@ async function analyzeExternalCapture(){
   $('#externalAgeBadge').textContent=age==null?'fecha no válida':age===0?'hoy':`${age} días`;
   $('#externalAgeBadge').className=age!=null&&age<=20?'fresh':'old';
   $('#externalDecisionLabel').textContent=decision.label;
-  $('#externalDecisionReason').textContent=decision.candidate?`${decision.candidate.score}% de similitud · ${decision.candidate.reasons.join(', ')}`:'Se creará un inmueble maestro nuevo si decides guardarlo.';
+  $('#externalDecisionReason').textContent=decision.candidate
+    ? `${decision.candidate.score}% de similitud · ${decision.candidate.reasons.join(', ')}${decision.candidate.warnings?.length?` · ⚠ ${decision.candidate.warnings.join(', ')}`:''}`
+    : 'Se creará un inmueble maestro nuevo si decides guardarlo.';
 
   $('#externalCandidateBox').hidden=!candidate;
   if(candidate){
     $('#externalCandidateName').textContent=masterShortName(candidate);
     $('#externalCandidateMeta').textContent=masterShortMeta(candidate);
   }
+  const publisherName=$('#externalAgentName').value.trim();
+  $('#externalPublisherBox').hidden=!publisherName;
+  if(publisherName){
+    $('#externalPublisherName').textContent=publisherName;
+    const platform=sourceLabel($('#externalSourceType').value);
+    $('#externalPublisherMeta').textContent=`Mostrado como publicador/vendedor en ${platform}. Esto no confirma que sea el captador original.`;
+  }
+
   $('#externalCaptorBox').hidden=!captor;
   if(captor){
     $('#externalCaptorName').textContent=`${captor.name}${captor.phone?` · ${captor.phone}`:''}`;
@@ -814,9 +871,16 @@ async function analyzeExternalCapture(){
 async function saveExternalCapture(forceNew=false){
   if(!externalDraft)return;
   const p=externalDraft.parsed||{};
+  const listedAmount=externalDraft.capture?.listed_price_value;
+  const currency=externalDraft.capture?.listed_price_currency;
   const criticalMissing=[
-    ['precio',p.price_usd],['habitaciones',p.bedrooms],['baños',p.bathrooms],['puestos',p.parking]
+    ['precio',p.price_usd||listedAmount],['habitaciones',p.bedrooms],['baños',p.bathrooms],['puestos',p.parking]
   ].filter(([,v])=>v==null).map(([k])=>k);
+
+  if(listedAmount&&currency==='UNVERIFIED'){
+    const ok=confirm('El anuncio tiene un precio publicado, pero la moneda real está marcada como “No confirmada”. Radar lo guardará como dato externo y NO lo usará como precio USD para matching ni deduplicación fuerte. ¿Continuar?');
+    if(!ok)return;
+  }
   if(criticalMissing.length){
     const ok=confirm(`Faltan datos estructurados por verificar: ${criticalMissing.join(', ')}. ¿Guardar de todas formas?`);
     if(!ok)return;
@@ -851,7 +915,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0521',{type:'module'});
+    const worker = new Worker('./worker.js?v=0522',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1414,4 +1478,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0521').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0522').catch(()=>{});

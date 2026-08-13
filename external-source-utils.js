@@ -1,5 +1,5 @@
 
-import { normLoc } from './location-utils.js?v=0521';
+import { normLoc } from './location-utils.js?v=0522';
 
 const STOP=new Set('venta vendo vende alquiler alquilo alquila propiedad inmueble oportunidad precio ref referencia whatsapp colega asesor asesora inmobiliario inmobiliaria carabobo valencia disponible disponibilidad contacto informacion info habitaciones habitacion banos bano puestos puesto estacionamiento estacionamientos mts m2 metros con para por del de la el los las una uno un y en se'.split(' '));
 const norm=s=>normLoc(String(s||'')).replace(/\s+/g,' ').trim();
@@ -15,10 +15,18 @@ function jaccard(a,b){
   return inter/(A.size+B.size-inter);
 }
 function closeNum(a,b,tol){return a!=null&&b!=null&&Math.abs(Number(a)-Number(b))<=tol;}
-function priceClose(a,b){
-  if(!a||!b)return false;
+function priceDeltaRatio(a,b){
+  if(!a||!b)return null;
   const x=Number(a),y=Number(b);
-  return Math.abs(x-y)/Math.max(x,y)<=0.08;
+  if(!Number.isFinite(x)||!Number.isFinite(y)||x<=0||y<=0)return null;
+  return Math.abs(x-y)/Math.max(x,y);
+}
+function priceClose(a,b){
+  const d=priceDeltaRatio(a,b);
+  return d!=null&&d<=0.08;
+}
+function verifiedUsd(parsed={}){
+  return String(parsed.price_currency||'').toUpperCase()==='USD' && parsed.price_usd>0;
 }
 function identity(post={}){
   const phone=String(post.agent_phone||'').replace(/\D/g,'');
@@ -34,9 +42,11 @@ export function findMasterCandidates(parsed={},masters=[],sourcePosts=[]){
     if(!byMaster.has(p.master_id))byMaster.set(p.master_id,[]);
     byMaster.get(p.master_id).push(p);
   }
+
   const rows=[];
   for(const m of masters||[]){
-    let score=0;const reasons=[];
+    let score=0;const reasons=[];const warnings=[];
+
     if(parsed.operation&&m.operation){
       if(norm(parsed.operation)!==norm(m.operation))continue;
       score+=8;reasons.push('misma operación');
@@ -45,19 +55,27 @@ export function findMasterCandidates(parsed={},masters=[],sourcePosts=[]){
       if(norm(parsed.property_type)!==norm(m.property_type))continue;
       score+=12;reasons.push('mismo tipo');
     }
+
     if(parsed.zone_id&&m.zone_id){
       if(parsed.zone_id!==m.zone_id)continue;
       score+=18;reasons.push('misma zona');
     }else if(parsed.zone&&m.zone&&norm(parsed.zone)===norm(m.zone)){
       score+=14;reasons.push('misma zona');
     }
+
     const pr=normResidence(parsed.residence),mr=normResidence(m.residence);
-    if(pr&&mr&&pr===mr){score+=28;reasons.push('misma residencia/conjunto');}
-    if(closeNum(parsed.area_m2,m.area_m2,4)){score+=9;reasons.push('metraje cercano');}
-    if(parsed.bedrooms&&m.bedrooms&&Number(parsed.bedrooms)===Number(m.bedrooms)){score+=7;reasons.push('mismas habitaciones');}
-    if(parsed.bathrooms&&m.bathrooms&&Number(parsed.bathrooms)===Number(m.bathrooms)){score+=5;reasons.push('mismos baños');}
-    if(parsed.parking&&m.parking&&Number(parsed.parking)===Number(m.parking)){score+=4;reasons.push('mismos puestos');}
-    if(priceClose(parsed.price_usd,m.price_usd)){score+=9;reasons.push('precio cercano');}
+    const sameResidence=!!(pr&&mr&&pr===mr);
+    if(sameResidence){score+=28;reasons.push('misma residencia/conjunto');}
+
+    const sameArea=closeNum(parsed.area_m2,m.area_m2,4);
+    if(sameArea){score+=9;reasons.push('metraje cercano');}
+
+    const sameBeds=parsed.bedrooms&&m.bedrooms&&Number(parsed.bedrooms)===Number(m.bedrooms);
+    const sameBaths=parsed.bathrooms&&m.bathrooms&&Number(parsed.bathrooms)===Number(m.bathrooms);
+    const sameParking=parsed.parking&&m.parking&&Number(parsed.parking)===Number(m.parking);
+    if(sameBeds){score+=7;reasons.push('mismas habitaciones');}
+    if(sameBaths){score+=5;reasons.push('mismos baños');}
+    if(sameParking){score+=4;reasons.push('mismos puestos');}
 
     let bestText=0;
     for(const s of byMaster.get(m.id)||[]){
@@ -68,7 +86,43 @@ export function findMasterCandidates(parsed={},masters=[],sourcePosts=[]){
     else if(bestText>=.50){score+=12;reasons.push('texto similar');}
     else if(bestText>=.32){score+=6;reasons.push('texto parcialmente similar');}
 
-    if(score>=35)rows.push({master:m,score:Math.min(100,score),reasons,best_text_similarity:bestText});
+    // Price is only used as a hard comparison when the external price is
+    // explicitly confirmed as USD. This avoids treating Marketplace's
+    // platform currency label as a factual USD conversion.
+    let price_delta_ratio=null;
+    if(verifiedUsd(parsed)&&m.price_usd){
+      price_delta_ratio=priceDeltaRatio(parsed.price_usd,m.price_usd);
+      if(price_delta_ratio!=null){
+        if(price_delta_ratio<=0.08){
+          score+=10;reasons.push('precio compatible');
+        }else if(price_delta_ratio<=0.20){
+          score-=8;warnings.push('precio con diferencia moderada');
+        }else if(price_delta_ratio<=0.40){
+          score-=20;warnings.push('precio con diferencia importante');
+        }else{
+          // More than 40% difference is a major identity conflict.
+          score-=38;warnings.push('precio fuertemente incompatible');
+        }
+
+        // >60% difference: discard unless there is unusually strong identity
+        // evidence from exact residence + area + specs + very similar source text.
+        const strongIdentity =
+          sameResidence && sameArea &&
+          (sameBeds||parsed.bedrooms==null||m.bedrooms==null) &&
+          (sameBaths||parsed.bathrooms==null||m.bathrooms==null) &&
+          bestText>=0.65;
+
+        if(price_delta_ratio>0.60&&!strongIdentity)continue;
+      }
+    }
+
+    if(score>=30){
+      rows.push({
+        master:m,
+        score:Math.max(0,Math.min(100,Math.round(score))),
+        reasons,warnings,best_text_similarity:bestText,price_delta_ratio
+      });
+    }
   }
   return rows.sort((a,b)=>b.score-a.score);
 }

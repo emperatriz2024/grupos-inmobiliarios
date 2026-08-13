@@ -577,3 +577,13 @@
 .evidenceRow.medium span{color:#d1b969}
 .evidenceRow.missing{border-color:#4a2921;background:#150d0a}
 .evidenceRow.missing span{color:#c98672}
+
+
+/* v0.5.2.2 — Marketplace metadata + publisher/captor split */
+.externalPriceHint{display:block;margin-top:6px;color:#6f684f;font-size:7px;line-height:1.45}
+.externalPublisherBox{
+  border-radius:11px;padding:10px;margin-top:8px;background:#11131a;border:1px solid #2a3348
+}
+.externalPublisherBox>span{display:block;color:#7f98c7;font-size:7px;margin-bottom:4px}
+.externalPublisherBox strong{display:block;font-size:11px;color:#ddd}
+.externalPublisherBox small{display:block;color:#737b8c;font-size:8px;line-height:1.4;margin-top:3px}

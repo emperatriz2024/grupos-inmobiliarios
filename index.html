@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0521" />
+  <link rel="stylesheet" href="./styles.css?v=0522" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.2.1 CORE</div>
+      <div class="version">v0.5.2.2 CORE</div>
     </header>
 
     <section class="stats">
@@ -260,11 +260,30 @@
             <input id="externalUrl" type="url" inputmode="url" placeholder="https://...">
           </label>
 
-          <div class="externalGrid">
-            <label>Cuenta / asesor que publicó
-              <input id="externalAgentName" placeholder="@usuario o nombre">
+          <label>Título del anuncio
+            <input id="externalTitle" placeholder="Ej. Casa en venta Monteserrino, San Diego Carabobo">
+          </label>
+
+          <div class="externalGrid externalPriceGrid">
+            <label>Precio publicado
+              <input id="externalListedPrice" inputmode="decimal" placeholder="Ej. 90.000">
             </label>
-            <label>Teléfono si aparece
+            <label>Moneda real / interpretación
+              <select id="externalPriceCurrency">
+                <option value="UNVERIFIED">No confirmada</option>
+                <option value="USD">USD</option>
+                <option value="VES">Bolívares (VES)</option>
+                <option value="OTHER">Otra</option>
+              </select>
+            </label>
+          </div>
+          <small class="externalPriceHint">Marketplace puede mostrar una etiqueta de moneda de plataforma que no necesariamente coincide con la moneda negociada. Radar solo usa el precio como filtro fuerte de duplicados cuando confirmas USD.</small>
+
+          <div class="externalGrid">
+            <label>Publicador / vendedor mostrado
+              <input id="externalAgentName" placeholder="Ej. Daniela Toloza">
+            </label>
+            <label>Teléfono del publicador si aparece
               <input id="externalAgentPhone" inputmode="tel" placeholder="0412-...">
             </label>
           </div>
@@ -300,6 +319,12 @@
             <span>Posible inmueble maestro</span>
             <strong id="externalCandidateName">—</strong>
             <small id="externalCandidateMeta"></small>
+          </div>
+
+          <div id="externalPublisherBox" class="externalPublisherBox" hidden>
+            <span>Publicador / vendedor mostrado</span>
+            <strong id="externalPublisherName">—</strong>
+            <small id="externalPublisherMeta">Dato de la publicación externa; no implica que sea el captador original.</small>
           </div>
 
           <div id="externalCaptorBox" class="externalCaptorBox" hidden>
@@ -555,6 +580,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0521"></script>
+  <script type="module" src="./app.js?v=0522"></script>
 </body>
 </html>

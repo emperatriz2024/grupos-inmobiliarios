@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0521';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0521';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0521';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0521';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0521';
+import { isDemandRequest } from './intent-utils.js?v=0522';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0522';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0522';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0522';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0522';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
@@ -718,10 +718,17 @@ export async function upsertExternalCapture({capture,parsed,masterId=null,captor
   const oldPost=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).get(postId));
   const source={
     ...(oldPost||{}),id:postId,master_id:id,source_type:capture.source_type||'otro',legacy_property_id:null,
-    channel_name:capture.channel_name||capture.agent_name||null,
-    agent_name:capture.agent_name||null,agent_phone:capture.agent_phone||parsed.phone||null,
+    channel_name:capture.channel_name||capture.publisher_name||capture.agent_name||null,
+    agent_name:capture.publisher_name||capture.agent_name||null,
+    publisher_name:capture.publisher_name||capture.agent_name||null,
+    publisher_phone:capture.publisher_phone||capture.agent_phone||parsed.phone||null,
+    agent_phone:capture.publisher_phone||capture.agent_phone||parsed.phone||null,
     published_at:capture.published_at||now,detected_at:oldPost?.detected_at||now,last_detected_at:now,
     external_id:capture.external_id||null,external_url:capture.external_url||null,external_code:capture.external_code||null,
+    external_title:capture.external_title||null,
+    listed_price_raw:capture.listed_price_raw||null,
+    listed_price_value:capture.listed_price_value??null,
+    listed_price_currency:capture.listed_price_currency||'UNVERIFIED',
     original_text:capture.original_text||parsed.text||'',normalized_text:parsed.normalized||'',
     observed_price:parsed.price_usd??null,observed_area_m2:parsed.area_m2??null,observed_residence:parsed.residence||null,
     observed_bedrooms:parsed.bedrooms??null,observed_bathrooms:parsed.bathrooms??null,observed_parking:parsed.parking??null,
@@ -828,7 +835,7 @@ export async function exportDatabaseSnapshot(){
   return {
     format:'radar-inmobiliario-backup',
     backup_version:1,
-    app_version:'0.5.2.1',
+    app_version:'0.5.2.2',
     db_name:DB_NAME,
     db_version:DB_VERSION,
     created_at:new Date().toISOString(),

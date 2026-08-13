@@ -1,15 +1,27 @@
-RADAR INMOBILIARIO v0.5.2.1 — EXTRACCIÓN TRAZABLE (DEV)
+RADAR INMOBILIARIO v0.5.2.2 — MARKETPLACE METADATA (DEV)
 =========================================================
 
 1. Subir SOLO a radar-v050-dev.
 2. NO tocar main/principal.
-3. Reemplazar todos los archivos homónimos.
-4. Verificar arriba: v0.5.2.1 CORE.
+3. Reemplazar archivos homónimos.
+4. Verificar arriba: v0.5.2.2 CORE.
 5. NO borrar ni restaurar la base.
-6. Volver a pegar EXACTAMENTE la misma publicación de Monte Serino.
-7. Pulsar Analizar publicación.
-8. Debe aparecer:
-   Puestos: 2
-   ← “Estacionamiento: 2 puestos”
-9. Revisar también evidencia de precio, habitaciones, baños y metraje.
-10. No guardar todavía: primero comprobar que todos los datos extraídos sean correctos.
+
+PRUEBA MONTESERINO:
+- Fuente: Marketplace
+- Título: Casa en venta Monteserrino, San Diego Carabobo | R-MC
+- Precio publicado: 90.000
+- Moneda real: si sabes que son USD, elegir USD; si no, dejar No confirmada
+- Publicador/vendedor: Daniela Toloza
+- Descripción: pegar el texto completo
+- Analizar publicación
+
+VALIDAR:
+- 144 m²
+- 2 habitaciones
+- 1 baño
+- 2 puestos
+- Publicador mostrado: Daniela Toloza
+- Captador probable: debe mantenerse separado
+- Si precio está confirmado USD, un candidato de $25.000 NO debe clasificarse como duplicado fuerte.
+- NO guardar todavía hasta revisar el resultado.
