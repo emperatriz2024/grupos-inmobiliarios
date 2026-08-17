@@ -189,6 +189,70 @@ export async function downloadDropboxFile(path) {
   if (!r.ok) throw new Error(`No pude descargar ${path} desde Dropbox.`);
   return await r.blob();
 }
+
+export async function uploadDropboxFileOverwrite(path,blob) {
+  path = normalizePath(path);
+  const token = await getAccessToken();
+
+  const doUpload = async(authToken) => fetch(CONTENT+'/files/upload',{
+    method:'POST',
+    headers:{
+      'Authorization':`Bearer ${authToken}`,
+      'Content-Type':'application/octet-stream',
+      'Dropbox-API-Arg':JSON.stringify({
+        path,
+        mode:'overwrite',
+        autorename:false,
+        mute:true,
+        strict_conflict:false
+      })
+    },
+    body:blob
+  });
+
+  let r=await doUpload(token);
+  if(r.status===401){
+    const fresh=await refreshToken();
+    r=await doUpload(fresh);
+  }
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok){
+    const msg=data?.error_summary||data?.error?.['.tag']||`Dropbox upload ${r.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+export async function deleteDropboxFile(path) {
+  path = normalizePath(path);
+  try{
+    return await api('/files/delete_v2',{path});
+  }catch(e){
+    // If the file was already removed, the desired final state is already achieved.
+    const msg=String(e.message||'');
+    if(msg.includes('not_found')||msg.includes('path/not_found')) return {already_deleted:true};
+    throw e;
+  }
+}
+
+export async function archiveLatestDropboxFile(sourcePath,toFolder,fileName,blob) {
+  sourcePath=normalizePath(sourcePath);
+  toFolder=normalizePath(toFolder);
+  await ensureDropboxFolder(toFolder);
+
+  const targetPath=`${toFolder}/${fileName}`.replace(/\/+/g,'/');
+
+  // 1) Save the new export as the canonical/current copy in PROCESADOS.
+  // Dropbox overwrites the previous copy of this same group silently.
+  await uploadDropboxFileOverwrite(targetPath,blob);
+
+  // 2) Only after the processed copy exists, remove the pending source.
+  // Therefore a failure before this line leaves the source available for retry.
+  await deleteDropboxFile(sourcePath);
+
+  return {source_path:sourcePath,target_path:targetPath,replaced:true};
+}
+
 export async function ensureDropboxFolder(path) {
   path = normalizePath(path);
   if (!path) return;

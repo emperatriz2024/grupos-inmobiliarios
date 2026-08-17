@@ -1,26 +1,20 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.12 PRO — JERARQUÍA TERRITORIAL
+ACTUALIZACIÓN ACUMULATIVA v0.4.13 PRO
 
-IMPORTANTE:
-NO instales primero v0.4.11. v0.4.12 la sustituye.
+Esta versión incluye la jerarquía territorial de v0.4.12 MÁS el nuevo flujo de chats.
 
-1. Descomprime este ZIP.
-2. Entra al MISMO repositorio GitHub: grupos-inmobiliarios.
-3. Upload files / Subir archivos.
-4. Sube TODOS los archivos de esta carpeta.
-5. Commit changes.
-6. Espera GitHub Pages.
-7. Abre la URL una vez en Safari y recarga.
-8. Cierra y vuelve a abrir Grupos Inmobiliarios.
-9. Debe aparecer v0.4.12 PRO.
+1. Sube TODOS los archivos al mismo repositorio GitHub.
+2. Commit changes.
+3. Espera GitHub Pages.
+4. Abre la URL en Safari y recarga una vez.
+5. Cierra y vuelve a abrir la PWA.
+6. Debe decir v0.4.13 PRO.
 
-NO vacíes la base local.
+NUEVO FLUJO:
+- CHAT_PENDIENTES → procesar
+- CHAT_PROCESADOS recibe/reemplaza la copia anterior del mismo grupo
+- CHAT_PENDIENTES elimina la copia ya procesada
+
+Si un proceso falla, el ZIP queda en CHAT_PENDIENTES para reintentarlo.
+
+NO vacíes la base.
 NO reconfigures Dropbox.
-NO vuelvas a importar contactos.
-
-Al entrar en Buscar:
-1. Elige uno o varios MUNICIPIOS.
-2. Abre ZONAS / SECTORES.
-3. Solo verás ubicaciones del catálogo territorial, agrupadas por municipio.
-4. Puedes tildar varias zonas simultáneamente.
-
-La primera apertura vuelve a clasificar territorialmente el inventario existente.

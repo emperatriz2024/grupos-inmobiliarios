@@ -5,21 +5,21 @@ import {
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations
-} from './db.js?v=0412';
+} from './db.js?v=0413';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0412';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0412';
-import { isDemandRequest } from './intent-utils.js?v=0412';
-import { consolidateProperties } from './dedupe-utils.js?v=0412';
+} from './search-utils.js?v=0413';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0413';
+import { isDemandRequest } from './intent-utils.js?v=0413';
+import { consolidateProperties } from './dedupe-utils.js?v=0413';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
-  redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0412';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0412';
-import { normLocation } from './location-catalog.js?v=0412';
+  archiveLatestDropboxFile, redirectUri as dropboxRedirectUri
+} from './dropbox.js?v=0413';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0413';
+import { normLocation } from './location-catalog.js?v=0413';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -433,7 +433,7 @@ async function renderSaved() {
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0412',{type:'module'});
+    const worker = new Worker('./worker.js?v=0413',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -769,8 +769,13 @@ $('#processPending').onclick=async()=>{
         if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando últimos 60 días · ${entry.name}`;
         if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Guardando ${entry.name} · ${p.done}/${p.total}`;
       });
-      $('#dropboxProgressDetail').textContent=`Moviendo ${entry.name} a ${s.processedPath}`;
-      await moveDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name);
+      $('#dropboxProgressDetail').textContent=`Actualizando copia vigente · ${entry.name}`;
+      await archiveLatestDropboxFile(
+        entry.path_lower||entry.path_display,
+        s.processedPath,
+        entry.name,
+        blob
+      );
       ok++;
       await loadData();
     }catch(e){
@@ -783,7 +788,9 @@ $('#processPending').onclick=async()=>{
   $('#dropboxProgressBar').value=queue.length;
   $('#dropboxProgressTitle').textContent=failed?'Proceso terminado con avisos':'Todos los pendientes fueron procesados';
   $('#dropboxProgressCount').textContent=`${ok} OK${failed?` · ${failed} error`:''}`;
-  $('#dropboxProgressDetail').textContent=failed?'Los archivos con error permanecen en Chat pendiente.':'Los ZIP procesados fueron movidos a Procesado.';
+  $('#dropboxProgressDetail').textContent=failed
+    ? 'Los archivos con error permanecen en CHAT_PENDIENTES para poder reintentarlos.'
+    : 'CHAT_PENDIENTES quedó limpio. CHAT_PROCESADOS conserva una sola copia vigente por grupo.';
   $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
   await refreshDropboxPending();
 };
@@ -824,4 +831,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0411')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0412').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0413').catch(()=>{});
