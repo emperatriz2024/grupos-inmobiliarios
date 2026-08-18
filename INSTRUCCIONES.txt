@@ -1,20 +1,19 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.13 PRO
+ACTUALIZACIÓN ACUMULATIVA v0.4.14 PRO — PROCESAMIENTO RÁPIDO
 
-Esta versión incluye la jerarquía territorial de v0.4.12 MÁS el nuevo flujo de chats.
-
-1. Sube TODOS los archivos al mismo repositorio GitHub.
-2. Commit changes.
-3. Espera GitHub Pages.
-4. Abre la URL en Safari y recarga una vez.
-5. Cierra y vuelve a abrir la PWA.
-6. Debe decir v0.4.13 PRO.
-
-NUEVO FLUJO:
-- CHAT_PENDIENTES → procesar
-- CHAT_PROCESADOS recibe/reemplaza la copia anterior del mismo grupo
-- CHAT_PENDIENTES elimina la copia ya procesada
-
-Si un proceso falla, el ZIP queda en CHAT_PENDIENTES para reintentarlo.
+1. Sube TODOS los archivos al mismo repositorio GitHub: grupos-inmobiliarios.
+2. Rama: main. Carpeta: raíz /.
+3. Commit changes.
+4. Espera a que GitHub Pages publique.
+5. Abre la URL en Safari y recarga una vez.
+6. Cierra y vuelve a abrir la PWA.
+7. Verifica que diga v0.4.14 PRO.
 
 NO vacíes la base.
 NO reconfigures Dropbox.
+NO vuelvas a importar contactos.
+
+NUEVO FLUJO
+- Éxito: CHAT_PENDIENTES queda sin ese ZIP.
+- CHAT_PROCESADOS reemplaza la copia anterior del mismo grupo.
+- Fallo: el ZIP permanece en CHAT_PENDIENTES para reintentar.
+- Reprocesamientos del mismo grupo serán progresivamente más rápidos gracias al modo incremental.

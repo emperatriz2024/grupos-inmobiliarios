@@ -2,24 +2,24 @@
 import {
   mergeProperties, addImport, getStats, getRecentImports, clearDatabase,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties,
-  learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
+  learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats, getLatestImportForGroup,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations
-} from './db.js?v=0413';
+} from './db.js?v=0414';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0413';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0413';
-import { isDemandRequest } from './intent-utils.js?v=0413';
-import { consolidateProperties } from './dedupe-utils.js?v=0413';
+} from './search-utils.js?v=0414';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0414';
+import { isDemandRequest } from './intent-utils.js?v=0414';
+import { consolidateProperties } from './dedupe-utils.js?v=0414';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   archiveLatestDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0413';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0413';
-import { normLocation } from './location-catalog.js?v=0413';
+} from './dropbox.js?v=0414';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0414';
+import { normLocation } from './location-catalog.js?v=0414';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -431,9 +431,9 @@ async function renderSaved() {
 }
 
 
-function processZipWithWorker(file, group, progressCb) {
+function processZipWithWorker(file, group, progressCb, options={}) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0413',{type:'module'});
+    const worker = new Worker('./worker.js?v=0414',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -441,7 +441,7 @@ function processZipWithWorker(file, group, progressCb) {
       if(m.type==='done'){ worker.terminate(); resolve(m); }
     };
     worker.onerror=(e)=>{worker.terminate();reject(new Error(e.message||'Error del procesador'));};
-    worker.postMessage({file,group,locationCatalog});
+    worker.postMessage({file,group,locationCatalog,sinceTs:options.sinceTs||0,overlapHours:options.overlapHours??48});
   });
 }
 
@@ -453,6 +453,12 @@ async function saveProcessedResult(m, group, fileName, progressCb) {
     skipped_age:m.result.messages_skipped_age ?? 0,
     max_age_days:m.result.max_age_days ?? 60,
     cutoff_date:m.result.cutoff_date ?? null,
+    incremental:m.result.incremental ?? false,
+    incremental_since_ts:m.result.incremental_since_ts ?? 0,
+    latest_message_ts:m.result.latest_message_ts ?? 0,
+    latest_message_date_iso:m.result.latest_message_date_iso ?? null,
+    latest_message_time:m.result.latest_message_time ?? null,
+    dropbox_content_hash:m.dropboxContentHash ?? null,
     detected:m.result.properties_detected,unique:m.result.unique.length,
     added:saved.added,updated:saved.updated};
   await addImport(summary);
@@ -461,8 +467,9 @@ async function saveProcessedResult(m, group, fileName, progressCb) {
   return summary;
 }
 
-async function importOneZip(file, group, progressCb) {
-  const m = await processZipWithWorker(file,group,progressCb);
+async function importOneZip(file, group, progressCb, options={}) {
+  const m = await processZipWithWorker(file,group,progressCb,options);
+  m.dropboxContentHash=options.dropboxContentHash||null;
   const summary = await saveProcessedResult(m,group,file.name,progressCb);
   return {m,summary};
 }
@@ -753,44 +760,60 @@ $('#processPending').onclick=async()=>{
   const s=getDropboxSettings();
   $('#processPending').disabled=true; $('#refreshDropbox').disabled=true;
   $('#dropboxProgress').hidden=false; $('#dropboxProgressBar').max=pendingDropboxFiles.length;
-  let ok=0, failed=0;
+  let ok=0,failed=0,unchanged=0;
   const queue=[...pendingDropboxFiles];
+
   for(let i=0;i<queue.length;i++){
     const entry=queue[i];
     $('#dropboxProgressBar').value=i;
     $('#dropboxProgressTitle').textContent='Procesando chats pendientes';
     $('#dropboxProgressCount').textContent=`${i+1}/${queue.length}`;
-    $('#dropboxProgressDetail').textContent=`Descargando ${entry.name}`;
+    const group=groupFromName(entry.name);
+
     try{
+      const previous=await getLatestImportForGroup(group);
+
+      // Exact same Dropbox file: no need to unzip, parse or touch the database.
+      if(entry.content_hash && previous?.dropbox_content_hash===entry.content_hash){
+        $('#dropboxProgressDetail').textContent=`Sin cambios · archivando ${entry.name}`;
+        await archiveLatestDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name);
+        unchanged++; ok++;
+        continue;
+      }
+
+      $('#dropboxProgressDetail').textContent=`Descargando ${entry.name}`;
       const blob=await downloadDropboxFile(entry.path_lower||entry.path_display);
       const file=new File([blob],entry.name,{type:'application/zip'});
-      const group=groupFromName(entry.name);
+
+      // From the second successful export onward, analyze only the new tail of the chat
+      // with a 48-hour overlap. This preserves safety while avoiding reprocessing 60 days.
+      const sinceTs=Number(previous?.latest_message_ts||0);
       const {summary}=await importOneZip(file,group,(p)=>{
-        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando últimos 60 días · ${entry.name}`;
-        if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Guardando ${entry.name} · ${p.done}/${p.total}`;
-      });
-      $('#dropboxProgressDetail').textContent=`Actualizando copia vigente · ${entry.name}`;
-      await archiveLatestDropboxFile(
-        entry.path_lower||entry.path_display,
-        s.processedPath,
-        entry.name,
-        blob
-      );
+        if(p.phase==='process') $('#dropboxProgressDetail').textContent=sinceTs
+          ? `Analizando novedades · ${entry.name}`
+          : `Analizando últimos 60 días · ${entry.name}`;
+        if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Actualizando base · ${p.done}/${p.total}`;
+      },{sinceTs,overlapHours:48,dropboxContentHash:entry.content_hash||null});
+
+      $('#dropboxProgressDetail').textContent=`Limpiando pendiente · ${entry.name}`;
+      await archiveLatestDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name);
       ok++;
-      await loadData();
     }catch(e){
       failed++;
       console.error(entry.name,e);
       $('#dropboxProgressDetail').textContent=`Error en ${entry.name}: ${e.message}`;
-      await new Promise(r=>setTimeout(r,1200));
+      await new Promise(r=>setTimeout(r,500));
     }
   }
+
+  // Expensive UI/database reload happens ONCE, not after every ZIP.
+  await loadData();
   $('#dropboxProgressBar').value=queue.length;
-  $('#dropboxProgressTitle').textContent=failed?'Proceso terminado con avisos':'Todos los pendientes fueron procesados';
-  $('#dropboxProgressCount').textContent=`${ok} OK${failed?` · ${failed} error`:''}`;
+  $('#dropboxProgressTitle').textContent=failed?'Proceso terminado con avisos':'Pendientes procesados';
+  $('#dropboxProgressCount').textContent=`${ok} OK${unchanged?` · ${unchanged} sin cambios`:''}${failed?` · ${failed} error`:''}`;
   $('#dropboxProgressDetail').textContent=failed
-    ? 'Los archivos con error permanecen en CHAT_PENDIENTES para poder reintentarlos.'
-    : 'CHAT_PENDIENTES quedó limpio. CHAT_PROCESADOS conserva una sola copia vigente por grupo.';
+    ? 'Solo los archivos con error permanecen en CHAT_PENDIENTES. Los demás fueron eliminados de la bandeja.'
+    : 'CHAT_PENDIENTES quedó vacío. CHAT_PROCESADOS conserva únicamente la copia vigente de cada grupo.';
   $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
   await refreshDropboxPending();
 };
@@ -831,4 +854,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0411')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0413').catch(()=>{});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0414').catch(()=>{});

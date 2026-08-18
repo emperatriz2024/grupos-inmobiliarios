@@ -1,6 +1,6 @@
-import { normLoc } from './location-utils.js?v=0413';
-import { propertyTimestamp } from './date-utils.js?v=0413';
-import { isDemandRequest } from './intent-utils.js?v=0413';
+import { normLoc } from './location-utils.js?v=0414';
+import { propertyTimestamp } from './date-utils.js?v=0414';
+import { isDemandRequest } from './intent-utils.js?v=0414';
 
 const STOP=new Set('venta vendo vende alquiler alquilo alquila propiedad inmueble oportunidad precio ref referencia whatsapp colega asesor asesora inmobiliario inmobiliaria carabobo valencia disponible disponibilidad contacto informacion info habitaciones habitacion banos bano puestos puesto estacionamiento estacionamientos mts m2 metros con para por del de la el los las una uno un y en se'.split(' '));
 function norm(s=''){return normLoc(String(s)).replace(/\b(?:0412|0414|0416|0424|0426)\s*\d+\b/g,' ').replace(/\b\d{6,}\b/g,' ').replace(/\s+/g,' ').trim();}

@@ -1,7 +1,7 @@
-import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0413';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0413';
-import { resolveLocationRecord } from './location-catalog.js?v=0413';
-import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0413';
+import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0414';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0414';
+import { resolveLocationRecord } from './location-catalog.js?v=0414';
+import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0414';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
 */
@@ -43,7 +43,13 @@ function cutoffForDays(maxAgeDays, now=Date.now()) {
 export function parseWhatsAppText(text, group='Grupo', options={}) {
   const maxAgeDays = Number(options.maxAgeDays ?? 60);
   const now = options.now ?? Date.now();
-  const cutoff = maxAgeDays > 0 ? cutoffForDays(maxAgeDays, now) : null;
+  const ageCutoff = maxAgeDays > 0 ? cutoffForDays(maxAgeDays, now) : null;
+  const sinceTs = Number(options.sinceTs || 0);
+  const overlapHours = Number(options.overlapHours ?? 48);
+  const incrementalCutoff = sinceTs > 0 ? new Date(sinceTs - overlapHours*60*60*1000) : null;
+  const cutoff = ageCutoff && incrementalCutoff
+    ? new Date(Math.max(ageCutoff.getTime(), incrementalCutoff.getTime()))
+    : (incrementalCutoff || ageCutoff);
   // WhatsApp export follows the device locale. Your current exports are MDY,
   // but we detect it automatically so the engine also supports DMY exports.
   const dateOrder = detectDateOrderFromText(text, 'MDY');
@@ -70,16 +76,21 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
       totalMessages++;
 
       const msgDate = parseMessageDate(m[1], dateOrder);
-      if (cutoff && msgDate && msgDate < cutoff) {
-        skippedOld++;
-        current = null; // no acumulamos ni las líneas del mensaje viejo
-        continue;
-      }
 
       let hour = Number(m[2]);
       const ap = m[5].toLowerCase();
       if (ap === 'p' && hour !== 12) hour += 12;
       if (ap === 'a' && hour === 12) hour = 0;
+
+      // Compare full date+time. This matters for fast incremental imports:
+      // comparing only midnight would incorrectly discard same-day messages.
+      const msgDateTime = msgDate ? new Date(msgDate) : null;
+      if (msgDateTime) msgDateTime.setHours(hour,Number(m[3])||0,Number(m[4])||0,0);
+      if (cutoff && msgDateTime && msgDateTime < cutoff) {
+        skippedOld++;
+        current = null; // no acumulamos ni las líneas del mensaje viejo
+        continue;
+      }
 
       current = {
         date: m[1],
@@ -101,6 +112,9 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
   rows.maxAgeDays = maxAgeDays;
   rows.dateOrder = dateOrder;
   rows.cutoffDate = cutoff ? cutoff.toISOString().slice(0,10) : null;
+  rows.incremental = sinceTs > 0;
+  rows.incrementalSinceTs = sinceTs || 0;
+  rows.overlapHours = overlapHours;
   return rows;
 }
 
@@ -282,7 +296,12 @@ function splitMultiListingMessage(message){
 
 export function processChatText(text, group='Grupo', options={}) {
   const maxAgeDays = Number(options.maxAgeDays ?? 60);
-  const messages = parseWhatsAppText(text, group, {maxAgeDays, now: options.now ?? Date.now()});
+  const messages = parseWhatsAppText(text, group, {
+    maxAgeDays,
+    now: options.now ?? Date.now(),
+    sinceTs: options.sinceTs || 0,
+    overlapHours: options.overlapHours ?? 48
+  });
 
   const properties=[];
   let requestsSkipped=0;
@@ -315,6 +334,11 @@ export function processChatText(text, group='Grupo', options={}) {
     }
   }
 
+  const latestMessage = messages.length ? messages[messages.length-1] : null;
+  const latestMessageTs = latestMessage
+    ? messageDateTime(latestMessage.date,latestMessage.time,latestMessage.date_iso,latestMessage.date_order)
+    : 0;
+
   return {
     messages:messages.length,
     messages_total:messages.totalMessages ?? messages.length,
@@ -322,6 +346,12 @@ export function processChatText(text, group='Grupo', options={}) {
     max_age_days:maxAgeDays,
     cutoff_date:messages.cutoffDate ?? null,
     date_order:messages.dateOrder ?? 'MDY',
+    incremental:messages.incremental ?? false,
+    incremental_since_ts:messages.incrementalSinceTs ?? 0,
+    overlap_hours:messages.overlapHours ?? 48,
+    latest_message_ts:latestMessageTs || 0,
+    latest_message_date_iso:latestMessage?.date_iso || null,
+    latest_message_time:latestMessage?.time || null,
     requests_skipped:requestsSkipped,
     multi_items_created:multiItemsCreated,
     properties_detected:properties.length,

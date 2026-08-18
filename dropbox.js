@@ -235,22 +235,28 @@ export async function deleteDropboxFile(path) {
   }
 }
 
-export async function archiveLatestDropboxFile(sourcePath,toFolder,fileName,blob) {
+export async function archiveLatestDropboxFile(sourcePath,toFolder,fileName) {
   sourcePath=normalizePath(sourcePath);
   toFolder=normalizePath(toFolder);
   await ensureDropboxFolder(toFolder);
-
   const targetPath=`${toFolder}/${fileName}`.replace(/\/+/g,'/');
 
-  // 1) Save the new export as the canonical/current copy in PROCESADOS.
-  // Dropbox overwrites the previous copy of this same group silently.
-  await uploadDropboxFileOverwrite(targetPath,blob);
+  // Fast server-side replacement: no second upload of the ZIP over the internet.
+  // If an older snapshot exists, delete it. If the move fails afterwards,
+  // the new ZIP remains in CHAT_PENDIENTES and can be retried safely.
+  try{ await deleteDropboxFile(targetPath); }catch(e){
+    const msg=String(e.message||'');
+    if(!msg.includes('not_found')&&!msg.includes('path/not_found')) throw e;
+  }
 
-  // 2) Only after the processed copy exists, remove the pending source.
-  // Therefore a failure before this line leaves the source available for retry.
-  await deleteDropboxFile(sourcePath);
-
-  return {source_path:sourcePath,target_path:targetPath,replaced:true};
+  const result=await api('/files/move_v2',{
+    from_path:sourcePath,
+    to_path:targetPath,
+    allow_shared_folder:true,
+    autorename:false,
+    allow_ownership_transfer:false
+  });
+  return {source_path:sourcePath,target_path:targetPath,replaced:true,server_side:true,result};
 }
 
 export async function ensureDropboxFolder(path) {

@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0413';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0413';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0413';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0413';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0413';
+import { isDemandRequest } from './intent-utils.js?v=0414';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0414';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0414';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0414';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0414';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 5;
@@ -121,13 +121,48 @@ export async function mergeProperties(records, onProgress) {
 
 export async function addImport(summary) {
   const db = await openDB();
-  const tx = db.transaction(IMPORT_STORE, 'readwrite');
-  const id = await reqP(tx.objectStore(IMPORT_STORE).add({
-    ...summary,
-    imported_at: new Date().toISOString()
-  }));
+  let newId = null;
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(IMPORT_STORE,'readwrite');
+    const store=tx.objectStore(IMPORT_STORE);
+    const req=store.openCursor();
+    req.onerror=()=>reject(req.error);
+    req.onsuccess=()=>{
+      const c=req.result;
+      if(!c){
+        const add=store.add({...summary,imported_at:new Date().toISOString()});
+        add.onsuccess=()=>{newId=add.result;};
+        return;
+      }
+      // Snapshot semantics: only the latest successful import for a group is kept.
+      if(String(c.value?.group||'')===String(summary.group||'')) c.delete();
+      c.continue();
+    };
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+    tx.onabort=()=>reject(tx.error);
+  });
   db.close();
-  return id;
+  return newId;
+}
+
+export async function getLatestImportForGroup(group) {
+  const db=await openDB();
+  const tx=db.transaction(IMPORT_STORE,'readonly');
+  const store=tx.objectStore(IMPORT_STORE);
+  let found=null;
+  await new Promise((resolve,reject)=>{
+    const req=store.openCursor(null,'prev');
+    req.onerror=()=>reject(req.error);
+    req.onsuccess=()=>{
+      const c=req.result;
+      if(!c) return resolve();
+      if(String(c.value?.group||'')===String(group||'')){found=c.value;return resolve();}
+      c.continue();
+    };
+  });
+  db.close();
+  return found;
 }
 
 export async function getStats() {
