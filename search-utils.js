@@ -42,6 +42,7 @@ export function formatMoney(v) {
 export function whatsappNumber(phone='') {
   let d = String(phone).replace(/\D/g,'');
   if (!d) return '';
+  if(d.startsWith('00'))d=d.slice(2);
   if (d.startsWith('0')) d = '58' + d.slice(1);
   else if (!d.startsWith('58') && d.length === 10) d = '58' + d;
   return d;

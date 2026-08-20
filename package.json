@@ -1,0 +1,10 @@
+{
+  "name": "radar-inmobiliario-v060-professional-audit",
+  "private": true,
+  "version": "0.6.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node --check app.js && node --check db.js && node --check engine.js && node --check dedupe-utils.js && node scripts/validate-architecture.mjs"
+  }
+}

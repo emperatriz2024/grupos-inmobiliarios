@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0530" />
+  <link rel="stylesheet" href="./styles.css?v=0600" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.5.3 CORE</div>
+      <div class="version">V0.6.0 PROFESSIONAL AUDIT</div>
     </header>
 
     <section class="stats">
@@ -259,6 +259,11 @@
           <label>Enlace de la publicación
             <input id="externalUrl" type="url" inputmode="url" placeholder="https://...">
           </label>
+          <div class="externalUrlActions">
+            <button id="analyzeExternalUrl" class="ghost" type="button">Analizar URL</button>
+            <button id="clearExternalSource" class="miniGhost" type="button">Limpiar / Nueva publicación</button>
+          </div>
+          <small id="externalUrlStatus" class="externalUrlStatus" aria-live="polite"></small>
 
           <label>Título del anuncio
             <input id="externalTitle" placeholder="Ej. Casa en venta Monteserrino, San Diego Carabobo">
@@ -331,6 +336,7 @@
             <span>Captador probable conocido</span>
             <strong id="externalCaptorName">—</strong>
             <small id="externalCaptorMeta"></small>
+            <a id="externalCaptorWhatsapp" class="ghost" target="_blank" rel="noopener noreferrer" hidden>Consultar disponibilidad por WhatsApp</a>
           </div>
 
           <div class="externalSaveActions">
@@ -435,7 +441,7 @@
         <div class="sectionTitle"><span>↻</span><div><h2>Importaciones recientes</h2><p>Historial guardado localmente.</p></div></div>
         <div id="recent"></div>
       </section>
-      <div class="dangerZone"><button id="resetBtn" class="ghost">Vaciar toda la base local</button></div>
+      <div class="dangerZone"><button id="resetBtn" class="ghost" disabled title="Deshabilitado en V0.6 Professional Audit">Borrado de base deshabilitado</button></div>
     </section>
 
     <section id="viewSaved" class="view">
@@ -601,6 +607,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0530"></script>
+  <script type="module" src="./app.js?v=0600"></script>
 </body>
 </html>

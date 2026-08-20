@@ -160,10 +160,10 @@ function parseNumber(raw) {
 function priceContextFlags(line=''){
   const n=normalizeText(line);
   return {
-    negative:/\b(condominio|mantenimiento|mensualidad|cuota|reserva|apartado|honorarios|comision|contrato|deposito|adelantad[oa]s?|gastos?|servicios?)\b/i.test(n),
+    negative:/\b(condominio|mantenimiento|mensualidad|cuota|reserva|apartado|honorarios|comision|contrato|deposito|adelantad[oa]s?|gastos?|servicios?|codigo|cod|id|referencia\s+(?:inmobiliaria|interna)|m2|mts2|metros?)\b/i.test(n),
     current:/\b(ahora|oferta|nuevo\s+precio|precio\s+actual|rebaja|remate|precio\s+final)\b/i.test(n),
     old:/\b(antes|precio\s+anterior|precio\s+viejo)\b/i.test(n),
-    sale:/\b(precio|precio\s+de\s+venta|venta|vendo|vende|ref(?:erencia)?|inversion|valor)\b/i.test(n),
+    sale:/\b(precio|precio\s+de\s+venta|venta|vendo|vende|inversion|valor)\b/i.test(n),
     rent:/\b(canon|alquiler|mensual)\b/i.test(n)
   };
 }
@@ -174,6 +174,10 @@ export function extractPriceDetailed(text, operation=null) {
   const add=(line,lineIndex,pos,rawValue,value,kind,baseScore)=>{
     if(!Number.isFinite(value)||value<=0||value>50000000)return;
     const flags=priceContextFlags(line);
+    const before=normalizeText(line.slice(0,Math.max(0,pos)));
+    const currentAt=Math.max(before.lastIndexOf('ahora'),before.lastIndexOf('nuevo precio'),before.lastIndexOf('precio actual'),before.lastIndexOf('rebaja'));
+    const oldAt=Math.max(before.lastIndexOf('antes'),before.lastIndexOf('precio anterior'),before.lastIndexOf('precio viejo'));
+    if(currentAt>=0||oldAt>=0){flags.current=currentAt>oldAt;flags.old=oldAt>currentAt;}
     let score=baseScore;
     if(flags.negative) score-=90;
     if(flags.current) score+=18;
@@ -185,7 +189,7 @@ export function extractPriceDetailed(text, operation=null) {
 
   raw.split('\n').slice(0,35).forEach((line,lineIndex)=>{
     // Highest confidence: explicit commercial label near the amount.
-    const explicit=/\b(precio(?:\s+de\s+(?:venta|inversion))?|ref(?:erencia)?\.?|inversion|valor(?:\s+de\s+venta)?|canon)\s*[:.\-]?\s*(?:us\s*\$|usd\s*\$?|\$)?\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)(?:\s*(k|mil))?/gi;
+    const explicit=/\b(precio(?:\s+de\s+(?:venta|inversion))?|inversion|valor(?:\s+de\s+venta)?|canon)\s*[:.\-]?\s*(?:us\s*\$|usd\s*\$?|\$)?\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)(?:\s*(k|mil))?/gi;
     for(const m of line.matchAll(explicit)){
       let v=parseNumber(m[2]); const shorthand=!!m[3];
       if(shorthand)v*=1000;
@@ -236,11 +240,16 @@ export function extractPriceDetailed(text, operation=null) {
   if(ambiguous&&confidence==='medium')confidence='low';
 
   return {
-    value:best.value,
+    // Two equally plausible, materially different prices are not a confirmed
+    // price. Preserve every candidate for manual review instead of guessing.
+    value:ambiguous?null:best.value,
     confidence,
     status:ambiguous?'ambiguous':'ok',
     evidence:best.line||best.raw,
-    candidates:usable.slice(0,8).map(c=>({value:c.value,score:c.score,kind:c.kind,line:c.line}))
+    candidates:usable.slice(0,8).map(c=>({
+      value:c.value,score:c.score,kind:c.kind,line:c.line,
+      role:c.flags.old?'previous':c.flags.current?'current':c.flags.negative?'non_price':c.flags.rent?'rent':c.flags.sale?'principal':'ambiguous'
+    }))
   };
 }
 
@@ -259,7 +268,7 @@ export function auditExistingPropertyPrice(property={}){
     price_confidence:detail.confidence,
     price_audit_status:changed?'corrected':detail.status,
     price_evidence:detail.evidence,
-    price_audit_version:'0511',
+    price_audit_version:'0600',
     price_audited:true
   };
 }
@@ -316,8 +325,19 @@ export function extractStructuredFieldsDetailed(rawText=''){
     {rx:/\b(\d{1,2})\s*(?:puestos?(?:\s+de)?\s+estacionamiento|puestos?|p\s*\/?\s*e|estacionamientos?)\b/i,confidence:'medium',kind:'shorthand'},
     {rx:/\bpuestos?\s*[:\-]?\s*(\d{1,2})\b/i,confidence:'medium',kind:'explicit'}
   ]);
+  const noParkingLine=cleanText(rawText).split('\n').find(line=>/\b(?:no\s+(?:tiene|posee|incluye|cuenta\s+con)|sin)\s+(?:puesto|puestos|estacionamiento|parking)\b/i.test(normalizeText(line)));
+  if(noParkingLine){parking.value=0;parking.evidence=noParkingLine.trim();parking.confidence='high';parking.kind='explicit_zero';}
 
-  return {area_m2:area,bedrooms,bathrooms,parking};
+  const normalized=normalizeText(rawText);
+  const study=/\bestudio\b/i.test(normalized);
+  const studyAsBedroom=/\bestudio\s+(?:funciona|usado|convertido|habilitado)\s+como\s+(?:habitacion|dormitorio)\b/i.test(normalized);
+  const serviceBedroom=/\b(?:habitacion|cuarto|dormitorio)\s+de\s+servicio\b|\bservicio\s+con\s+(?:habitacion|cuarto)\b/i.test(normalized);
+  return {
+    area_m2:area,bedrooms,bathrooms,parking,
+    study:{value:study,evidence:study?(cleanText(rawText).split('\n').find(x=>/\bestudio\b/i.test(x))||'').trim()||null:null,confidence:study?'high':'missing',kind:'explicit'},
+    study_as_bedroom:{value:studyAsBedroom,evidence:studyAsBedroom?(cleanText(rawText).split('\n').find(x=>/\bestudio\b/i.test(x))||'').trim()||null:null,confidence:studyAsBedroom?'high':'missing',kind:'explicit'},
+    service_bedroom:{value:serviceBedroom,evidence:serviceBedroom?(cleanText(rawText).split('\n').find(x=>/\bservicio\b/i.test(x))||'').trim()||null:null,confidence:serviceBedroom?'high':'missing',kind:'explicit'}
+  };
 }
 
 function firstNumber(n, patterns) {
@@ -374,17 +394,22 @@ export function extractProperty(message, options={}) {
     zone_id:smartLocation.zone_id,zone,zone_detected:smartLocation.zone_detected,zone_detected_norm:smartLocation.zone_detected_norm,zone_confidence:smartLocation.zone_confidence,zone_matches:smartLocation.zone_matches,
     complex_id:smartLocation.complex_id,complex_detected:smartLocation.complex_detected,complex_detected_norm:smartLocation.complex_detected_norm,complex_confidence:smartLocation.complex_confidence,location_requires_review:smartLocation.requires_review,
     location_terms:locationTerms,residence:smartLocation.complex||smartLocation.complex_detected||null,price_usd:price,
-    price_confidence:priceDetail.confidence,price_audit_status:priceDetail.status,price_evidence:priceDetail.evidence,price_audit_version:'0511',price_audited:true,
+    price_confidence:priceDetail.confidence,price_audit_status:priceDetail.status,price_evidence:priceDetail.evidence,price_audit_version:'0600',price_audited:true,
     area_m2:structured.area_m2.value,
     bedrooms:structured.bedrooms.value,
     bathrooms:structured.bathrooms.value,
     parking:structured.parking.value,
+    study:structured.study.value,
+    study_as_bedroom:structured.study_as_bedroom.value,
+    service_bedroom:structured.service_bedroom.value,
     extraction_evidence:{
       price:priceDetail.evidence||null,
       area_m2:structured.area_m2.evidence||null,
       bedrooms:structured.bedrooms.evidence||null,
       bathrooms:structured.bathrooms.evidence||null,
       parking:structured.parking.evidence||null
+      ,study:structured.study.evidence||null
+      ,service_bedroom:structured.service_bedroom.evidence||null
     },
     extraction_confidence:{
       price:priceDetail.confidence||'missing',
@@ -392,6 +417,8 @@ export function extractProperty(message, options={}) {
       bedrooms:structured.bedrooms.confidence,
       bathrooms:structured.bathrooms.confidence,
       parking:structured.parking.confidence
+      ,study:structured.study.confidence
+      ,service_bedroom:structured.service_bedroom.confidence
     },
     phone:extractPhone(message.text),
     planta_electrica:/\bplanta\s+(?:electrica|100|50|total|parcial)|\bplanta\s*100\s*%/i.test(n),
@@ -402,7 +429,12 @@ export function extractProperty(message, options={}) {
     financiamiento:/\b(financiamiento|financia|cuotas?|inicial)\b/i.test(n),
     piscina:/\bpiscina\b/i.test(n),
     text:message.text,
-    normalized:n
+    normalized:n,
+    sourceType:options.sourceType||'whatsapp_zip',
+    sourceChannel:options.sourceChannel||'primary_number',
+    sourceId:options.sourceId||null,
+    importedAt:options.importedAt||new Date().toISOString(),
+    publishedAt:message.date_iso||message.date||null
   };
   rec.id = simpleHash(n);
   rec.location_pending=(smartLocation.pending||[]).map(x=>({...x,property_id:rec.id,group:message.group,sender:message.sender,date:message.date,date_iso:message.date_iso,sample_text:message.text.slice(0,1800)}));
@@ -444,14 +476,19 @@ export function processChatText(text, group='Grupo', options={}) {
   const properties=[];
   let requestsSkipped=0;
   let multiItemsCreated=0;
-  for(const m of messages){
+  for(let messageIndex=0;messageIndex<messages.length;messageIndex++){
+    const m=messages[messageIndex];
     if(isDemandRequest(m.text)){ requestsSkipped++; continue; }
     const parts=splitMultiListingMessage(m);
     if(parts.length>1) multiItemsCreated += parts.length;
     for(const part of parts){
-      const r=extractProperty(part,{locationCatalog:options.locationCatalog});
+      const r=extractProperty(part,{
+        locationCatalog:options.locationCatalog,sourceType:options.sourceType,sourceChannel:options.sourceChannel,
+        sourceId:options.sourceId,importedAt:options.importedAt
+      });
       if(r) properties.push(r);
     }
+    if(messageIndex%250===0||messageIndex===messages.length-1)options.onProgress?.({done:messageIndex+1,total:messages.length});
   }
 
   const unique=new Map();

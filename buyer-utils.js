@@ -8,6 +8,7 @@ const num = v => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
+const knownNum=v=>{const n=Number(v);return v!==null&&v!==undefined&&v!==''&&Number.isFinite(n)&&n>=0?n:null;};
 const bool = v => v === true || v === 1 || v === '1' || v === 'true';
 
 export const BUYER_FEATURES = [
@@ -137,9 +138,9 @@ export function scoreBuyerMaster(buyer, master) {
   if(minP!=null||maxP!=null){
     if(price==null) unknownHard.push('Precio no detectado');
     else{
-      if(maxP!=null&&price>maxP*(1+tolerance)){
+      if(maxP!=null&&price>maxP){
         const over=(price-maxP)/maxP;
-        if(over>.15)return null;
+        if(tolerance<=0||over>tolerance)return null;
         hardFails.push(`Sobre presupuesto: $${Math.round(price-maxP).toLocaleString('es-VE')}`);
       }else if(minP!=null&&price<minP) gaps.push('Precio por debajo del rango objetivo');
       else reasons.push('Dentro del presupuesto');
@@ -147,13 +148,13 @@ export function scoreBuyerMaster(buyer, master) {
   }
 
   const hardMinimums=[
-    ['Habitaciones',num(master.bedrooms),num(buyer.min_bedrooms)],
-    ['Baños',num(master.bathrooms),num(buyer.min_bathrooms)],
-    ['Puestos',num(master.parking),num(buyer.min_parking)]
+    ['Habitaciones',knownNum(master.bedrooms),num(buyer.min_bedrooms)],
+    ['Baños',knownNum(master.bathrooms),num(buyer.min_bathrooms)],
+    ['Puestos',knownNum(master.parking),num(buyer.min_parking)]
   ];
   for(const [label,value,target] of hardMinimums){
     if(target==null)continue;
-    if(value==null)unknownHard.push(`${label}: dato no detectado`);
+    if(value==null)unknownHard.push(`${label}: dato por verificar`);
     else if(value<target)hardFails.push(`${label}: ${value}, mínimo ${target}`);
     else reasons.push(`${label} cumplen`);
   }

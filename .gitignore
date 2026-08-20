@@ -1,0 +1,25 @@
+# Local secrets and environment configuration
+.env
+.env.*
+!.env.example
+
+# Dependencies, caches and build/test output
+node_modules/
+.cache/
+cache/
+coverage/
+dist/
+build/
+tmp/
+temp/
+*.log
+
+# Local databases and runtime state
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Generated local ZIP validation fixtures (tests generate their own in memory)
+tests/fixtures/_chat.txt
+tests/fixtures/*.zip

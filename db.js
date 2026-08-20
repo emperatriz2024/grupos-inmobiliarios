@@ -3,6 +3,7 @@ import { extractLocationTerms, bestZone } from './location-utils.js?v=0530';
 import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0530';
 import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0530';
 import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0530';
+import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
 const DB_VERSION = 6;
@@ -179,7 +180,7 @@ export async function patchPropertyPriceAudits(records=[]){
             price_confidence:rec.price_confidence||'missing',
             price_audit_status:rec.price_audit_status||'ok',
             price_evidence:rec.price_evidence||null,
-            price_audit_version:'0511',
+            price_audit_version:rec.price_audit_version||'0600',
             price_audited:true
           });updated++;
         };
@@ -506,7 +507,7 @@ function legacySources(p={}){
   const rows=(p.sources&&p.sources.length)?p.sources:[{group:p.group,sender:p.sender,date:p.date,date_iso:p.date_iso,date_order:p.date_order,time:p.time,phone:p.phone}];
   return rows.filter(Boolean);
 }
-function masterSnapshot(p={},id,existing=null){
+export function masterSnapshot(p={},id,existing=null){
   const now=new Date().toISOString();
   return {
     ...(existing||{}),id,
@@ -521,6 +522,8 @@ function masterSnapshot(p={},id,existing=null){
     price_audited:p.price_audited===true||existing?.price_audited===true,
     area_m2:p.area_m2??existing?.area_m2??null,
     bedrooms:p.bedrooms??existing?.bedrooms??null,bathrooms:p.bathrooms??existing?.bathrooms??null,parking:p.parking??existing?.parking??null,
+    study:p.study??existing?.study??false,study_as_bedroom:p.study_as_bedroom??existing?.study_as_bedroom??false,
+    service_bedroom:p.service_bedroom??existing?.service_bedroom??false,
     planta_electrica:!!(p.planta_electrica||existing?.planta_electrica),planta_100:!!(p.planta_100||existing?.planta_100),
     pozo:!!(p.pozo||existing?.pozo),tanque:!!(p.tanque||existing?.tanque),amoblado:!!(p.amoblado||existing?.amoblado),
     financiamiento:!!(p.financiamiento||existing?.financiamiento),piscina:!!(p.piscina||existing?.piscina),
@@ -587,6 +590,8 @@ export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
         const postId=`src_wa_${radarHash(sourceKey)}`,old=postMap.get(postId);
         postMap.set(postId,{
           ...(old||{}),id:postId,master_id:masterId,source_type:'whatsapp',legacy_property_id:legacyId,
+          sourceType:p.sourceType||'whatsapp_zip',sourceChannel:p.sourceChannel||'primary_number',sourceId:p.sourceId||postId,
+          importedAt:p.importedAt||old?.importedAt||now,publishedAt:sourceDateTime(src,p),
           channel_name:src.group||p.group||null,agent_name:src.sender||p.sender||null,agent_phone:src.phone||p.phone||null,
           published_at:sourceDateTime(src,p),detected_at:old?.detected_at||p.first_seen_at||now,last_detected_at:p.last_seen_at||old?.last_detected_at||now,
           external_id:null,external_url:null,external_code:null,original_text:p.text||'',normalized_text:p.normalized||'',
@@ -659,6 +664,8 @@ function externalMasterSnapshot(parsed={},id,existing=null,capture={}){
     bedrooms:parsed.bedrooms??existing?.bedrooms??null,
     bathrooms:parsed.bathrooms??existing?.bathrooms??null,
     parking:parsed.parking??existing?.parking??null,
+    study:parsed.study??existing?.study??false,study_as_bedroom:parsed.study_as_bedroom??existing?.study_as_bedroom??false,
+    service_bedroom:parsed.service_bedroom??existing?.service_bedroom??false,
     planta_electrica:!!(parsed.planta_electrica||existing?.planta_electrica),
     planta_100:!!(parsed.planta_100||existing?.planta_100),
     pozo:!!(parsed.pozo||existing?.pozo),
@@ -718,6 +725,8 @@ export async function upsertExternalCapture({capture,parsed,masterId=null,captor
   const oldPost=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).get(postId));
   const source={
     ...(oldPost||{}),id:postId,master_id:id,source_type:capture.source_type||'otro',legacy_property_id:null,
+    sourceType:capture.source_type||'external_web',sourceChannel:capture.source_channel||capture.source_type||'external_web',sourceId:capture.source_id||postId,
+    importedAt:oldPost?.importedAt||now,publishedAt:capture.published_at||now,
     channel_name:capture.channel_name||capture.publisher_name||capture.agent_name||null,
     agent_name:capture.publisher_name||capture.agent_name||null,
     publisher_name:capture.publisher_name||capture.agent_name||null,
@@ -806,9 +815,11 @@ export async function refreshExternalMasterVigency(){
   const db=await openDB();
   const sources=await reqP(db.transaction(SOURCE_POST_STORE,'readonly').objectStore(SOURCE_POST_STORE).getAll());
   const masters=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll());
+  const byMaster=new Map();
+  for(const source of sources){if(!source.master_id)continue;const rows=byMaster.get(source.master_id)||[];rows.push(source);byMaster.set(source.master_id,rows);}
   const changed=[];
   for(const master of masters){
-    const related=sources.filter(x=>x.master_id===master.id);
+    const related=byMaster.get(master.id)||[];
     if(!related.some(x=>x.source_type!=='whatsapp'))continue;
     const live=related.filter(_sourceLiveForMaster);
     const hasVerified=live.some(x=>x.source_type!=='whatsapp'&&x.availability_status==='verified'&&x.last_verified_at&&_daysSinceDb(x.last_verified_at)<=7);
@@ -903,6 +914,7 @@ const BACKUP_STORES=[
   COMPLEX_STORE,LOCATION_PENDING_STORE,MASTER_STORE,SOURCE_POST_STORE,BUYER_STORE,
   MATCH_STORE,SYNC_QUEUE_STORE
 ];
+export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 
 export async function exportDatabaseSnapshot(){
   const db=await openDB();
@@ -917,8 +929,9 @@ export async function exportDatabaseSnapshot(){
   }finally{db.close();}
   return {
     format:'radar-inmobiliario-backup',
-    backup_version:1,
-    app_version:'0.5.3',
+    backup_version:2,
+    schemaVersion:BACKUP_SCHEMA_VERSION,
+    app_version:APP_VERSION,
     db_name:DB_NAME,
     db_version:DB_VERSION,
     created_at:new Date().toISOString(),
@@ -928,11 +941,38 @@ export async function exportDatabaseSnapshot(){
   };
 }
 
-function validateBackupSnapshot(snapshot){
-  if(!snapshot||snapshot.format!=='radar-inmobiliario-backup'||Number(snapshot.backup_version)!==1) throw new Error('Este archivo no es un respaldo válido de Radar Inmobiliario.');
+export function migrateBackupSnapshot(snapshot){
+  if(!snapshot||snapshot.format!=='radar-inmobiliario-backup')throw new Error('Este archivo no es un respaldo válido de Radar Inmobiliario.');
+  const version=Number(snapshot.schemaVersion||snapshot.backup_version||1);
+  if(version<1||version>BACKUP_SCHEMA_VERSION)throw new Error(`Versión de respaldo no compatible: ${version}.`);
+  const stores={...(snapshot.stores||{})};
+  for(const name of BACKUP_STORES){
+    if(stores[name]===undefined||stores[name]===null)stores[name]=[];
+    else if(!Array.isArray(stores[name]))throw new Error(`La tabla ${name} del respaldo está dañada.`);
+  }
+  if(version===1){
+    stores[SOURCE_POST_STORE]=stores[SOURCE_POST_STORE].map(row=>({
+      ...row,
+      sourceType:row.sourceType||(row.source_type==='whatsapp'?'whatsapp_zip':row.source_type||'external_web'),
+      sourceChannel:row.sourceChannel||(row.source_type==='whatsapp'?'primary_number':row.channel_name||row.source_type||'external_web'),
+      sourceId:row.sourceId||row.id||null,importedAt:row.importedAt||row.detected_at||row.created_at||snapshot.created_at||null,
+      publishedAt:row.publishedAt||row.published_at||null
+    }));
+  }
+  const counts=Object.fromEntries(BACKUP_STORES.map(name=>[name,stores[name].length]));
+  return {...snapshot,backup_version:2,schemaVersion:BACKUP_SCHEMA_VERSION,app_version:APP_VERSION,stores,counts,migrated_from:version<BACKUP_SCHEMA_VERSION?version:null};
+}
+
+export function validateBackupSnapshot(snapshot){
+  if(!snapshot||snapshot.format!=='radar-inmobiliario-backup') throw new Error('Este archivo no es un respaldo válido de Radar Inmobiliario.');
   if(!snapshot.stores||typeof snapshot.stores!=='object') throw new Error('El respaldo no contiene las tablas esperadas.');
-  for(const name of BACKUP_STORES){if(snapshot.stores[name]!=null&&!Array.isArray(snapshot.stores[name])) throw new Error(`La tabla ${name} del respaldo está dañada.`);}
-  return true;
+  let total=0;
+  for(const name of BACKUP_STORES){
+    if(snapshot.stores[name]!=null&&!Array.isArray(snapshot.stores[name])) throw new Error(`La tabla ${name} del respaldo está dañada.`);
+    const rows=snapshot.stores[name]||[];total+=rows.length;
+    for(const row of rows){if(!row||typeof row!=='object'||Array.isArray(row))throw new Error(`La tabla ${name} contiene un registro inválido.`);}
+  }
+  return {valid:true,total,stores:BACKUP_STORES.length};
 }
 
 async function replaceStoreRows(db,name,rows=[]){
@@ -954,29 +994,36 @@ async function replaceStoreRows(db,name,rows=[]){
 }
 
 export async function restoreDatabaseSnapshot(snapshot,onProgress){
-  validateBackupSnapshot(snapshot);
+  const prepared=migrateBackupSnapshot(snapshot);
+  validateBackupSnapshot(prepared);
   const db=await openDB();
   try{
-    for(let i=0;i<BACKUP_STORES.length;i++){
-      const name=BACKUP_STORES[i],rows=snapshot.stores[name]||[];
-      onProgress?.({store:name,index:i+1,total:BACKUP_STORES.length,rows:rows.length});
-      await replaceStoreRows(db,name,rows);
-    }
+    // One transaction means a validation/write failure aborts the complete
+    // replacement instead of leaving a half-restored database.
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(BACKUP_STORES,'readwrite');
+      BACKUP_STORES.forEach((name,i)=>{
+        const store=tx.objectStore(name),rows=prepared.stores[name]||[];
+        onProgress?.({store:name,index:i+1,total:BACKUP_STORES.length,rows:rows.length});
+        store.clear();for(const row of rows)store.put(row);
+      });
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('La restauración fue cancelada.'));
+    });
   }finally{db.close();}
-  return {restored_at:new Date().toISOString(),counts:snapshot.counts||{}};
+  return {restored_at:new Date().toISOString(),counts:prepared.counts||{},schemaVersion:prepared.schemaVersion,migrated_from:prepared.migrated_from};
 }
 
 export function backupSnapshotSummary(snapshot){
-  validateBackupSnapshot(snapshot);
-  const c=snapshot.counts||{};
+  const prepared=migrateBackupSnapshot(snapshot);validateBackupSnapshot(prepared);
+  const c=prepared.counts||{};
   return {
-    properties:Number(c[PROP_STORE]||snapshot.stores?.[PROP_STORE]?.length||0),
-    masters:Number(c[MASTER_STORE]||snapshot.stores?.[MASTER_STORE]?.length||0),
-    sources:Number(c[SOURCE_POST_STORE]||snapshot.stores?.[SOURCE_POST_STORE]?.length||0),
-    contacts:Number(c[CONTACT_STORE]||snapshot.stores?.[CONTACT_STORE]?.length||0),
-    buyers:Number(c[BUYER_STORE]||snapshot.stores?.[BUYER_STORE]?.length||0),
-    matches:Number(c[MATCH_STORE]||snapshot.stores?.[MATCH_STORE]?.length||0),
-    created_at:snapshot.created_at||null
+    properties:Number(c[PROP_STORE]||prepared.stores?.[PROP_STORE]?.length||0),
+    masters:Number(c[MASTER_STORE]||prepared.stores?.[MASTER_STORE]?.length||0),
+    sources:Number(c[SOURCE_POST_STORE]||prepared.stores?.[SOURCE_POST_STORE]?.length||0),
+    contacts:Number(c[CONTACT_STORE]||prepared.stores?.[CONTACT_STORE]?.length||0),
+    buyers:Number(c[BUYER_STORE]||prepared.stores?.[BUYER_STORE]?.length||0),
+    matches:Number(c[MATCH_STORE]||prepared.stores?.[MATCH_STORE]?.length||0),
+    created_at:prepared.created_at||null,schemaVersion:prepared.schemaVersion,migrated_from:prepared.migrated_from
   };
 }
 

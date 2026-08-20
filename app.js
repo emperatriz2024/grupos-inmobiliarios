@@ -1,9 +1,9 @@
 
 import {
-  mergeProperties, patchPropertyPriceAudits, addImport, getStats, getRecentImports, clearDatabase,
-  getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds, purgeOldProperties,
+  mergeProperties, patchPropertyPriceAudits, addImport, getStats, getRecentImports,
+  getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds,
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
-  ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, clearLocationPendings, recordLocationPendings,
+  ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, recordLocationPendings,
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations,
   syncRadarCore, getRadarCoreStats, getMasterProperties, getAllSourcePosts, getExternalSourcePosts, getExternalSourceStats, externalUrlExists, upsertExternalCapture, updateExternalSourceVerification, refreshExternalMasterVigency,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
@@ -27,6 +27,9 @@ import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsApp
 import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0530';
 import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0530';
 import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0530';
+import { adapterForUrl, safeExternalUrl, sourceTypeFromUrl } from './external/adapters.js';
+import { propertyDisplayName } from './core/property-policy.js';
+import { diagnosticLog } from './diagnostics.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -135,14 +138,14 @@ function annotateContactResolution(p){
 function contactBadge(p){const x=p?.phone_resolution?.source;return x==='directorio'?'WhatsApp · contacto':x==='publicacion'?'Tel. publicación':x==='ambiguo'?'Contacto ambiguo':'Sin contacto';}
 
 function buildWhatsAppMessage(p) {
-  const original = (p?.text || '').trim();
+  const summary=[propertyTitle(p),displayZone(p),p.price_usd?formatMoney(p.price_usd):null,p.area_m2?`${p.area_m2} m²`:null].filter(Boolean).join(' · ');
+  const reference=(p?.external_url||p?.reference||'').trim();
   return [
-    'Hola colega, envíame esta propiedad:',
+    'Hola colega, ¿esta propiedad la tienes disponible actualmente?',
     '',
-    original || 'Publicación original no disponible.',
-    '',
-    'Gracias.'
-  ].join('\n');
+    summary||'Propiedad consultada en Radar Inmobiliario.',
+    reference||null
+  ].filter(x=>x!=null).join('\n');
 }
 function buildWhatsAppHref(p){
   const num=whatsappNumber(effectivePhone(p)); if(!num)return '';
@@ -176,7 +179,7 @@ function featureLabels(p) {
   return out;
 }
 function displayZone(p){ return p.zone || bestZone(p.text||'',null) || 'Zona no detectada'; }
-function propertyTitle(p) { return p.residence || p.property_type || 'Propiedad'; }
+function propertyTitle(p) { return propertyDisplayName(p); }
 
 function sourceText(p) {
   const s = (p.sources || [])[0] || {};
@@ -692,6 +695,7 @@ $('#deleteBuyerBtn')?.addEventListener('click',async()=>{
 // ---------- Fuentes externas v0.5.2 ------------------------------------------
 function isoToday(){return new Date().toISOString().slice(0,10);}
 function extEsc(v=''){return esc(v);}
+function extSafeLink(v=''){return safeExternalUrl(v)||'';}
 function externalAgeDays(dateStr){
   const t=Date.parse(dateStr||'');if(!Number.isFinite(t))return null;
   const today=new Date();today.setHours(0,0,0,0);
@@ -757,7 +761,7 @@ function externalFactsHtml(p={}){
   ].filter(Boolean);
   return facts.map(x=>`<span>${extEsc(x)}</span>`).join('');
 }
-function masterShortName(m={}){return m.residence||m.property_type||'Inmueble maestro';}
+function masterShortName(m={}){return propertyDisplayName(m)||'Inmueble maestro';}
 function masterShortMeta(m={}){
   return [m.zone,m.municipality,m.price_usd?formatMoney(m.price_usd):null,m.area_m2?`${m.area_m2} m²`:null].filter(Boolean).join(' · ');
 }
@@ -772,7 +776,7 @@ async function refreshExternalSourcesUI(){
   const rows=allRows.slice(0,12),box=$('#externalRecentList');
   if(box)box.innerHTML=rows.length?rows.map(r=>`<article class="externalRecentItem">
     <div><b>${extEsc(sourceLabel(r.source_type))}</b><strong>${extEsc(r.external_title||r.observed_residence||'Propiedad')}</strong><small>${extEsc([r.agent_name,r.published_at?.slice(0,10),r.observed_price?formatMoney(r.observed_price):(r.listed_price_value?`${Number(r.listed_price_value).toLocaleString('es-VE')} ${r.listed_price_currency||''}`:null)].filter(Boolean).join(' · '))}</small></div>
-    ${r.external_url?`<a href="${extEsc(r.external_url)}" target="_blank" rel="noopener">Abrir</a>`:''}
+    ${extSafeLink(r.external_url)?`<a href="${extEsc(extSafeLink(r.external_url))}" target="_blank" rel="noopener noreferrer">Abrir</a>`:''}
   </article>`).join(''):'<div class="empty externalEmpty">Todavía no has guardado publicaciones externas.</div>';
 
   renderExternalFreshness(allRows);
@@ -806,7 +810,7 @@ function renderExternalFreshness(rows=[]){
     <div class="freshnessActions">
       ${!['unavailable','sold'].includes(f.code)?`<button class="confirmFresh" data-fresh-action="verified" data-source-id="${extEsc(r.id)}">✓ Confirmar vigente</button>`:`<button data-fresh-action="unverified" data-source-id="${extEsc(r.id)}">↻ Reactivar revisión</button>`}
       <button class="markUnavailable" data-fresh-action="unavailable" data-source-id="${extEsc(r.id)}">No disponible</button>
-      ${r.external_url?`<a href="${extEsc(r.external_url)}" target="_blank" rel="noopener">Abrir publicación</a>`:'<span></span>'}
+      ${extSafeLink(r.external_url)?`<a href="${extEsc(extSafeLink(r.external_url))}" target="_blank" rel="noopener noreferrer">Abrir publicación</a>`:'<span></span>'}
     </div>
   </article>`).join(''):'<div class="freshnessEmpty">No hay publicaciones en esta categoría.</div>';
 }
@@ -815,7 +819,9 @@ async function analyzeExternalCapture(){
   const description=$('#externalText').value.trim();
   const text=externalCombinedText();
   if(text.length<25)return alert('Pega el título y/o la descripción completa de la publicación.');
-  const url=$('#externalUrl').value.trim();
+  const rawUrl=$('#externalUrl').value.trim();
+  const url=rawUrl?safeExternalUrl(rawUrl):'';
+  if(rawUrl&&!url)return alert('El enlace no es una URL HTTP/HTTPS válida.');
   if(url){
     const dup=await externalUrlExists(url);
     if(dup&&!confirm('Ese enlace ya fue guardado antes. ¿Quieres analizarlo nuevamente?'))return;
@@ -900,6 +906,11 @@ async function analyzeExternalCapture(){
   if(captor){
     $('#externalCaptorName').textContent=`${captor.name}${captor.phone?` · ${captor.phone}`:''}`;
     $('#externalCaptorMeta').textContent=`Confianza ${captor.confidence} · ${captor.score}% · ${captor.appearances} apariciones conocidas`;
+    const wa=$('#externalCaptorWhatsapp'),number=whatsappNumber(captor.phone||'');
+    if(wa&&number){
+      const summary=[propertyDisplayName(parsed),parsed.zone,parsed.price_usd?formatMoney(parsed.price_usd):null,url].filter(Boolean).join(' · ');
+      wa.href=`https://wa.me/${number}?text=${encodeURIComponent(`Hola colega, ¿esta propiedad la tienes disponible actualmente?\n\n${summary}`)}`;wa.hidden=false;
+    }else if(wa){wa.hidden=true;wa.removeAttribute('href');}
   }
 
   $('#saveExternalLinked').hidden=decision.mode==='new'||!candidate;
@@ -945,7 +956,41 @@ async function saveExternalCapture(forceNew=false){
   $('#saveExternalLinked').disabled=true;$('#saveExternalNew').disabled=true;
   setTimeout(()=>{$('#saveExternalLinked').disabled=false;$('#saveExternalNew').disabled=false;},800);
 }
+
+function resetExternalCapture(){
+  for(const id of ['externalUrl','externalTitle','externalListedPrice','externalAgentName','externalAgentPhone','externalText']){
+    const el=$('#'+id);if(el)el.value='';
+  }
+  if($('#externalSourceType'))$('#externalSourceType').value='instagram';
+  if($('#externalPriceCurrency'))$('#externalPriceCurrency').value='UNVERIFIED';
+  if($('#externalPublishedDate'))$('#externalPublishedDate').value=isoToday();
+  if($('#externalAnalysis'))$('#externalAnalysis').hidden=true;
+  if($('#externalUrlStatus')){$('#externalUrlStatus').textContent='';$('#externalUrlStatus').dataset.kind='';}
+  externalDraft=null;
+}
+
+async function analyzeExternalUrl(){
+  const input=$('#externalUrl'),status=$('#externalUrlStatus'),button=$('#analyzeExternalUrl');
+  const safe=safeExternalUrl(input?.value||'');
+  if(!safe){status.textContent='Escribe una URL HTTP/HTTPS válida.';status.dataset.kind='error';return;}
+  input.value=safe;button.disabled=true;status.textContent='Leyendo metadata pública…';status.dataset.kind='working';
+  try{
+    const type=sourceTypeFromUrl(safe),adapter=adapterForUrl(safe),result=await adapter.analyze(safe);
+    if($('#externalSourceType')&&[...$('#externalSourceType').options].some(o=>o.value===type))$('#externalSourceType').value=type;
+    if(!result.ok){status.textContent=result.message;status.dataset.kind='warning';return;}
+    if(result.title&&!$('#externalTitle').value.trim())$('#externalTitle').value=result.title;
+    if(result.description&&!$('#externalText').value.trim())$('#externalText').value=result.description;
+    if(result.price!=null&&!$('#externalListedPrice').value.trim())$('#externalListedPrice').value=String(result.price);
+    if(result.currency&&['USD','VES'].includes(result.currency)&&$('#externalPriceCurrency'))$('#externalPriceCurrency').value=result.currency;
+    status.textContent='Metadata pública obtenida. Revisa el texto y pulsa Analizar publicación.';status.dataset.kind='success';
+  }catch(error){
+    diagnosticLog('external','analyze_url',error?.message||String(error));
+    status.textContent='Radar no pudo leer automáticamente esta publicación. Usa los campos manuales.';status.dataset.kind='warning';
+  }finally{button.disabled=false;}
+}
 $('#analyzeExternalSource')?.addEventListener('click',analyzeExternalCapture);
+$('#analyzeExternalUrl')?.addEventListener('click',analyzeExternalUrl);
+$('#clearExternalSource')?.addEventListener('click',resetExternalCapture);
 $('#saveExternalLinked')?.addEventListener('click',()=>saveExternalCapture(false));
 $('#saveExternalNew')?.addEventListener('click',()=>saveExternalCapture(true));
 
@@ -982,7 +1027,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0530',{type:'module'});
+    const worker = new Worker('./worker.js?v=0600',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1037,6 +1082,7 @@ $('#importBtn').addEventListener('click', async () => {
       if(p.phase==='zip') setStatus('Abriendo ZIP…',12);
       else if(p.phase==='decode') setStatus(p.bytes?`Leyendo chat… ${prettySize(p.bytes)}`:'Leyendo chat…',28);
       else if(p.phase==='process') setStatus('Detectando propiedades…',48);
+      else if(p.phase==='process_progress') setStatus(`Detectando propiedades… ${Number(p.done||0).toLocaleString('es-VE')} / ${Number(p.total||0).toLocaleString('es-VE')}`,48+Math.round((Number(p.done||0)/Math.max(Number(p.total||0),1))*10));
       else if(p.phase==='save') setStatus(`Guardando base local… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,60+Math.round((p.done/Math.max(p.total,1))*35));
     });
     setStatus('Importación completada',100);
@@ -1090,7 +1136,7 @@ async function afterLocationDecision(){
 async function initLocationSystem(){
   await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();
   const migration=localStorage.getItem('gi_location_migration_v0412');
-  if(!migration){await clearLocationPendings();await rematchAllPropertyLocations(locationCatalog);localStorage.setItem('gi_location_migration_v0412',String(Date.now()));locationCatalog=await getLocationCatalog();}
+  if(!migration){await rematchAllPropertyLocations(locationCatalog);localStorage.setItem('gi_location_migration_v0412',String(Date.now()));locationCatalog=await getLocationCatalog();}
   await refreshLocationStats();
 }
 $('#openLocationReview')?.addEventListener('click',async()=>{locationPendings=await getLocationPendings('pending');renderLocationReview();$('#locationReviewDialog').showModal();});
@@ -1099,16 +1145,15 @@ $('#refreshLocationCatalog')?.addEventListener('click',async()=>{locationCatalog
 
 async function loadData() {
   if(!locationCatalog.zones?.length){await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();}
-  await purgeOldProperties(60);
   let rawProperties=await getAllProperties();
-  const priceAuditNeeded=rawProperties.filter(p=>p.price_audit_version!=='0511');
+  const priceAuditNeeded=rawProperties.filter(p=>p.price_audit_version!=='0600');
   if(priceAuditNeeded.length){
     const audited=priceAuditNeeded.map(auditExistingPropertyPrice);
     await patchPropertyPriceAudits(audited);
     rawProperties=await getAllProperties();
     const corrected=audited.filter((p,i)=>p.price_audit_status==='corrected').length;
     const ambiguous=audited.filter(p=>p.price_audit_status==='ambiguous').length;
-    localStorage.setItem('gi_price_audit_0511',JSON.stringify({at:new Date().toISOString(),checked:audited.length,corrected,ambiguous}));
+    localStorage.setItem('gi_price_audit_0600',JSON.stringify({at:new Date().toISOString(),checked:audited.length,corrected,ambiguous}));
   }
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
   const consolidated=consolidateProperties(valid);
@@ -1137,9 +1182,7 @@ async function loadData() {
   renderResults();if(restored)restoreSearchPosition();if($('#viewSaved').classList.contains('active'))renderSaved();
 }
 $('#resetBtn').onclick = async () => {
-  if (!confirm('¿Eliminar propiedades, importaciones y guardadas de este dispositivo?')) return;
-  await clearDatabase(); allProperties=[]; favoriteIds=new Set(); await loadData();
-  $('#resultBox').hidden=true; $('#statusBox').hidden=true;
+  alert('El borrado masivo está deshabilitado en V0.6 Professional Audit para proteger los datos locales.');
 };
 
 
@@ -1545,4 +1588,9 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=0530').catch(()=>{});
+if ('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message',event=>{
+    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.0')console.info('Radar V0.6.0 listo para usar.');
+  });
+  navigator.serviceWorker.register('./sw.js?v=0600').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+}
