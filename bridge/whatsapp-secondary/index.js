@@ -11,7 +11,7 @@ const runtimeRoot=process.env.RADAR_BRIDGE_RUNTIME_DIR||path.join(process.env.LO
 const [whatsappModule,qrModule]=await Promise.all([import('whatsapp-web.js'),import('qrcode-terminal')]);
 const {Client,LocalAuth}=whatsappModule.default||whatsappModule;
 const qr=qrModule.default||qrModule;
-const client=new Client({authStrategy:new LocalAuth({clientId:'radar-v061-secondary',dataPath:path.join(runtimeRoot,'session')}),puppeteer:{headless:true,userDataDir:path.join(runtimeRoot,'chromium'),args:['--no-sandbox','--disable-setuid-sandbox']}});
+const client=new Client({authStrategy:new LocalAuth({clientId:'radar-v061-secondary',dataPath:path.join(runtimeRoot,'session')}),puppeteer:{headless:true,args:['--no-sandbox','--disable-setuid-sandbox']}});
 const LOG_FIELDS=new Set(['count','status','retryInMs','operation','attempt','scope']);
 const safeLog=(event,data={})=>console.log(JSON.stringify({at:new Date().toISOString(),event,...Object.fromEntries(Object.entries(data).filter(([key])=>LOG_FIELDS.has(key)))}));
 const outbox=new DurableOutbox(path.join(runtimeRoot,'outbox','events.json'));
