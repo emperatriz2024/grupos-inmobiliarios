@@ -6,7 +6,7 @@ import {DurableOutbox} from '../bridge/whatsapp-secondary/outbox.js';
 import {BatchUploader} from '../bridge/whatsapp-secondary/uploader.js';
 import {MemoryGroupState} from '../bridge/whatsapp-secondary/group-state.js';
 import {SecondaryBridge,BRIDGE_STATES} from '../bridge/whatsapp-secondary/bridge.js';
-import {MemoryEventQueue} from '../secondary-whatsapp/queue.js';
+import {createNetlifyEventQueue,MemoryEventQueue,NETLIFY_TEST_STORE_NAME,netlifyBlobsDependencyAvailable} from '../secondary-whatsapp/queue.js';
 import {normalizePhoneIdentity,validateSecondaryEvent} from '../secondary-whatsapp/contract.js';
 import {createIngestHandler} from '../netlify/functions/secondary-whatsapp-ingest.js';
 import {createSyncHandler} from '../netlify/functions/secondary-whatsapp-sync.js';
@@ -22,6 +22,7 @@ import path from 'node:path';
 const now='2026-08-20T14:00:00.000Z';
 function raw(id='m1',overrides={}){return {messageId:id,groupId:'120@g.us',groupName:'Inmuebles Valencia',authorId:'584141234567@c.us',authorIdentifier:'584141234567@c.us',authorDisplayName:'Ana',timestamp:now,receivedAt:now,messageType:'chat',text:'Apartamento en venta Mañongo\n3 habitaciones 2 baños 2 puestos\nPrecio $75.000',hasMedia:false,...overrides};}
 function waMessage(overrides={}){return {from:'120@g.us',author:'584141234567@c.us',timestamp:Date.parse(now)/1000,type:'chat',body:'Apartamento venta Precio $75.000',hasMedia:false,fromMe:false,id:{_serialized:'m1',remote:'120@g.us'},getChat:async()=>({name:'Grupo Uno'}),getContact:async()=>({pushname:'Ana'}),...overrides};}
+function fakeBlobStore(){const rows=new Map();return {rows,getMetadata:async key=>rows.has(key)?{etag:'test'}:null,setJSON:async(key,value)=>rows.set(key,value),get:async key=>rows.get(key)??null,delete:async key=>rows.delete(key),list:async({prefix='' }={})=>({blobs:[...rows.keys()].filter(key=>key.startsWith(prefix)).map(key=>({key,etag:'test'})),directories:[]})};}
 
 test('bridge ignora chat privado y mensajes propios',async()=>{
   assert.equal(isGroupMessage(waMessage({from:'584141234567@c.us'})),false);
@@ -107,6 +108,18 @@ test('rate limiting defensivo devuelve 429 sin revelar detalles',async()=>{
 
 test('retención TEST elimina raw vencido y conserva reciente',async()=>{
   const queue=new MemoryEventQueue();await queue.put(raw('old',{receivedAt:'2026-07-01T00:00:00Z'}));await queue.put(raw('recent',{receivedAt:now}));const result=await queue.purgeExpired({now:Date.parse(now),rawDays:14});assert.equal(result.rawRemoved,1);assert.deepEqual((await queue.list()).events.map(x=>x.messageId),['recent']);
+});
+
+test('Netlify queue conecta Lambda, usa store TEST strong y soporta put/list/idempotencia',async()=>{
+  assert.equal(netlifyBlobsDependencyAvailable(),true);const store=fakeBlobStore(),lambdaEvent={httpMethod:'POST',blobs:'context-test'};let connected,options;
+  const queue=await createNetlifyEventQueue(lambdaEvent,{connect:event=>{connected=event;},storeFactory:value=>{options=value;return store;},logger:()=>{}});assert.equal(connected,lambdaEvent);assert.deepEqual(options,{name:NETLIFY_TEST_STORE_NAME,consistency:'strong'});assert.equal(NETLIFY_TEST_STORE_NAME,'radar-secondary-whatsapp-v061-test');
+  assert.equal((await queue.put(raw('netlify-put'))).duplicate,false);assert.equal((await queue.put(raw('netlify-put'))).duplicate,true);const page=await queue.list({limit:10});assert.deepEqual(page.events.map(x=>x.messageId),['netlify-put']);assert.ok(page.nextCursor.startsWith('event-'));
+});
+
+test('diagnóstico de queue registra etapa y sanitiza secretos sin cambiar el error público',async()=>{
+  const logs=[],logger=line=>logs.push(JSON.parse(line));await assert.rejects(()=>createNetlifyEventQueue({}, {connect:()=>{throw new Error('token=real-secret https://private.example/path')},logger}),/real-secret/);assert.equal(logs[0].event,'QUEUE_INIT_ERROR');assert.equal(logs[0].error.name,'Error');assert.equal(JSON.stringify(logs).includes('real-secret'),false);assert.equal(JSON.stringify(logs).includes('private.example'),false);
+  const store=fakeBlobStore();store.getMetadata=async()=>{throw new TypeError('read failed')};const queue=await createNetlifyEventQueue({}, {connect:()=>{},storeFactory:()=>store,logger});await assert.rejects(()=>queue.put(raw('read-error')),/read failed/);assert.equal(logs.at(-1).event,'QUEUE_READ_ERROR');
+  const writeStore=fakeBlobStore();writeStore.setJSON=async()=>{throw new Error('write failed')};const writeQueue=await createNetlifyEventQueue({}, {connect:()=>{},storeFactory:()=>writeStore,logger});await assert.rejects(()=>writeQueue.put(raw('write-error')),/write failed/);assert.equal(logs.at(-1).event,'QUEUE_WRITE_ERROR');
 });
 
 test('desconexión entra en RECONNECTING con espera inicial de 5 segundos',()=>{

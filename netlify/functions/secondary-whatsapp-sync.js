@@ -11,6 +11,6 @@ export function createSyncHandler({queueFactory=createNetlifyEventQueue,env=proc
   const expected=env.RADAR_SECONDARY_SYNC_TOKEN;if(!expected||!secureEqual(bearer(event.headers),expected))return json(401,{error:'unauthorized'});
   const cursor=String(event.queryStringParameters?.cursor||'');if(!validCursor(cursor))return withCors(json(400,{error:'cursor_invalid'}),origin.origin);
   const limit=Math.min(100,Math.max(1,Number(event.queryStringParameters?.limit)||50));
-  try{const queue=await queueFactory(),page=await queue.list({cursor,limit});return withCors(json(200,page),origin.origin);}catch{return withCors(json(503,{error:'queue_unavailable'}),origin.origin);}
+  try{const queue=await queueFactory(event),page=await queue.list({cursor,limit});return withCors(json(200,page),origin.origin);}catch{return withCors(json(503,{error:'queue_unavailable'}),origin.origin);}
 };}
 export const handler=createSyncHandler();

@@ -8,9 +8,7 @@
     "check": "node --check app.js && node --check db.js && node --check engine.js && node --check dedupe-utils.js && node scripts/validate-architecture.mjs",
     "bridge:start": "node bridge/whatsapp-secondary/index.js"
   },
-  "optionalDependencies": {
-    "@netlify/blobs": "^10.0.0",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.34.1"
+  "dependencies": {
+    "@netlify/blobs": "11.0.1"
   }
 }
