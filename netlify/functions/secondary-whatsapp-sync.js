@@ -1,5 +1,5 @@
 import {createNetlifyEventQueue} from '../../secondary-whatsapp/queue.js';
-import {bearer,json,secureEqual} from './_secondary-http.js';
+import {bearer,eventResponseToResponse,json,requestToEvent,secureEqual} from './_secondary-http.js';
 import {validCursor} from '../../secondary-whatsapp/contract.js';
 import {allowedOrigin,preflight,rateLimit,withCors} from './_secondary-security.js';
 
@@ -13,4 +13,5 @@ export function createSyncHandler({queueFactory=createNetlifyEventQueue,env=proc
   const limit=Math.min(100,Math.max(1,Number(event.queryStringParameters?.limit)||50));
   try{const queue=await queueFactory(event),page=await queue.list({cursor,limit});return withCors(json(200,page),origin.origin);}catch{return withCors(json(503,{error:'queue_unavailable'}),origin.origin);}
 };}
-export const handler=createSyncHandler();
+const syncHandler=createSyncHandler();
+export default async request=>eventResponseToResponse(await syncHandler(await requestToEvent(request)));

@@ -10,3 +10,9 @@ export function parseJsonBody(event={}){
   if(Buffer.byteLength(raw)>MAX_BODY_BYTES)return {ok:false,response:json(413,{error:'payload_too_large'})};
   try{return {ok:true,value:JSON.parse(raw)}}catch{return {ok:false,response:json(400,{error:'invalid_json'})};}
 }
+
+export async function requestToEvent(request){
+  const url=new URL(request.url),headers=Object.fromEntries(request.headers.entries());
+  return {httpMethod:request.method,headers,queryStringParameters:Object.fromEntries(url.searchParams.entries()),body:['GET','HEAD'].includes(request.method)?'':await request.text(),isBase64Encoded:false};
+}
+export function eventResponseToResponse(result){return new Response([204,304].includes(result.statusCode)?null:result.body,{status:result.statusCode,headers:result.headers});}

@@ -8,8 +8,10 @@ import {MemoryGroupState} from '../bridge/whatsapp-secondary/group-state.js';
 import {SecondaryBridge,BRIDGE_STATES} from '../bridge/whatsapp-secondary/bridge.js';
 import {createNetlifyEventQueue,MemoryEventQueue,NETLIFY_TEST_STORE_NAME,netlifyBlobsDependencyAvailable} from '../secondary-whatsapp/queue.js';
 import {normalizePhoneIdentity,validateSecondaryEvent} from '../secondary-whatsapp/contract.js';
-import {createIngestHandler} from '../netlify/functions/secondary-whatsapp-ingest.js';
-import {createSyncHandler} from '../netlify/functions/secondary-whatsapp-sync.js';
+import ingestFunction,{createIngestHandler} from '../netlify/functions/secondary-whatsapp-ingest.js';
+import syncFunction,{createSyncHandler} from '../netlify/functions/secondary-whatsapp-sync.js';
+import {setEnvironmentContext} from '@netlify/blobs';
+import {BlobsServer} from '@netlify/blobs/server';
 import {resetRateLimits} from '../netlify/functions/_secondary-security.js';
 import {SecondaryWhatsAppSource} from '../ingestion/source-ingestion.js';
 import {looksLikeRealEstate,processSecondaryEvents} from '../ingestion/secondary-processing.js';
@@ -110,16 +112,38 @@ test('retención TEST elimina raw vencido y conserva reciente',async()=>{
   const queue=new MemoryEventQueue();await queue.put(raw('old',{receivedAt:'2026-07-01T00:00:00Z'}));await queue.put(raw('recent',{receivedAt:now}));const result=await queue.purgeExpired({now:Date.parse(now),rawDays:14});assert.equal(result.rawRemoved,1);assert.deepEqual((await queue.list()).events.map(x=>x.messageId),['recent']);
 });
 
-test('Netlify queue conecta Lambda, usa store TEST strong y soporta put/list/idempotencia',async()=>{
-  assert.equal(netlifyBlobsDependencyAvailable(),true);const store=fakeBlobStore(),lambdaEvent={httpMethod:'POST',blobs:'context-test'};let connected,options;
-  const queue=await createNetlifyEventQueue(lambdaEvent,{connect:event=>{connected=event;},storeFactory:value=>{options=value;return store;},logger:()=>{}});assert.equal(connected,lambdaEvent);assert.deepEqual(options,{name:NETLIFY_TEST_STORE_NAME,consistency:'strong'});assert.equal(NETLIFY_TEST_STORE_NAME,'radar-secondary-whatsapp-v061-test');
+test('Netlify queue usa getStore directo, store TEST strong y soporta put/list/idempotencia',async()=>{
+  assert.equal(netlifyBlobsDependencyAvailable(),true);const store=fakeBlobStore();let options;
+  const queue=await createNetlifyEventQueue({}, {storeFactory:value=>{options=value;return store;},logger:()=>{}});assert.deepEqual(options,{name:NETLIFY_TEST_STORE_NAME,consistency:'strong'});assert.equal(NETLIFY_TEST_STORE_NAME,'radar-secondary-whatsapp-v061-test');
   assert.equal((await queue.put(raw('netlify-put'))).duplicate,false);assert.equal((await queue.put(raw('netlify-put'))).duplicate,true);const page=await queue.list({limit:10});assert.deepEqual(page.events.map(x=>x.messageId),['netlify-put']);assert.ok(page.nextCursor.startsWith('event-'));
 });
 
 test('diagnóstico de queue registra etapa y sanitiza secretos sin cambiar el error público',async()=>{
-  const logs=[],logger=line=>logs.push(JSON.parse(line));await assert.rejects(()=>createNetlifyEventQueue({}, {connect:()=>{throw new Error('token=real-secret https://private.example/path')},logger}),/real-secret/);assert.equal(logs[0].event,'QUEUE_INIT_ERROR');assert.equal(logs[0].error.name,'Error');assert.equal(JSON.stringify(logs).includes('real-secret'),false);assert.equal(JSON.stringify(logs).includes('private.example'),false);
-  const store=fakeBlobStore();store.getMetadata=async()=>{throw new TypeError('read failed')};const queue=await createNetlifyEventQueue({}, {connect:()=>{},storeFactory:()=>store,logger});await assert.rejects(()=>queue.put(raw('read-error')),/read failed/);assert.equal(logs.at(-1).event,'QUEUE_READ_ERROR');
-  const writeStore=fakeBlobStore();writeStore.setJSON=async()=>{throw new Error('write failed')};const writeQueue=await createNetlifyEventQueue({}, {connect:()=>{},storeFactory:()=>writeStore,logger});await assert.rejects(()=>writeQueue.put(raw('write-error')),/write failed/);assert.equal(logs.at(-1).event,'QUEUE_WRITE_ERROR');
+  const logs=[],logger=line=>logs.push(JSON.parse(line));await assert.rejects(()=>createNetlifyEventQueue({}, {storeFactory:()=>{throw new Error('token=real-secret https://private.example/path')},logger}),/real-secret/);assert.equal(logs[0].event,'QUEUE_INIT_ERROR');assert.equal(logs[0].error.name,'Error');assert.equal(JSON.stringify(logs).includes('real-secret'),false);assert.equal(JSON.stringify(logs).includes('private.example'),false);
+  const store=fakeBlobStore();store.getMetadata=async()=>{throw new TypeError('read failed')};const queue=await createNetlifyEventQueue({}, {storeFactory:()=>store,logger});await assert.rejects(()=>queue.put(raw('read-error')),/read failed/);assert.equal(logs.at(-1).event,'QUEUE_READ_ERROR');
+  const writeStore=fakeBlobStore();writeStore.setJSON=async()=>{throw new Error('write failed')};const writeQueue=await createNetlifyEventQueue({}, {storeFactory:()=>writeStore,logger});await assert.rejects(()=>writeQueue.put(raw('write-error')),/write failed/);assert.equal(logs.at(-1).event,'QUEUE_WRITE_ERROR');
+});
+
+test('integración real local Function ingest → Netlify Blobs → Function sync',async()=>{
+  resetRateLimits();const folder=await mkdtemp(path.join(os.tmpdir(),'radar-v061-blobs-')),server=new BlobsServer({directory:folder,token:'local-test-token',logger:()=>{}});const address=await server.start();
+  const previousIngest=process.env.RADAR_BRIDGE_INGEST_TOKEN,previousSync=process.env.RADAR_SECONDARY_SYNC_TOKEN;
+  try{
+    const localBlobsURL=`http://127.0.0.1:${address.port}`;setEnvironmentContext({edgeURL:localBlobsURL,uncachedEdgeURL:localBlobsURL,siteID:'radar-local-test',token:'local-test-token'});process.env.RADAR_BRIDGE_INGEST_TOKEN='ingest-local-test';process.env.RADAR_SECONDARY_SYNC_TOKEN='sync-local-test';
+    const ingest=await ingestFunction(new Request('http://localhost/.netlify/functions/secondary-whatsapp-ingest',{method:'POST',headers:{authorization:'Bearer ingest-local-test','content-type':'application/json'},body:JSON.stringify({events:[raw('real-local-blob')]})}));assert.equal(ingest.status,202);assert.deepEqual(await ingest.json(),{accepted:1,duplicates:0,total:1});
+    const duplicate=await ingestFunction(new Request('http://localhost/.netlify/functions/secondary-whatsapp-ingest',{method:'POST',headers:{authorization:'Bearer ingest-local-test','content-type':'application/json'},body:JSON.stringify({events:[raw('real-local-blob')]})}));assert.equal((await duplicate.json()).duplicates,1);
+    const sync=await syncFunction(new Request('http://localhost/.netlify/functions/secondary-whatsapp-sync?limit=100',{headers:{authorization:'Bearer sync-local-test'}}));assert.equal(sync.status,200);const page=await sync.json();assert.equal(page.events.length,1);assert.equal(page.events[0].messageId,'real-local-blob');assert.ok(page.nextCursor.startsWith('event-'));
+  }finally{
+    setEnvironmentContext({});if(previousIngest===undefined)delete process.env.RADAR_BRIDGE_INGEST_TOKEN;else process.env.RADAR_BRIDGE_INGEST_TOKEN=previousIngest;if(previousSync===undefined)delete process.env.RADAR_SECONDARY_SYNC_TOKEN;else process.env.RADAR_SECONDARY_SYNC_TOKEN=previousSync;await server.stop();await rm(folder,{recursive:true,force:true});
+  }
+});
+
+test('Functions modernas conservan rechazo sin auth y preflight CORS',async()=>{
+  const previousIngest=process.env.RADAR_BRIDGE_INGEST_TOKEN,previousSync=process.env.RADAR_SECONDARY_SYNC_TOKEN,previousOrigin=process.env.RADAR_SECONDARY_ALLOWED_ORIGIN;
+  try{process.env.RADAR_BRIDGE_INGEST_TOKEN='ingest-modern-test';process.env.RADAR_SECONDARY_SYNC_TOKEN='sync-modern-test';process.env.RADAR_SECONDARY_ALLOWED_ORIGIN='https://radar-test.example';
+    const ingest=await ingestFunction(new Request('http://localhost/.netlify/functions/secondary-whatsapp-ingest',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}));assert.equal(ingest.status,401);assert.deepEqual(await ingest.json(),{error:'unauthorized'});
+    const sync=await syncFunction(new Request('http://localhost/.netlify/functions/secondary-whatsapp-sync'));assert.equal(sync.status,401);assert.deepEqual(await sync.json(),{error:'unauthorized'});
+    const preflightResponse=await syncFunction(new Request('http://localhost/.netlify/functions/secondary-whatsapp-sync',{method:'OPTIONS',headers:{origin:'https://radar-test.example'}}));assert.equal(preflightResponse.status,204);assert.equal(preflightResponse.headers.get('access-control-allow-origin'),'https://radar-test.example');
+  }finally{if(previousIngest===undefined)delete process.env.RADAR_BRIDGE_INGEST_TOKEN;else process.env.RADAR_BRIDGE_INGEST_TOKEN=previousIngest;if(previousSync===undefined)delete process.env.RADAR_SECONDARY_SYNC_TOKEN;else process.env.RADAR_SECONDARY_SYNC_TOKEN=previousSync;if(previousOrigin===undefined)delete process.env.RADAR_SECONDARY_ALLOWED_ORIGIN;else process.env.RADAR_SECONDARY_ALLOWED_ORIGIN=previousOrigin;}
 });
 
 test('desconexión entra en RECONNECTING con espera inicial de 5 segundos',()=>{

@@ -1,6 +1,6 @@
 import {validateBatch} from '../../secondary-whatsapp/contract.js';
 import {createNetlifyEventQueue} from '../../secondary-whatsapp/queue.js';
-import {bearer,json,parseJsonBody,secureEqual} from './_secondary-http.js';
+import {bearer,eventResponseToResponse,json,parseJsonBody,requestToEvent,secureEqual} from './_secondary-http.js';
 import {allowedOrigin,rateLimit,withCors} from './_secondary-security.js';
 
 export function createIngestHandler({queueFactory=createNetlifyEventQueue,env=process.env,now=()=>Date.now()}={}){let lastPurgeAt=0;return async event=>{
@@ -15,4 +15,5 @@ export function createIngestHandler({queueFactory=createNetlifyEventQueue,env=pr
     const current=now();if(current-lastPurgeAt>=3_600_000){await queue.purgeExpired?.({now:current});lastPurgeAt=current;}return withCors(json(202,{accepted,duplicates,total:valid.events.length}),origin.origin);
   }catch{return withCors(json(503,{error:'queue_unavailable'}),origin.origin);}
 };}
-export const handler=createIngestHandler();
+const ingestHandler=createIngestHandler();
+export default async request=>eventResponseToResponse(await ingestHandler(await requestToEvent(request)));
