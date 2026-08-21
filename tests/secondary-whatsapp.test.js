@@ -41,6 +41,11 @@ test('bridge acepta grupo y conserva grupo, autor e identidad verificable',async
   const event=await normalizeWhatsAppMessage(waMessage());assert.equal(event.groupId,'120@g.us');assert.equal(event.groupName,'Grupo Uno');assert.equal(event.authorDisplayName,'Ana');assert.equal(event.authorPhone,'584141234567');
 });
 
+test('normalizador omite timestamps inválidos y tolera metadata inaccesible',async()=>{
+  assert.equal(await normalizeWhatsAppMessage(waMessage({timestamp:undefined})),null);
+  const event=await normalizeWhatsAppMessage(waMessage({id:{_serialized:'metadata-fallback',remote:'120@g.us'},getChat:async()=>{throw new Error('chat unavailable')},getContact:async()=>{throw new Error('contact unavailable')},hasQuotedMsg:true,getQuotedMessage:async()=>{throw new Error('quote unavailable')}}));assert.equal(event.messageId,'metadata-fallback');assert.equal(event.groupName,'');assert.equal(event.authorDisplayName,'');assert.equal(event.quotedMessageId,null);
+});
+
 test('LID conserva identificador y deja teléfono como no verificable',()=>{
   const identity=normalizePhoneIdentity('123456789@lid');assert.equal(identity.authorPhone,null);assert.equal(identity.authorIdentifier,'123456789@lid');assert.equal(identity.phoneStatus,'unverifiable');
 });
