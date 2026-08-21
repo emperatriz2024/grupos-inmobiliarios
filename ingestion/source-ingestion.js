@@ -23,7 +23,7 @@ export class ExternalWebSource extends SourceIngestion{
   constructor(channel='external_web'){super({sourceType:SOURCE_TYPES.EXTERNAL_WEB,sourceChannel:channel});}
 }
 export class SecondaryWhatsAppSource extends SourceIngestion{
-  constructor({endpoint='',token='',fetchImpl=globalThis.fetch}={}){super({sourceType:SOURCE_TYPES.WHATSAPP_SECONDARY,sourceChannel:'secondary_number',configured:Boolean(endpoint&&token)});this.endpoint=endpoint;this.token=token;this.fetchImpl=fetchImpl;}
+  constructor({endpoint='',token='',fetchImpl=(...args)=>globalThis.fetch(...args)}={}){super({sourceType:SOURCE_TYPES.WHATSAPP_SECONDARY,sourceChannel:'secondary_number',configured:Boolean(endpoint&&token)});this.endpoint=endpoint;this.token=token;this.fetchImpl=fetchImpl;}
   capability(){return {...super.capability(),reason:this.configured?null:'Configura manualmente URL y token de lectura para esta sesión del navegador.'};}
   async ingest({cursor='',limit=50}={}){
     if(!this.configured)throw new Error('WhatsApp secundario no está configurado.');

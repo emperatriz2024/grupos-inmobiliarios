@@ -125,6 +125,12 @@ test('SecondaryWhatsAppSource usa lectura autenticada y cursor',async()=>{
   let requested;const source=new SecondaryWhatsAppSource({endpoint:'https://example.test/sync',token:'read-test',fetchImpl:async(url,options)=>{requested={url:String(url),options};return {ok:true,json:async()=>({events:[raw()],nextCursor:'event-m1',hasMore:false})};}});const page=await source.ingest({cursor:'event-old'});assert.equal(page.events.length,1);assert.match(requested.url,/cursor=event-old/);assert.equal(requested.options.headers.authorization,'Bearer read-test');
 });
 
+test('SecondaryWhatsAppSource preserva el contexto nativo de Window.fetch',async()=>{
+  const originalFetch=globalThis.fetch;let requested;
+  globalThis.fetch=async function(url,options){if(this!==globalThis)throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");requested={url:String(url),options};return {ok:true,json:async()=>({events:[raw('bound-fetch')],nextCursor:'event-bound-fetch',hasMore:false})};};
+  try{const source=new SecondaryWhatsAppSource({endpoint:'https://example.test/sync',token:'context-test'}),page=await source.ingest({cursor:'event-cursor',limit:37});assert.equal(page.events[0].messageId,'bound-fetch');assert.match(requested.url,/cursor=event-cursor/);assert.match(requested.url,/limit=37/);assert.equal(requested.options.headers.authorization,'Bearer context-test');}finally{globalThis.fetch=originalFetch;}
+});
+
 test('mensaje no inmobiliario no crea inmueble y publicación válida usa Radar Core',()=>{
   const social=raw('social',{text:'Buenos días, feliz jueves'});assert.equal(looksLikeRealEstate(social.text),false);assert.equal(processSecondaryEvents([social]).records.length,0);
   const result=processSecondaryEvents([raw()]);assert.equal(result.records.length,1);assert.equal(result.records[0].sourceType,'whatsapp_secondary');assert.equal(result.records[0].price_usd,75000);assert.equal(consolidateProperties(result.records).length,1);
