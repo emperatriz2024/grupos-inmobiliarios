@@ -23,9 +23,15 @@ export class ExternalWebSource extends SourceIngestion{
   constructor(channel='external_web'){super({sourceType:SOURCE_TYPES.EXTERNAL_WEB,sourceChannel:channel});}
 }
 export class SecondaryWhatsAppSource extends SourceIngestion{
-  constructor(){super({sourceType:SOURCE_TYPES.WHATSAPP_SECONDARY,sourceChannel:'secondary_number',configured:false});}
-  capability(){return {...super.capability(),reason:'No hay proveedor oficial, token, webhook ni cuenta Business configurados.'};}
-  async ingest(){throw new Error('WhatsApp secundario no está configurado. Se requiere una integración oficial/autorizada.');}
+  constructor({endpoint='',token='',fetchImpl=globalThis.fetch}={}){super({sourceType:SOURCE_TYPES.WHATSAPP_SECONDARY,sourceChannel:'secondary_number',configured:Boolean(endpoint&&token)});this.endpoint=endpoint;this.token=token;this.fetchImpl=fetchImpl;}
+  capability(){return {...super.capability(),reason:this.configured?null:'Configura manualmente URL y token de lectura para esta sesión del navegador.'};}
+  async ingest({cursor='',limit=50}={}){
+    if(!this.configured)throw new Error('WhatsApp secundario no está configurado.');
+    const url=new URL(this.endpoint,globalThis.location?.href||'http://localhost/');url.searchParams.set('limit',String(Math.min(100,limit)));if(cursor)url.searchParams.set('cursor',cursor);
+    const response=await this.fetchImpl(url,{method:'GET',headers:{accept:'application/json',authorization:`Bearer ${this.token}`},cache:'no-store',credentials:'omit'});
+    if(!response.ok)throw new Error(response.status===401?'Credencial de lectura inválida.':`Sincronización secundaria HTTP ${response.status}.`);
+    const data=await response.json();if(!Array.isArray(data.events))throw new Error('Respuesta secundaria inválida.');return {events:data.events,nextCursor:data.nextCursor||cursor,hasMore:Boolean(data.hasMore)};
+  }
 }
 
 export function sourceMetadata(sourceType,sourceChannel,sourceId,publishedAt,importedAt=new Date().toISOString()){

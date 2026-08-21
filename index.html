@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0600" />
+  <link rel="stylesheet" href="./styles.css?v=0610" />
 </head>
 <body>
   <main class="shell">
@@ -20,7 +20,7 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">V0.6.0 PROFESSIONAL AUDIT</div>
+      <div class="version">V0.6.1 WHATSAPP SECONDARY</div>
     </header>
 
     <section class="stats">
@@ -162,6 +162,25 @@
     </section>
 
     <section id="viewImport" class="view">
+      <section class="card secondaryWhatsAppCard">
+        <div class="sectionTitle">
+          <span>◉</span>
+          <div><h2>WhatsApp secundario</h2><p>Canal de solo lectura · cola remota TEST · Radar Core V0.6</p></div>
+        </div>
+        <div class="secondaryStatus"><span id="secondaryStatusDot"></span><strong id="secondaryStatusText">No configurado</strong><small id="secondaryLastSync">Sin sincronizaciones</small></div>
+        <div class="secondaryStats">
+          <div><strong id="secondaryReceived">0</strong><span>recibidos</span></div>
+          <div><strong id="secondaryPending">0</strong><span>pendientes</span></div>
+          <div><strong id="secondaryProcessed">0</strong><span>procesados</span></div>
+          <div><strong id="secondaryGroups">0</strong><span>grupos</span></div>
+          <div><strong id="secondaryProperties">0</strong><span>propiedades</span></div>
+          <div><strong id="secondaryErrors">0</strong><span>errores</span></div>
+        </div>
+        <div class="secondaryActions"><button id="configureSecondary" class="ghost" type="button">Configurar acceso TEST</button><button id="syncSecondaryNow" class="primary" type="button">Sincronizar ahora</button><button id="secondaryDiagnostics" class="miniGhost" type="button">Ver diagnóstico</button></div>
+        <pre id="secondaryDiagnosticBox" class="secondaryDiagnosticBox" hidden></pre>
+        <small class="secondarySecurityNote">La credencial de lectura se conserva solo durante esta sesión del navegador y nunca se incluye en Git ni en respaldos.</small>
+      </section>
+
       <section class="card dropboxCard">
         <div class="sectionTitle">
           <span>☁</span>

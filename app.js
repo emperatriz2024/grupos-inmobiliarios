@@ -30,6 +30,8 @@ import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=
 import { adapterForUrl, safeExternalUrl, sourceTypeFromUrl } from './external/adapters.js';
 import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
+import { SecondaryWhatsAppSource } from './ingestion/source-ingestion.js';
+import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -59,6 +61,11 @@ const SEARCH_STATE_KEY='gi_search_state_v042';
 const BACKUP_AUTO_KEY='gi_backup_auto_dropbox_v0502';
 const BACKUP_LAST_KEY='gi_backup_last_v0502';
 const BACKUP_DROPBOX_PATH='/RADAR_RESPALDOS/radar-backup-latest.json';
+const SECONDARY_ENDPOINT_KEY='radar_secondary_endpoint_v061';
+const SECONDARY_TOKEN_KEY='radar_secondary_token_v061_session';
+const SECONDARY_CURSOR_KEY='radar_secondary_cursor_v061';
+const SECONDARY_STATS_KEY='radar_secondary_stats_v061';
+let secondarySyncing=false;
 
 function rememberSearchPosition(cardId='') {
   try {
@@ -164,6 +171,7 @@ function showView(id) {
   document.querySelectorAll('.bottomNav button').forEach(b => b.classList.toggle('active', b.dataset.view === id));
   if (id === 'viewSaved') renderSaved();
   if (id === 'viewBuyers') refreshBuyersData();
+  if (id === 'viewImport') syncSecondaryWhatsApp({silent:true});
 }
 document.querySelectorAll('.bottomNav button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
 
@@ -1575,10 +1583,50 @@ async function initDropbox() {
   }
 }
 
+function secondaryStats(){try{return {...{received:0,pending:0,processed:0,groups:0,properties:0,errors:0,lastSync:null,lastError:null},...JSON.parse(localStorage.getItem(SECONDARY_STATS_KEY)||'{}')};}catch{return {received:0,pending:0,processed:0,groups:0,properties:0,errors:0};}}
+function saveSecondaryStats(stats){localStorage.setItem(SECONDARY_STATS_KEY,JSON.stringify(stats));renderSecondaryState(stats);}
+function secondaryConfig(){return {endpoint:localStorage.getItem(SECONDARY_ENDPOINT_KEY)||'',token:sessionStorage.getItem(SECONDARY_TOKEN_KEY)||''};}
+function renderSecondaryState(stats=secondaryStats()){
+  const configured=Boolean(secondaryConfig().endpoint&&secondaryConfig().token),dot=$('#secondaryStatusDot');
+  if(dot)dot.className=stats.lastError?'error':configured?'connected':'';
+  if($('#secondaryStatusText'))$('#secondaryStatusText').textContent=stats.lastError?'Desconectado':configured?'Conectado':'No configurado';
+  if($('#secondaryLastSync'))$('#secondaryLastSync').textContent=stats.lastSync?`Última sincronización: ${new Date(stats.lastSync).toLocaleString('es-VE')}`:'Sin sincronizaciones';
+  const values={secondaryReceived:stats.received,secondaryPending:stats.pending,secondaryProcessed:stats.processed,secondaryGroups:stats.groups,secondaryProperties:stats.properties,secondaryErrors:stats.errors};
+  for(const [id,value] of Object.entries(values))if($('#'+id))$('#'+id).textContent=Number(value||0).toLocaleString('es-VE');
+}
+function configureSecondaryAccess(){
+  const current=localStorage.getItem(SECONDARY_ENDPOINT_KEY)||`${location.origin}/.netlify/functions/secondary-whatsapp-sync`;
+  const endpoint=prompt('URL HTTPS del endpoint TEST secondary-whatsapp-sync:',current);if(endpoint===null)return;
+  let parsed;try{parsed=new URL(endpoint,location.href);if(parsed.protocol!=='https:'&&parsed.hostname!=='localhost')throw new Error();}catch{return alert('La URL debe usar HTTPS (o localhost para pruebas).');}
+  const token=prompt('Token de lectura TEST. Se guardará solo durante esta sesión del navegador:','');if(!token)return alert('No se guardó ninguna credencial.');
+  localStorage.setItem(SECONDARY_ENDPOINT_KEY,parsed.toString());sessionStorage.setItem(SECONDARY_TOKEN_KEY,token);const stats=secondaryStats();stats.lastError=null;saveSecondaryStats(stats);
+}
+async function syncSecondaryWhatsApp({silent=false}={}){
+  if(secondarySyncing)return;const config=secondaryConfig();renderSecondaryState();if(!config.endpoint||!config.token){if(!silent)alert('Configura primero el acceso TEST.');return;}
+  secondarySyncing=true;const button=$('#syncSecondaryNow');if(button)button.disabled=true;let stats=secondaryStats(),cursor=localStorage.getItem(SECONDARY_CURSOR_KEY)||'',pages=0;
+  try{
+    let hasMore=true;
+    while(hasMore&&pages<5){
+      const source=new SecondaryWhatsAppSource({...config}),page=await source.ingest({cursor,limit:50});const result=processSecondaryEvents(page.events,{locationCatalog});
+      for(const record of result.records){const direct=record.publisher?.observed_phone?contactIndex.byId.get(record.publisher.observed_phone):null,evidence=direct?{status:'resolved',contact:direct,confidence:1,reason:'teléfono observado exacto',matched_name:record.publisher?.observed_name||null}:resolvePropertyContact({sender:record.publisher?.observed_name||record.sender},contactIndex);record.publisher.contact_evidence=evidence.status==='resolved'?{status:'resolved',contact_id:evidence.contact?.id||null,confidence:evidence.confidence,reason:evidence.reason,matched_name:evidence.matched_name}:evidence.status==='ambiguous'?{status:'ambiguous',count:evidence.count}:{status:'none'};record.probable_captor_id=null;record.captor_score=null;}
+      const saved=await mergeProperties(result.records);if(result.records.length){await learnContactsFromProperties(result.records);await recordLocationPendings(result.records.flatMap(x=>x.location_pending||[]));}
+      stats.received+=result.validCount;stats.processed+=result.validCount;stats.properties+=result.propertiesDetected;stats.groups=Math.max(stats.groups,result.groupsDetected);stats.pending=page.hasMore?1:0;
+      cursor=page.nextCursor||cursor;localStorage.setItem(SECONDARY_CURSOR_KEY,cursor);hasMore=page.hasMore;pages++;
+      diagnosticLog('whatsapp_secondary','sync_page',`Recibidos ${result.validCount}; propiedades ${result.propertiesDetected}; nuevas ${saved.added}`,'info');
+    }
+    stats.lastSync=new Date().toISOString();stats.lastError=null;saveSecondaryStats(stats);await loadData();
+  }catch(error){stats.errors++;stats.lastError=error.message;saveSecondaryStats(stats);diagnosticLog('whatsapp_secondary','sync',error.message);if(!silent)alert(`WhatsApp secundario: ${error.message}`);}
+  finally{secondarySyncing=false;if(button)button.disabled=false;}
+}
+$('#configureSecondary')?.addEventListener('click',configureSecondaryAccess);
+$('#syncSecondaryNow')?.addEventListener('click',()=>syncSecondaryWhatsApp({silent:false}));
+$('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,endpointConfigured:Boolean(secondaryConfig().endpoint),tokenConfigured:Boolean(secondaryConfig().token),store:'radar-secondary-whatsapp-v061-test'},null,2);});
+
 async function initApp(){
-  try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
+setInterval(()=>{if(document.visibilityState==='visible')syncSecondaryWhatsApp({silent:true});},5*60*1000);
 
 window.addEventListener('pagehide',()=>rememberSearchPosition());
 window.addEventListener('pageshow',e=>{ if(e.persisted) restoreSearchPosition(); });
@@ -1590,7 +1638,7 @@ document.addEventListener('visibilitychange',()=>{
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
 if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
-    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.0')console.info('Radar V0.6.0 listo para usar.');
+    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.1')console.info('Radar V0.6.1 listo para usar.');
   });
-  navigator.serviceWorker.register('./sw.js?v=0600').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0610').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }

@@ -629,3 +629,13 @@
   button,.action,a.ghost{min-height:44px}
   .bottomNav button{min-height:48px}
 }
+
+/* v0.6.1 — WhatsApp secundario, canal TEST de solo lectura */
+.secondaryWhatsAppCard{border-color:#214533;background:linear-gradient(155deg,#0b1510,#0d0d0d)}
+.secondaryStatus{display:flex;align-items:center;gap:8px;margin:10px 0 12px;padding:10px;border:1px solid #26362e;border-radius:12px;background:#080b09}
+.secondaryStatus>span{width:9px;height:9px;border-radius:50%;background:#666;box-shadow:0 0 0 3px #222}
+.secondaryStatus>span.connected{background:#59ba72;box-shadow:0 0 0 3px #17331f}.secondaryStatus>span.error{background:#d17a68;box-shadow:0 0 0 3px #3a1c17}
+.secondaryStatus strong{font-size:11px}.secondaryStatus small{margin-left:auto;color:#777;font-size:7px;text-align:right}
+.secondaryStats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.secondaryStats>div{padding:8px;border:1px solid #263029;border-radius:10px;background:#090b09}.secondaryStats strong{display:block;color:#9fd0a9;font-size:16px}.secondaryStats span{font-size:6px;color:#777}
+.secondaryActions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}.secondaryActions .miniGhost{grid-column:1/-1}.secondaryDiagnosticBox{white-space:pre-wrap;max-height:220px;overflow:auto;background:#070707;border:1px solid #282828;border-radius:10px;color:#9aa79d;padding:10px;font-size:8px;line-height:1.5}.secondarySecurityNote{display:block;color:#637068;font-size:7px;line-height:1.45;margin-top:9px}
+@media(max-width:390px){.secondaryStats{grid-template-columns:repeat(2,1fr)}.secondaryActions{grid-template-columns:1fr}}
