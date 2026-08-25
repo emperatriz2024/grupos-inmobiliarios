@@ -1,0 +1,4 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+LOG_DIR="$HOME/.radar-whatsapp-secondary/logs"; mkdir -p "$LOG_DIR"; chmod 700 "$LOG_DIR"; printf 's1000000\nn5\n' >"$LOG_DIR/config"
+exec svlogd -tt "$LOG_DIR"

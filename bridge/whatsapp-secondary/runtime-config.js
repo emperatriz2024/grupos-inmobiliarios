@@ -8,12 +8,12 @@ export function resolveRuntimeConfig(env=process.env,platform=process.platform){
   if(!Object.values(BRIDGE_MODES).includes(mode))throw new Error('RADAR_BRIDGE_MODE debe ser test o live.');
   const cloudDefault='/data/radar-whatsapp-secondary';
   const localDefault=path.join(env.LOCALAPPDATA||os.homedir(),'RadarInmobiliario','whatsapp-secondary');
-  const runtimeRoot=path.resolve(env.RADAR_BRIDGE_RUNTIME_DIR||(platform==='linux'&&env.FLY_APP_NAME?cloudDefault:localDefault));
-  const port=Math.min(65535,Math.max(1,Number(env.PORT||env.RADAR_BRIDGE_HEALTH_PORT)||8080));
+  const pathApi=platform==='win32'?path.win32:path.posix,runtimeRoot=pathApi.resolve(env.RADAR_BRIDGE_RUNTIME_DIR||(platform==='linux'&&env.FLY_APP_NAME?cloudDefault:localDefault));
+  const port=Math.min(65535,Math.max(1,Number(env.PORT||env.RADAR_BRIDGE_HEALTH_PORT)||8080)),healthHost=env.RADAR_BRIDGE_HEALTH_HOST||(env.FLY_APP_NAME?'0.0.0.0':'127.0.0.1');
   return Object.freeze({
-    mode,runtimeRoot,port,bootstrapMode:String(env.RADAR_BRIDGE_BOOTSTRAP_MODE||'false').toLowerCase()==='true',
+    mode,runtimeRoot,port,healthHost,bootstrapMode:String(env.RADAR_BRIDGE_BOOTSTRAP_MODE||'false').toLowerCase()==='true',
     endpoint:env.RADAR_BRIDGE_INGEST_URL||'',token:env.RADAR_BRIDGE_INGEST_TOKEN||'',
-    paths:Object.freeze({session:path.join(runtimeRoot,'session'),chromium:path.join(runtimeRoot,'chromium'),outbox:path.join(runtimeRoot,'outbox'),state:path.join(runtimeRoot,'state'),lock:path.join(runtimeRoot,'bridge.lock')})
+    paths:Object.freeze({session:pathApi.join(runtimeRoot,'session'),chromium:pathApi.join(runtimeRoot,'chromium'),outbox:pathApi.join(runtimeRoot,'outbox'),state:pathApi.join(runtimeRoot,'state'),lock:pathApi.join(runtimeRoot,'bridge.lock')})
   });
 }
 

@@ -1,0 +1,6 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+RUNTIME="$HOME/.radar-whatsapp-secondary"; ENV_FILE="$RUNTIME/config/runtime.env"; [[ -r "$ENV_FILE" ]] || { echo 'CONFIG_MISSING'; exit 2; }
+set -a; source "$ENV_FILE"; set +a
+PROJECT_ROOT="${RADAR_BRIDGE_PROJECT_ROOT:-$HOME/grupos-inmobiliarios}"; cd "$PROJECT_ROOT/bridge/whatsapp-secondary"
+exec node index.js

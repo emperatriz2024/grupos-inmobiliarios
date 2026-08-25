@@ -7,6 +7,7 @@ primary_region = "REPLACE_WITH_REGION"
 [env]
   RADAR_BRIDGE_MODE = "test"
   RADAR_BRIDGE_RUNTIME_DIR = "/data/radar-whatsapp-secondary"
+  RADAR_BRIDGE_HEALTH_HOST = "0.0.0.0"
   PORT = "8080"
 
 [processes]

@@ -1,0 +1,11 @@
+import http from 'node:http';
+import crypto from 'node:crypto';
+
+export function createBootstrapToken(){return crypto.randomBytes(32).toString('base64url');}
+export function isPrivateNetworkAddress(raw=''){const value=String(raw).replace(/^::ffff:/,'');return value==='::1'||value==='127.0.0.1'||/^10\./.test(value)||/^192\.168\./.test(value)||/^172\.(1[6-9]|2\d|3[01])\./.test(value)||/^(fc|fd|fe8|fe9|fea|feb)/i.test(value);}
+export function createQrBootstrapServer({token=createBootstrapToken(),host='127.0.0.1',port=8090,ttlMs=300_000,now=Date.now,renderQr,logger=()=>{},allowAddress=isPrivateNetworkAddress}={}){
+  if(!renderQr)throw new Error('QR renderer requerido.');const expiresAt=now()+ttlMs;let qrValue=null,used=false,timer=null;
+  const server=http.createServer(async(request,response)=>{const valid=allowAddress(request.socket.remoteAddress)&&!used&&now()<expiresAt&&request.method==='GET'&&request.url===`/bootstrap/${token}`;if(!valid){response.writeHead(404,{'cache-control':'no-store'});return response.end('Not found');}if(!qrValue){response.writeHead(202,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store','refresh':'2'});return response.end('Esperando QR…');}const svg=await renderQr(qrValue);response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'none'; img-src data:; style-src 'unsafe-inline'",'x-content-type-options':'nosniff'});response.end(`<!doctype html><meta name="viewport" content="width=device-width"><title>Vincular Radar</title><style>body{font-family:sans-serif;text-align:center;padding:2rem}svg{max-width:90vw;height:auto}</style><h1>Vincular WhatsApp</h1>${svg}<p>Expira en pocos minutos.</p>`);});
+  const stop=async()=>{used=true;qrValue=null;if(timer)clearTimeout(timer);if(server.listening)await new Promise(resolve=>server.close(resolve));};
+  return {token,expiresAt,server,setQr:value=>{if(!used&&now()<expiresAt)qrValue=value;},invalidate:stop,start:()=>new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,()=>{timer=setTimeout(()=>stop().catch(()=>{}),Math.max(0,expiresAt-now()));timer.unref?.();logger('BOOTSTRAP_LISTENING',{status:200});resolve(server.address());});}),stop};
+}

@@ -18,7 +18,7 @@ import {createBridgeRuntime,safeLog} from '../bridge/whatsapp-secondary/index.js
 const temp=()=>mkdtemp(path.join(os.tmpdir(),'radar-v062-'));
 const event=(id='m1')=>({messageId:id,groupId:'test@g.us',timestamp:'2026-08-25T00:00:00Z',receivedAt:'2026-08-25T00:00:00Z',text:'test'});
 
-test('runtime cloud usa /data y separa paths persistentes; TEST es default',()=>{const safe=resolveRuntimeConfig({FLY_APP_NAME:'radar'},'linux');assert.equal(safe.mode,BRIDGE_MODES.TEST);assert.equal(safe.runtimeRoot,path.resolve('/data/radar-whatsapp-secondary'));for(const key of ['session','chromium','outbox','state'])assert.ok(safe.paths[key].startsWith(safe.runtimeRoot));});
+test('runtime cloud usa /data y separa paths persistentes; TEST es default',()=>{const safe=resolveRuntimeConfig({FLY_APP_NAME:'radar'},'linux');assert.equal(safe.mode,BRIDGE_MODES.TEST);assert.equal(safe.runtimeRoot,'/data/radar-whatsapp-secondary');for(const key of ['session','chromium','outbox','state'])assert.ok(safe.paths[key].startsWith(safe.runtimeRoot));});
 
 test('modo TEST prepara runtime sin inicializar WhatsApp ni QR',async()=>{const dir=await temp();let initialized=0;class FakeClient extends EventEmitter{async initialize(){initialized++;}async destroy(){}}const runtime=await createBridgeRuntime({env:{RADAR_BRIDGE_MODE:'test',RADAR_BRIDGE_RUNTIME_DIR:dir,PORT:'8099'},clientFactory:async()=>new FakeClient(),startHealth:false,acquireLock:false,installSignals:false,logger:()=>{}});assert.equal(initialized,0);for(const key of ['session','chromium','outbox','state'])assert.ok(runtime.config.paths[key].startsWith(dir));await rm(dir,{recursive:true,force:true});});
 

@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-cer
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY bridge/whatsapp-secondary/package.json ./package.json
-RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+COPY bridge/whatsapp-secondary/package.json bridge/whatsapp-secondary/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY bridge/whatsapp-secondary/ ./
 COPY deploy/cloud-bridge/entrypoint.sh /usr/local/bin/radar-entrypoint
 RUN chmod 0755 /usr/local/bin/radar-entrypoint \
