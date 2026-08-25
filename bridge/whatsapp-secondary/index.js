@@ -1,23 +1,42 @@
-import os from 'node:os';
+import {EventEmitter} from 'node:events';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {mkdir} from 'node:fs/promises';
 import {DurableOutbox} from './outbox.js';
 import {BatchUploader} from './uploader.js';
 import {SecondaryBridge} from './bridge.js';
 import {DurableGroupState} from './group-state.js';
+import {resolveRuntimeConfig,assertLiveConfig,BRIDGE_MODES} from './runtime-config.js';
+import {RuntimeLock} from './runtime-lock.js';
+import {createHealthServer} from './health-server.js';
+import {installLifecycle} from './lifecycle.js';
 
-const endpoint=process.env.RADAR_BRIDGE_INGEST_URL,token=process.env.RADAR_BRIDGE_INGEST_TOKEN;
-if(!endpoint||!token)throw new Error('Configura RADAR_BRIDGE_INGEST_URL y RADAR_BRIDGE_INGEST_TOKEN fuera de Git.');
-const runtimeRoot=process.env.RADAR_BRIDGE_RUNTIME_DIR||path.join(process.env.LOCALAPPDATA||os.homedir(),'RadarInmobiliario','whatsapp-secondary');
-const [whatsappModule,qrModule]=await Promise.all([import('whatsapp-web.js'),import('qrcode-terminal')]);
-const {Client,LocalAuth}=whatsappModule.default||whatsappModule;
-const qr=qrModule.default||qrModule;
-const client=new Client({authStrategy:new LocalAuth({clientId:'radar-v061-secondary',dataPath:path.join(runtimeRoot,'session')}),puppeteer:{headless:true,args:['--no-sandbox','--disable-setuid-sandbox']}});
-const LOG_FIELDS=new Set(['count','status','retryInMs','operation','attempt','scope','errorName']);
-const safeLog=(event,data={})=>console.log(JSON.stringify({at:new Date().toISOString(),event,...Object.fromEntries(Object.entries(data).filter(([key])=>LOG_FIELDS.has(key)))}));
-const outbox=new DurableOutbox(path.join(runtimeRoot,'outbox','events.json'));
-const uploader=new BatchUploader({outbox,endpoint,token,logger:safeLog});
-const groupState=new DurableGroupState(path.join(runtimeRoot,'state','groups.json'));
-const bridge=new SecondaryBridge({client,outbox,uploader,groupState,logger:safeLog});
-bridge.onQr=value=>qr.generate(value,{small:true});bridge.wire();
-process.on('SIGINT',async()=>{bridge.stopFlushLoop();await client.destroy();process.exit(0);});
-await client.initialize();
+const LOG_FIELDS=new Set(['state','count','status','retryInMs','operation','attempt','durationMs','scope','errorName']);
+const sanitizeLogValue=value=>typeof value==='string'?value.replace(/Bearer\s+\S+/gi,'Bearer [redacted]').replace(/\b(token|secret|password)\s*[:=]\s*\S+/gi,'$1=[redacted]').replace(/https?:\/\/\S+/gi,'[url]').replace(/\b\d{8,15}\b/g,'[number]').slice(0,120):value;
+export const safeLog=(event,data={})=>console.log(JSON.stringify({at:new Date().toISOString(),event:String(event).slice(0,80),...Object.fromEntries(Object.entries(data).filter(([key])=>LOG_FIELDS.has(key)).map(([key,value])=>[key,sanitizeLogValue(value)]))}));
+class TestClient extends EventEmitter{async destroy(){}}
+
+export async function createBridgeRuntime({env=process.env,clientFactory=null,logger=safeLog,startHealth=true,acquireLock=true,installSignals=true}={}){
+  const config=resolveRuntimeConfig(env);assertLiveConfig(config);
+  await Promise.all([config.paths.session,config.paths.chromium,config.paths.outbox,config.paths.state].map(value=>mkdir(value,{recursive:true})));
+  const lock=new RuntimeLock(config.paths.lock);if(acquireLock)await lock.acquire();
+  let client,showQr=null;
+  if(clientFactory)client=await clientFactory(config);
+  else if(config.mode===BRIDGE_MODES.LIVE){
+    process.env.PUPPETEER_CACHE_DIR=config.paths.chromium;
+    const whatsappModule=await import('whatsapp-web.js'),{Client,LocalAuth}=whatsappModule.default||whatsappModule;
+    client=new Client({authStrategy:new LocalAuth({clientId:'radar-v062-secondary',dataPath:config.paths.session}),puppeteer:{headless:true,executablePath:env.PUPPETEER_EXECUTABLE_PATH||undefined,args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']}});
+    if(config.bootstrapMode&&process.stdout.isTTY){const qrModule=await import('qrcode-terminal'),qr=qrModule.default||qrModule;showQr=value=>qr.generate(value,{small:true});}
+  }else client=new TestClient();
+  const outbox=new DurableOutbox(path.join(config.paths.outbox,'events.json'));
+  const uploader=new BatchUploader({outbox,endpoint:config.endpoint,token:config.token,logger});
+  const groupState=new DurableGroupState(path.join(config.paths.state,'groups.json'));
+  const bridge=new SecondaryBridge({client,outbox,uploader,groupState,logger});
+  bridge.onQr=value=>{if(showQr)showQr(value);else logger('AUTH_REQUIRED',{state:'WAITING_QR'});};bridge.wire();
+  const health=createHealthServer({bridge,outbox,port:config.port,logger});if(startHealth)await health.start();
+  const lifecycle=installSignals?installLifecycle({bridge,client,health:startHealth?health:null,lock:acquireLock?lock:null,logger}):null;
+  return {config,client,outbox,uploader,groupState,bridge,health,lock,lifecycle};
+}
+
+const direct=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
+if(direct){const runtime=await createBridgeRuntime();if(runtime.config.mode===BRIDGE_MODES.LIVE)await runtime.client.initialize();else safeLog('TEST_MODE',{state:'STARTING'});}

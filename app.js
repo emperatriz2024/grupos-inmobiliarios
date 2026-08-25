@@ -32,6 +32,7 @@ import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
 import { SecondaryWhatsAppSource } from './ingestion/source-ingestion.js';
 import { processSecondaryEvents } from './ingestion/secondary-processing.js';
+import {shouldSyncSecondary,SECONDARY_POLL_MS} from './ingestion/secondary-sync-policy.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -65,6 +66,8 @@ const SECONDARY_ENDPOINT_KEY='radar_secondary_endpoint_v061';
 const SECONDARY_TOKEN_KEY='radar_secondary_token_v061_session';
 const SECONDARY_CURSOR_KEY='radar_secondary_cursor_v061';
 const SECONDARY_STATS_KEY='radar_secondary_stats_v061';
+const SECONDARY_LAST_ATTEMPT_KEY='radar_secondary_last_attempt_v062';
+const SECONDARY_HEALTH_KEY='radar_secondary_health_v062';
 let secondarySyncing=false;
 
 function rememberSearchPosition(cardId='') {
@@ -1585,7 +1588,8 @@ async function initDropbox() {
 
 function secondaryStats(){try{return {...{received:0,pending:0,processed:0,groups:0,properties:0,errors:0,lastSync:null,lastError:null},...JSON.parse(localStorage.getItem(SECONDARY_STATS_KEY)||'{}')};}catch{return {received:0,pending:0,processed:0,groups:0,properties:0,errors:0};}}
 function saveSecondaryStats(stats){localStorage.setItem(SECONDARY_STATS_KEY,JSON.stringify(stats));renderSecondaryState(stats);}
-function secondaryConfig(){return {endpoint:localStorage.getItem(SECONDARY_ENDPOINT_KEY)||'',token:sessionStorage.getItem(SECONDARY_TOKEN_KEY)||''};}
+function secondaryConfig(){return {endpoint:localStorage.getItem(SECONDARY_ENDPOINT_KEY)||'',token:sessionStorage.getItem(SECONDARY_TOKEN_KEY)||'',healthEndpoint:localStorage.getItem(SECONDARY_HEALTH_KEY)||''};}
+async function checkSecondaryCloudHealth(){const target=$('#secondaryCloudStatus'),url=secondaryConfig().healthEndpoint;if(!target)return;if(!url){target.textContent='Bridge cloud aún no configurado';return;}try{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000),response=await fetch(url,{cache:'no-store',signal:controller.signal});clearTimeout(timer);target.textContent=response.ok?'Captura en la nube activa':'Bridge cloud no disponible';}catch{target.textContent='Bridge cloud no disponible';}}
 function renderSecondaryState(stats=secondaryStats()){
   const configured=Boolean(secondaryConfig().endpoint&&secondaryConfig().token),dot=$('#secondaryStatusDot');
   if(dot)dot.className=stats.lastError?'error':configured?'connected':'';
@@ -1599,11 +1603,12 @@ function configureSecondaryAccess(){
   const endpoint=prompt('URL HTTPS del endpoint TEST secondary-whatsapp-sync:',current);if(endpoint===null)return;
   let parsed;try{parsed=new URL(endpoint,location.href);if(parsed.protocol!=='https:'&&parsed.hostname!=='localhost')throw new Error();}catch{return alert('La URL debe usar HTTPS (o localhost para pruebas).');}
   const token=prompt('Token de lectura TEST. Se guardará solo durante esta sesión del navegador:','');if(!token)return alert('No se guardó ninguna credencial.');
-  localStorage.setItem(SECONDARY_ENDPOINT_KEY,parsed.toString());sessionStorage.setItem(SECONDARY_TOKEN_KEY,token);const stats=secondaryStats();stats.lastError=null;saveSecondaryStats(stats);
+  const currentHealth=localStorage.getItem(SECONDARY_HEALTH_KEY)||'',health=prompt('URL pública /health del bridge cloud (opcional, sin credenciales):',currentHealth);if(health){try{const parsedHealth=new URL(health);if(parsedHealth.protocol!=='https:')throw new Error();localStorage.setItem(SECONDARY_HEALTH_KEY,parsedHealth.toString());}catch{return alert('La URL de health debe usar HTTPS.');}}
+  localStorage.setItem(SECONDARY_ENDPOINT_KEY,parsed.toString());sessionStorage.setItem(SECONDARY_TOKEN_KEY,token);const stats=secondaryStats();stats.lastError=null;saveSecondaryStats(stats);checkSecondaryCloudHealth();
 }
 async function syncSecondaryWhatsApp({silent=false}={}){
   if(secondarySyncing)return;const config=secondaryConfig();renderSecondaryState();if(!config.endpoint||!config.token){if(!silent)alert('Configura primero el acceso TEST.');return;}
-  secondarySyncing=true;const button=$('#syncSecondaryNow');if(button)button.disabled=true;let stats=secondaryStats(),cursor=localStorage.getItem(SECONDARY_CURSOR_KEY)||'',pages=0;
+  localStorage.setItem(SECONDARY_LAST_ATTEMPT_KEY,String(Date.now()));secondarySyncing=true;const button=$('#syncSecondaryNow');if(button)button.disabled=true;let stats=secondaryStats(),cursor=localStorage.getItem(SECONDARY_CURSOR_KEY)||'',pages=0;
   try{
     let hasMore=true;
     while(hasMore&&pages<5){
@@ -1623,22 +1628,22 @@ $('#syncSecondaryNow')?.addEventListener('click',()=>syncSecondaryWhatsApp({sile
 $('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,endpointConfigured:Boolean(secondaryConfig().endpoint),tokenConfigured:Boolean(secondaryConfig().token),store:'radar-secondary-whatsapp-v061-test'},null,2);});
 
 async function initApp(){
-  try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await Promise.all([syncSecondaryWhatsApp({silent:true}),checkSecondaryCloudHealth()]);}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
-setInterval(()=>{if(document.visibilityState==='visible')syncSecondaryWhatsApp({silent:true});},5*60*1000);
+setInterval(()=>{if(document.visibilityState==='visible'){syncSecondaryWhatsApp({silent:true});checkSecondaryCloudHealth();}},SECONDARY_POLL_MS);
 
 window.addEventListener('pagehide',()=>rememberSearchPosition());
-window.addEventListener('pageshow',e=>{ if(e.persisted) restoreSearchPosition(); });
+window.addEventListener('pageshow',e=>{if(e.persisted)restoreSearchPosition();if(shouldSyncSecondary({lastAttempt:localStorage.getItem(SECONDARY_LAST_ATTEMPT_KEY)}))syncSecondaryWhatsApp({silent:true});});
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='hidden') rememberSearchPosition();
-  else if(document.visibilityState==='visible') restoreSearchPosition();
+  else if(document.visibilityState==='visible'){restoreSearchPosition();if(shouldSyncSecondary({lastAttempt:localStorage.getItem(SECONDARY_LAST_ATTEMPT_KEY)}))syncSecondaryWhatsApp({silent:true});}
 });
 
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
 if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
-    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.1')console.info('Radar V0.6.1 listo para usar.');
+    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.2')console.info('Radar V0.6.2 listo para usar.');
   });
-  navigator.serviceWorker.register('./sw.js?v=0610').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0620').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }

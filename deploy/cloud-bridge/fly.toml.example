@@ -1,0 +1,42 @@
+app = "REPLACE_WITH_TEST_APP_NAME"
+primary_region = "REPLACE_WITH_REGION"
+
+[build]
+  dockerfile = "deploy/cloud-bridge/Dockerfile"
+
+[env]
+  RADAR_BRIDGE_MODE = "test"
+  RADAR_BRIDGE_RUNTIME_DIR = "/data/radar-whatsapp-secondary"
+  PORT = "8080"
+
+[processes]
+  app = "node index.js"
+
+[http_service]
+  processes = ["app"]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "45s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[mounts]]
+  source = "radar_whatsapp_data"
+  destination = "/data"
+  processes = ["app"]
+
+[[restart]]
+  policy = "always"
+  processes = ["app"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  processes = ["app"]

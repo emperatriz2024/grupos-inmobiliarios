@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
+import {mkdtemp,readFile,rm,writeFile,mkdir} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {resolveRuntimeConfig,BRIDGE_MODES} from '../bridge/whatsapp-secondary/runtime-config.js';
+import {RuntimeLock} from '../bridge/whatsapp-secondary/runtime-lock.js';
+import {createHealthServer,safeMetrics} from '../bridge/whatsapp-secondary/health-server.js';
+import {installLifecycle} from '../bridge/whatsapp-secondary/lifecycle.js';
+import {DurableOutbox,MemoryOutbox} from '../bridge/whatsapp-secondary/outbox.js';
+import {DurableGroupState} from '../bridge/whatsapp-secondary/group-state.js';
+import {BatchUploader} from '../bridge/whatsapp-secondary/uploader.js';
+import {SecondaryBridge,BRIDGE_STATES} from '../bridge/whatsapp-secondary/bridge.js';
+import {shouldSyncSecondary,SECONDARY_POLL_MS} from '../ingestion/secondary-sync-policy.js';
+import {createBridgeRuntime,safeLog} from '../bridge/whatsapp-secondary/index.js';
+
+const temp=()=>mkdtemp(path.join(os.tmpdir(),'radar-v062-'));
+const event=(id='m1')=>({messageId:id,groupId:'test@g.us',timestamp:'2026-08-25T00:00:00Z',receivedAt:'2026-08-25T00:00:00Z',text:'test'});
+
+test('runtime cloud usa /data y separa paths persistentes; TEST es default',()=>{const safe=resolveRuntimeConfig({FLY_APP_NAME:'radar'},'linux');assert.equal(safe.mode,BRIDGE_MODES.TEST);assert.equal(safe.runtimeRoot,path.resolve('/data/radar-whatsapp-secondary'));for(const key of ['session','chromium','outbox','state'])assert.ok(safe.paths[key].startsWith(safe.runtimeRoot));});
+
+test('modo TEST prepara runtime sin inicializar WhatsApp ni QR',async()=>{const dir=await temp();let initialized=0;class FakeClient extends EventEmitter{async initialize(){initialized++;}async destroy(){}}const runtime=await createBridgeRuntime({env:{RADAR_BRIDGE_MODE:'test',RADAR_BRIDGE_RUNTIME_DIR:dir,PORT:'8099'},clientFactory:async()=>new FakeClient(),startHealth:false,acquireLock:false,installSignals:false,logger:()=>{}});assert.equal(initialized,0);for(const key of ['session','chromium','outbox','state'])assert.ok(runtime.config.paths[key].startsWith(dir));await rm(dir,{recursive:true,force:true});});
+
+test('single-instance rechaza lock activo y recupera stale sin borrar lock vivo',async()=>{const dir=await temp(),file=path.join(dir,'bridge.lock'),first=new RuntimeLock(file,{heartbeatMs:999999});await first.acquire();await assert.rejects(()=>new RuntimeLock(file).acquire(),/RUNTIME_LOCK_ACTIVE/);await first.release();await writeFile(file,JSON.stringify({pid:999999,owner:'dead',updatedAt:1}));const recovered=new RuntimeLock(file,{now:()=>500000,staleMs:1000,heartbeatMs:999999});await recovered.acquire();await recovered.release();await rm(dir,{recursive:true,force:true});});
+
+test('outbox y group state sobreviven restart; backup recupera sin destruir corrupto',async()=>{const dir=await temp(),file=path.join(dir,'outbox','events.json'),a=new DurableOutbox(file);await a.enqueue(event());assert.equal(await new DurableOutbox(file).count(),1);await a.enqueue(event('m2'));await writeFile(file,'{corrupt');const recovered=new DurableOutbox(file);assert.equal(await recovered.count(),1);assert.equal(await readFile(file,'utf8'),'{corrupt');const stateFile=path.join(dir,'state','groups.json'),state=new DurableGroupState(stateFile);await state.observe(event());assert.equal(await new DurableGroupState(stateFile).has('test@g.us','m1'),true);await rm(dir,{recursive:true,force:true});});
+
+test('health/ready/metrics son seguros y ready cambia 503→200',async()=>{const bridge={state:'STARTING',snapshot:()=>({state:bridge.state,uptimeMs:1,groupsSeen:0,messagesReceived:0,messagesQueued:0,messagesUploaded:0,duplicatesSkipped:0,lastMessageAt:null,lastSuccessfulUploadAt:null,backfillAttempts:0,backfillErrors:0})},outbox={count:async()=>2},health=createHealthServer({bridge,outbox,host:'127.0.0.1',port:0});const address=await health.start(),base=`http://127.0.0.1:${address.port}`;assert.equal((await fetch(`${base}/health`)).status,200);assert.equal((await fetch(`${base}/ready`)).status,503);bridge.state='READY';assert.equal((await fetch(`${base}/ready`)).status,200);const metrics=await (await fetch(`${base}/metrics`)).json();assert.equal(metrics.outboxPending,2);for(const forbidden of ['token','groupId','authorId','phone','text','qr','cookie'])assert.equal(JSON.stringify(metrics).includes(forbidden),false);await health.stop();});
+
+test('shutdown ordenado destruye cliente sin logout y conserva sesión',async()=>{const calls=[],processRef=new EventEmitter();processRef.exit=()=>calls.push('exit');const bridge={setState:s=>calls.push(s),stopFlushLoop:()=>calls.push('stop'),stopWatchdog:()=>{},flush:async()=>calls.push('flush')},client={destroy:async()=>calls.push('destroy'),logout:async()=>calls.push('logout')},health={stop:async()=>calls.push('health')},lock={release:async()=>calls.push('lock')};const lifecycle=installLifecycle({bridge,client,health,lock,processRef,exit:false});await lifecycle.shutdown('SIGTERM');assert.ok(calls.includes('destroy'));assert.equal(calls.includes('logout'),false);assert.equal(calls.at(0),'SHUTTING_DOWN');});
+
+test('uploader respeta Retry-After, red/500 hacen backoff y circuit breaker',async()=>{const outbox=new MemoryOutbox();await outbox.enqueue(event());const retry429=new BatchUploader({outbox,endpoint:'https://test',token:'secret',random:()=>0,fetchImpl:async()=>({ok:false,status:429,headers:{get:()=> '7'}})}),r429=await retry429.flush(100);assert.equal(r429.retryInMs,7000);const failing=new BatchUploader({outbox,endpoint:'https://test',token:'secret',random:()=>0,fetchImpl:async()=>{throw new TypeError('network')},circuitThreshold:2,circuitCooldownMs:10000});await failing.flush(8000);const second=await failing.flush(12000);assert.equal(second.circuitOpen,true);const held=await failing.flush(13000);assert.equal(held.circuitOpen,true);});
+
+test('watchdog degrada cola creciente y auth failure requiere vinculación',async()=>{const client=new EventEmitter(),outbox={count:async()=>5001},bridge=new SecondaryBridge({client,outbox,uploader:{flush:async()=>({uploaded:0})},maxPending:5000});bridge.wire();client.emit('auth_failure','private detail');assert.equal(bridge.state,BRIDGE_STATES.AUTH_REQUIRED);await bridge.watchdog();assert.equal(bridge.state,BRIDGE_STATES.DEGRADED);});
+
+test('métricas y política iPhone no filtran datos y usan polling moderado',()=>{const metrics=safeMetrics({snapshot:()=>({state:'READY',uptimeMs:1,groupsSeen:1,messagesReceived:2,messagesQueued:2,messagesUploaded:2,duplicatesSkipped:0,lastMessageAt:null,lastSuccessfulUploadAt:null,backfillAttempts:1,backfillErrors:0})},0);assert.equal(Object.hasOwn(metrics,'groupId'),false);assert.equal(SECONDARY_POLL_MS,300000);assert.equal(shouldSyncSecondary({lastAttempt:1000,now:181001}),true);assert.equal(shouldSyncSecondary({lastAttempt:1000,now:10000}),false);});
+
+test('código propio es read-only, QR/secretos no están en endpoints y Docker excluye runtime',async()=>{const root=path.resolve('.'),files=['bridge/whatsapp-secondary/index.js','bridge/whatsapp-secondary/bridge.js'];const source=(await Promise.all(files.map(file=>readFile(path.join(root,file),'utf8')))).join('\n');for(const api of ['sendMessage(','reply(','react(','forward(','delete(','edit(','createGroup(','addParticipants(','removeParticipants(','promoteParticipants(','demoteParticipants('])assert.equal(source.includes(api),false);const ignore=await readFile(path.join(root,'.dockerignore'),'utf8');for(const item of ['.env','**/runtime','**/session','**/outbox','**/state','**/chromium'])assert.ok(ignore.includes(item));const health=await readFile(path.join(root,'bridge/whatsapp-secondary/health-server.js'),'utf8');assert.equal(/RADAR_BRIDGE_INGEST_TOKEN|authorization|qrcode/i.test(health),false);});
+
+test('logger defensivo no imprime QR, secretos, URL ni teléfono',()=>{const original=console.log,rows=[];console.log=value=>rows.push(value);try{safeLog('SAFE',{operation:'token=abc https://private.test 584120000000'});}finally{console.log=original;}const output=rows.join('');assert.equal(output.includes('abc'),false);assert.equal(output.includes('private.test'),false);assert.equal(output.includes('584120000000'),false);});
