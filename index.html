@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0600" />
+  <link rel="stylesheet" href="./styles.css?v=0601" />
 </head>
 <body>
   <main class="shell">
@@ -159,6 +159,34 @@
       <div id="buyersEmpty" class="empty" hidden>
         Todavía no has creado compradores. Toca <b>Nuevo comprador</b> para comenzar el matching.
       </div>
+    </section>
+
+    <section id="viewRequests" class="view">
+      <div class="buyersHero requestsHero">
+        <div><div class="eyebrow buyersEyebrow">RADAR COMERCIAL</div><h2>Solicitudes</h2><p>Convierte una necesidad en criterios verificables y busca una sola vez sobre inmuebles maestros.</p></div>
+      </div>
+      <section class="card requestComposer">
+        <label>Título de la solicitud<input id="requestTitle" placeholder="Ej. Locales para María"></label>
+        <label>Comprador asociado<select id="requestBuyer"><option value="">Sin comprador</option></select></label>
+        <label class="fullSpan">Lenguaje natural<textarea id="requestNatural" rows="3" placeholder="Ej. Busco apartamento en Mañongo o El Parral hasta 100 mil con mínimo 2 habitaciones."></textarea></label>
+        <button id="analyzeRequestText" class="ghost fullSpan" type="button">Interpretar solicitud</button>
+        <div id="requestInterpretation" class="requestInterpretation fullSpan" hidden></div>
+        <div class="requestStructured fullSpan">
+          <h3>Criterios estructurados</h3>
+          <div class="buyerFormGrid"><label>Operación<select id="requestOperation"><option value="">Confirmar</option><option>Venta</option><option>Alquiler</option></select></label><label>Precio mínimo<input id="requestMinPrice" type="number" inputmode="numeric"></label><label>Precio máximo<input id="requestMaxPrice" type="number" inputmode="numeric"></label><label>Tolerancia<select id="requestTolerance"><option value="0">Estricto · 0%</option><option value="5">+5% alternativas</option><option value="10">+10% alternativas</option></select></label><label>Habitaciones mín.<input id="requestMinBedrooms" type="number" inputmode="numeric"></label><label>Baños mín.<input id="requestMinBathrooms" type="number" inputmode="numeric"></label><label>Puestos mín.<input id="requestMinParking" type="number" inputmode="numeric"></label><label>m² mínimo<input id="requestMinArea" type="number" inputmode="numeric"></label><label>m² máximo<input id="requestMaxArea" type="number" inputmode="numeric"></label><label>Vigencia<select id="requestVigency"><option value="active">Vigente o reciente</option><option value="verified">Solo vigencia confirmada</option></select></label></div>
+          <h4>Tipos</h4><div id="requestTypes" class="buyerCheckGrid"></div>
+          <h4>Municipios</h4><div id="requestMunicipalities" class="buyerChoiceList requestZoneList"></div>
+          <h4>Zonas</h4><div id="requestZones" class="buyerChoiceList requestZoneList"></div>
+          <h4>Conjuntos / residencias</h4><div id="requestComplexes" class="buyerChoiceList requestZoneList"></div>
+          <h4>Características obligatorias</h4><div id="requestRequired" class="buyerCheckGrid"></div>
+          <h4>Preferencias</h4><div id="requestDesired" class="buyerCheckGrid"></div>
+        </div>
+        <button id="runRequest" class="primary fullSpan" type="button">Guardar y buscar en inmuebles maestros</button>
+      </section>
+      <section class="card"><div class="sectionTitle"><span>⌕</span><div><h2>Solicitudes guardadas</h2><p>Reabre criterios y detecta opciones nuevas desde la última selección.</p></div></div><div id="requestSavedList" class="requestSavedList"></div></section>
+      <div id="requestSelectionBar" class="requestSelectionBar" hidden><b><span id="requestSelectedCount">0</span> seleccionadas</b><button id="requestSelectAll" class="ghost">Seleccionar exactas y por verificar</button><button id="requestDeselectAll" class="ghost">Deseleccionar</button><button id="createSelection" class="primary">Crear selección para cliente</button></div>
+      <section id="requestResults"></section>
+      <section id="requestShareResult" class="card requestShareResult" hidden></section>
     </section>
 
     <section id="viewImport" class="view">
@@ -563,6 +591,13 @@
       </form>
     </dialog>
 
+    <dialog id="selectionPublishDialog" class="buyerDialog">
+      <form id="selectionPublishForm" class="buyerForm">
+        <div class="dialogHead buyerDialogHead"><div><span>LINK COMPARTIBLE</span><h2>Publicar selección</h2></div><button id="closeSelectionPublish" type="button">×</button></div>
+        <div class="buyerFormBody"><p class="buyerHelp">Solo se publicarán campos comerciales aprobados. La credencial se usa una vez y no se guarda.</p><label>Título<input id="selectionPublishTitle" required></label><label>Nombre del cliente (opcional)<input id="selectionClientName"></label><label>Expira (opcional)<input id="selectionExpiresAt" type="datetime-local"></label><label>Credencial de publicación<input id="selectionAdminToken" type="password" required autocomplete="off"></label><button class="primary" type="submit">Generar o actualizar link seguro</button><button id="disableSelectionLink" class="dangerBuyerBtn" type="button" hidden>Desactivar link</button></div>
+      </form>
+    </dialog>
+
     <dialog id="buyerMatchesDialog" class="buyerMatchesDialog">
       <div class="dialogHead">
         <div><span>MATCHING AUTOMÁTICO</span><h2 id="buyerMatchesTitle">Coincidencias</h2></div>
@@ -603,10 +638,11 @@
   <nav class="bottomNav">
     <button data-view="viewSearch" class="active"><span>⌕</span>Buscar</button>
     <button data-view="viewBuyers"><span>◎</span>Compradores</button>
+    <button data-view="viewRequests"><span>≡</span>Solicitudes</button>
     <button data-view="viewImport"><span>＋</span>Importar</button>
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0600"></script>
+  <script type="module" src="./app.js?v=0601"></script>
 </body>
 </html>

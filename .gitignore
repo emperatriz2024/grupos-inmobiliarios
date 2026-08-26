@@ -13,6 +13,12 @@ build/
 tmp/
 temp/
 *.log
+.netlify/
+.wwebjs_auth/
+.wwebjs_cache/
+bridge/.env
+bridge/.wwebjs_auth/
+bridge/.wwebjs_cache/
 
 # Local databases and runtime state
 *.db

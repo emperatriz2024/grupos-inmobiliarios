@@ -51,9 +51,9 @@ test('comprador exige 2 puestos y dato ausente nunca obtiene 100%',()=>{
   assert.ok(match);assert.equal(match.match_kind,'por_verificar');assert.ok(match.score<100);assert.match(match.gaps.join(' '),/Puestos: dato por verificar/);
 });
 
-test('respaldo V1 migra hacia adelante sin perder fuentes',()=>{
+test('respaldo V1 migra a V3 sin perder fuentes',()=>{
   const old={format:'radar-inmobiliario-backup',backup_version:1,created_at:'2026-01-01T00:00:00Z',stores:{source_posts:[{id:'s1',source_type:'whatsapp',published_at:'2026-01-01'}]}};
-  const next=migrateBackupSnapshot(old);assert.equal(next.schemaVersion,2);assert.equal(next.stores.source_posts.length,1);assert.equal(next.stores.source_posts[0].sourceType,'whatsapp_zip');assert.equal(validateBackupSnapshot(next).valid,true);
+  const next=migrateBackupSnapshot(old);assert.equal(next.schemaVersion,3);assert.equal(next.stores.source_posts.length,1);assert.equal(next.stores.source_posts[0].sourceType,'whatsapp_zip');assert.deepEqual(next.stores.requests,[]);assert.deepEqual(next.stores.selections,[]);assert.equal(validateBackupSnapshot(next).valid,true);
 });
 
 test('teléfonos venezolanos equivalentes se normalizan igual',()=>{

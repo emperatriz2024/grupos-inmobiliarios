@@ -6,7 +6,7 @@ import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLoca
 import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -23,6 +23,9 @@ const SOURCE_POST_STORE='source_posts';
 const BUYER_STORE='buyers';
 const MATCH_STORE='matches';
 const SYNC_QUEUE_STORE='sync_queue';
+const REQUEST_STORE='requests';
+const SELECTION_STORE='selections';
+const SELECTION_HISTORY_STORE='selection_history';
 
 
 function openDB() {
@@ -85,6 +88,26 @@ function openDB() {
       if(!db.objectStoreNames.contains(SYNC_QUEUE_STORE)){
         const s=db.createObjectStore(SYNC_QUEUE_STORE,{keyPath:'id',autoIncrement:true});
         s.createIndex('status','status',{unique:false});
+        s.createIndex('created_at','created_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(REQUEST_STORE)){
+        const s=db.createObjectStore(REQUEST_STORE,{keyPath:'id'});
+        s.createIndex('buyer_id','buyer_id',{unique:false});
+        s.createIndex('status','status',{unique:false});
+        s.createIndex('updated_at','updated_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(SELECTION_STORE)){
+        const s=db.createObjectStore(SELECTION_STORE,{keyPath:'id'});
+        s.createIndex('request_id','request_id',{unique:false});
+        s.createIndex('buyer_id','buyer_id',{unique:false});
+        s.createIndex('public_slug','public_slug',{unique:true});
+        s.createIndex('status','status',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(SELECTION_HISTORY_STORE)){
+        const s=db.createObjectStore(SELECTION_HISTORY_STORE,{keyPath:'id'});
+        s.createIndex('selection_id','selection_id',{unique:false});
+        s.createIndex('request_id','request_id',{unique:false});
+        s.createIndex('buyer_id','buyer_id',{unique:false});
         s.createIndex('created_at','created_at',{unique:false});
       }
     };
@@ -908,11 +931,57 @@ export async function getAllMatches(){
   const db=await openDB(),rows=await reqP(db.transaction(MATCH_STORE,'readonly').objectStore(MATCH_STORE).getAll());db.close();return rows;
 }
 
+// ---------- Solicitudes y selecciones v0.6 ----------------------------------
+function uniqueStrings(values=[]){return [...new Set((values||[]).map(String).filter(Boolean))];}
+function businessId(prefix){const now=new Date().toISOString();return `${prefix}_${typeof crypto!=='undefined'&&crypto.randomUUID?crypto.randomUUID():radarHash(now+Math.random())}`;}
+
+export async function getRequests(){
+  const db=await openDB(),rows=await reqP(db.transaction(REQUEST_STORE,'readonly').objectStore(REQUEST_STORE).getAll());db.close();
+  return rows.sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
+}
+export async function getRequest(id){const db=await openDB(),row=await reqP(db.transaction(REQUEST_STORE,'readonly').objectStore(REQUEST_STORE).get(id));db.close();return row||null;}
+export async function saveRequest(record={}){
+  const now=new Date().toISOString(),id=record.id||businessId('request'),criteria=record.criteria||{};
+  const row={...record,id,buyer_id:record.buyer_id||null,title:String(record.title||'Solicitud inmobiliaria').trim(),
+    natural_text:String(record.natural_text||'').trim(),criteria:{...criteria,
+      property_types:uniqueStrings(criteria.property_types),municipality_ids:uniqueStrings(criteria.municipality_ids),
+      zone_ids:uniqueStrings(criteria.zone_ids),complex_ids:uniqueStrings(criteria.complex_ids),
+      required_features:uniqueStrings(criteria.required_features),desired_features:uniqueStrings(criteria.desired_features)},
+    status:record.status||'active',last_selection_at:record.last_selection_at||null,
+    created_at:record.created_at||now,updated_at:now};
+  const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(REQUEST_STORE,'readwrite');tx.objectStore(REQUEST_STORE).put(row);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return row;
+}
+export async function getSelections(){const db=await openDB(),rows=await reqP(db.transaction(SELECTION_STORE,'readonly').objectStore(SELECTION_STORE).getAll());db.close();return rows.sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')));}
+export async function getSelection(id){const db=await openDB(),row=await reqP(db.transaction(SELECTION_STORE,'readonly').objectStore(SELECTION_STORE).get(id));db.close();return row||null;}
+export async function saveSelection(record={}){
+  const now=new Date().toISOString(),id=record.id||businessId('selection');
+  const row={...record,id,request_id:record.request_id||null,buyer_id:record.buyer_id||null,
+    master_property_ids:uniqueStrings(record.master_property_ids),sent_master_property_ids:uniqueStrings(record.sent_master_property_ids),
+    status:record.status||'draft',title:String(record.title||'Selección de propiedades').trim(),
+    internal_notes:String(record.internal_notes||'').trim(),created_at:record.created_at||now,updated_at:now};
+  const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(SELECTION_STORE,'readwrite');tx.objectStore(SELECTION_STORE).put(row);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return row;
+}
+export async function recordSelectionPublication(selection={},event='published'){
+  const now=new Date().toISOString(),row={id:businessId('selection_event'),selection_id:selection.id,request_id:selection.request_id||null,
+    buyer_id:selection.buyer_id||null,event,master_property_ids:uniqueStrings(selection.master_property_ids),created_at:now};
+  const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction([SELECTION_HISTORY_STORE,REQUEST_STORE],'readwrite');tx.objectStore(SELECTION_HISTORY_STORE).put(row);
+    if(selection.request_id){const store=tx.objectStore(REQUEST_STORE),get=store.get(selection.request_id);get.onsuccess=()=>{if(get.result)store.put({...get.result,last_selection_at:now,updated_at:now});};}
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return row;
+}
+export async function getSelectionHistory({selectionId=null,requestId=null,buyerId=null}={}){
+  const db=await openDB(),store=db.transaction(SELECTION_HISTORY_STORE,'readonly').objectStore(SELECTION_HISTORY_STORE);let rows;
+  if(selectionId)rows=await allByIndex(store,'selection_id',selectionId);else if(requestId)rows=await allByIndex(store,'request_id',requestId);else if(buyerId)rows=await allByIndex(store,'buyer_id',buyerId);else rows=await reqP(store.getAll());
+  db.close();return rows.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+}
+export async function getPreviouslySentMasterIds({requestId=null,buyerId=null}={}){
+  const rows=await getSelectionHistory({requestId,buyerId});return [...new Set(rows.flatMap(row=>row.master_property_ids||[]))];
+}
+
 // ---------- Radar Backup v0.5.0.2 --------------------------------------------
 const BACKUP_STORES=[
   PROP_STORE,IMPORT_STORE,FAV_STORE,CONTACT_STORE,MUNICIPALITY_STORE,ZONE_STORE,
   COMPLEX_STORE,LOCATION_PENDING_STORE,MASTER_STORE,SOURCE_POST_STORE,BUYER_STORE,
-  MATCH_STORE,SYNC_QUEUE_STORE
+  MATCH_STORE,SYNC_QUEUE_STORE,REQUEST_STORE,SELECTION_STORE,SELECTION_HISTORY_STORE
 ];
 export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 
@@ -929,7 +998,7 @@ export async function exportDatabaseSnapshot(){
   }finally{db.close();}
   return {
     format:'radar-inmobiliario-backup',
-    backup_version:2,
+    backup_version:BACKUP_SCHEMA_VERSION,
     schemaVersion:BACKUP_SCHEMA_VERSION,
     app_version:APP_VERSION,
     db_name:DB_NAME,
@@ -960,7 +1029,7 @@ export function migrateBackupSnapshot(snapshot){
     }));
   }
   const counts=Object.fromEntries(BACKUP_STORES.map(name=>[name,stores[name].length]));
-  return {...snapshot,backup_version:2,schemaVersion:BACKUP_SCHEMA_VERSION,app_version:APP_VERSION,stores,counts,migrated_from:version<BACKUP_SCHEMA_VERSION?version:null};
+  return {...snapshot,backup_version:BACKUP_SCHEMA_VERSION,schemaVersion:BACKUP_SCHEMA_VERSION,app_version:APP_VERSION,stores,counts,migrated_from:version<BACKUP_SCHEMA_VERSION?version:null};
 }
 
 export function validateBackupSnapshot(snapshot){
@@ -1023,13 +1092,15 @@ export function backupSnapshotSummary(snapshot){
     contacts:Number(c[CONTACT_STORE]||prepared.stores?.[CONTACT_STORE]?.length||0),
     buyers:Number(c[BUYER_STORE]||prepared.stores?.[BUYER_STORE]?.length||0),
     matches:Number(c[MATCH_STORE]||prepared.stores?.[MATCH_STORE]?.length||0),
+    requests:Number(c[REQUEST_STORE]||prepared.stores?.[REQUEST_STORE]?.length||0),
+    selections:Number(c[SELECTION_STORE]||prepared.stores?.[SELECTION_STORE]?.length||0),
     created_at:prepared.created_at||null,schemaVersion:prepared.schemaVersion,migrated_from:prepared.migrated_from
   };
 }
 
 export async function clearDatabase() {
   const db = await openDB();
-  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE, CONTACT_STORE, MUNICIPALITY_STORE, ZONE_STORE, COMPLEX_STORE, LOCATION_PENDING_STORE, MASTER_STORE, SOURCE_POST_STORE, BUYER_STORE, MATCH_STORE, SYNC_QUEUE_STORE];
+  const stores = [PROP_STORE, IMPORT_STORE, FAV_STORE, CONTACT_STORE, MUNICIPALITY_STORE, ZONE_STORE, COMPLEX_STORE, LOCATION_PENDING_STORE, MASTER_STORE, SOURCE_POST_STORE, BUYER_STORE, MATCH_STORE, SYNC_QUEUE_STORE, REQUEST_STORE, SELECTION_STORE, SELECTION_HISTORY_STORE];
   await Promise.all(stores.map(name => new Promise((resolve, reject) => {
     const tx = db.transaction(name, 'readwrite');
     tx.oncomplete = resolve;

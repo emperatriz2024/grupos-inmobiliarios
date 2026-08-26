@@ -1,11 +1,13 @@
 const CACHE_PREFIX='grupos-inmobiliarios-';
-const CACHE=`${CACHE_PREFIX}v0600-professional-audit`;
-const V='?v=0600';
+const CACHE=`${CACHE_PREFIX}v0601-professional-requests`;
+const V='?v=0601';
 const ASSETS=[
   './','./index.html','./styles.css'+V,'./app.js'+V,'./db.js'+V,'./worker.js'+V,'./engine.js'+V,
   './zip-reader.js'+V,'./search-utils.js'+V,'./date-utils.js'+V,'./contact-utils.js'+V,
   './location-utils.js'+V,'./location-catalog.js'+V,'./intent-utils.js'+V,'./dedupe-utils.js'+V,
   './dropbox.js'+V,'./buyer-utils.js'+V,'./external-source-utils.js'+V,'./freshness-utils.js'+V,
+  './request-utils.js'+V,'./requests-ui.js'+V,'./selection-utils.js'+V,'./selection-api.js'+V,
+  './selection.html','./public-selection.js'+V,
   './version.js','./diagnostics.js','./core/property-policy.js','./external/adapters.js','./ingestion/source-ingestion.js',
   './manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'
 ];
@@ -15,7 +17,7 @@ self.addEventListener('activate',event=>event.waitUntil((async()=>{
   await Promise.all(keys.filter(key=>key.startsWith(CACHE_PREFIX)&&key!==CACHE).map(key=>caches.delete(key)));
   await self.clients.claim();
   const clients=await self.clients.matchAll({type:'window'});
-  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.6.0'}));
+  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.6.0-requests'}));
 })()));
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||new URL(event.request.url).origin!==self.location.origin)return;

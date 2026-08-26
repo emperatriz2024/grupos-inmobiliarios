@@ -3,8 +3,14 @@
   "private": true,
   "version": "0.6.0",
   "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^10.0.10"
+  },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check app.js && node --check db.js && node --check engine.js && node --check dedupe-utils.js && node scripts/validate-architecture.mjs"
+    "check": "node --check app.js && node --check db.js && node --check engine.js && node --check dedupe-utils.js && node --check request-utils.js && node --check requests-ui.js && node --check selection-utils.js && node --check selection-api.js && node --check public-selection.js && node --check netlify/functions/selections.js && node scripts/validate-architecture.mjs"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
   }
 }

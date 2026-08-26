@@ -30,6 +30,7 @@ import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=
 import { adapterForUrl, safeExternalUrl, sourceTypeFromUrl } from './external/adapters.js';
 import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
+import { initRequestsModule } from './requests-ui.js?v=0601';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -1576,7 +1577,7 @@ async function initDropbox() {
 }
 
 async function initApp(){
-  try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  try{await initLocationSystem();await loadData();await initRequestsModule();await initDropbox();renderBackupState();}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
 
@@ -1587,10 +1588,10 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
+if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0601-professional-requests')).map(k=>caches.delete(k)))).catch(()=>{});}
 if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
-    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.0')console.info('Radar V0.6.0 listo para usar.');
+    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.0-requests')console.info('Radar V0.6.0 Solicitudes listo para usar.');
   });
-  navigator.serviceWorker.register('./sw.js?v=0600').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0601').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }

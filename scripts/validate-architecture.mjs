@@ -22,7 +22,7 @@ for(const file of files)visit(file);
 for(const cycle of cycles)errors.push(`Dependencia circular: ${cycle.map(x=>path.relative(root,x)).join(' -> ')}`);
 
 const index=fs.readFileSync(path.join(root,'index.html'),'utf8');
-for(const id of ['searchBtn','newBuyerBtn','zipInput','importBtn','clearExternalSource','analyzeExternalUrl','backupFileInput']){
+for(const id of ['searchBtn','newBuyerBtn','zipInput','importBtn','clearExternalSource','analyzeExternalUrl','backupFileInput','analyzeRequestText','runRequest','createSelection','selectionAdminToken']){
   const count=(index.match(new RegExp(`id=["']${id}["']`,'g'))||[]).length;
   if(count!==1)errors.push(`ID crítico ${id}: esperado 1, encontrado ${count}`);
 }
@@ -36,4 +36,4 @@ const allText=files.map(f=>fs.readFileSync(f,'utf8')).join('\n');
 for(const [name,rx] of [['indexedDB.deleteDatabase',/indexedDB\.deleteDatabase\s*\(/],['localStorage.clear',/localStorage\.clear\s*\(/]])if(rx.test(allText))errors.push(`Operación prohibida: ${name}`);
 
 if(errors.length){console.error(errors.join('\n'));process.exit(1);}
-console.log(`ARCHITECTURE_OK files=${files.length} cycles=0 critical_ids=7 sw_assets=ok`);
+console.log(`ARCHITECTURE_OK files=${files.length} cycles=0 critical_ids=11 sw_assets=ok`);
