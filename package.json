@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check app.js && node --check db.js && node --check engine.js && node --check dedupe-utils.js && node scripts/validate-architecture.mjs",
+    "check": "node --check app.js && node --check db.js && node --check engine.js && node --check dedupe-utils.js && node --check core/radar/foundation.js && node --check core/radar/shadow-migration.js && node scripts/validate-architecture.mjs && node scripts/validate-core-schema.mjs",
+    "core:schema:validate": "node scripts/validate-core-schema.mjs",
+    "core:shadow:validate": "node scripts/shadow-migrate-0a.mjs",
     "bridge:start": "node bridge/whatsapp-secondary/index.js"
   },
   "dependencies": {

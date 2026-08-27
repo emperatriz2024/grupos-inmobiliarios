@@ -203,6 +203,13 @@ export async function addImport(summary) {
   return id;
 }
 
+export async function findImportByFileHash(fileHash) {
+  if(!fileHash)return null;
+  const db=await openDB(),tx=db.transaction(IMPORT_STORE,'readonly'),store=tx.objectStore(IMPORT_STORE);
+  const found=await new Promise((resolve,reject)=>{const req=store.openCursor(null,'prev');req.onerror=()=>reject(req.error);req.onsuccess=()=>{const cursor=req.result;if(!cursor)return resolve(null);if(cursor.value?.file_hash===fileHash)return resolve(cursor.value);cursor.continue();};});
+  db.close();return found;
+}
+
 export async function getStats() {
   const db = await openDB();
   const tx = db.transaction([PROP_STORE, IMPORT_STORE, FAV_STORE], 'readonly');

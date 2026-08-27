@@ -1,6 +1,6 @@
 
 import {
-  mergeProperties, patchPropertyPriceAudits, addImport, getStats, getRecentImports,
+  mergeProperties, patchPropertyPriceAudits, addImport, findImportByFileHash, getStats, getRecentImports,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds,
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, recordLocationPendings,
@@ -1047,16 +1047,16 @@ function processZipWithWorker(file, group, progressCb) {
   });
 }
 
-async function saveProcessedResult(m, group, fileName, progressCb) {
+async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb) {
   const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
-  const summary={group,file_name:fileName,chat_file:m.entryName,
+  const summary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
     messages:m.result.messages,
     messages_total:m.result.messages_total ?? m.result.messages,
     skipped_age:m.result.messages_skipped_age ?? 0,
     max_age_days:m.result.max_age_days ?? 60,
     cutoff_date:m.result.cutoff_date ?? null,
     detected:m.result.properties_detected,unique:m.result.unique.length,
-    added:saved.added,updated:saved.updated};
+    messages_detected:m.result.messages,messages_imported:m.result.messages,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'completed',started_at:startedAt,finished_at:new Date().toISOString()};
   await addImport(summary);
   await learnContactsFromProperties(m.result.unique);
   await recordLocationPendings(m.result.location_pendings||[]);
@@ -1064,8 +1064,12 @@ async function saveProcessedResult(m, group, fileName, progressCb) {
 }
 
 async function importOneZip(file, group, progressCb) {
+  const startedAt=new Date().toISOString();
+  const bytes=await file.arrayBuffer(),hashBytes=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+  const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),existing=await findImportByFileHash(fileHash);
+  if(existing)return {m:null,summary:{...existing,already_processed:true,status:'already_processed'}};
   const m = await processZipWithWorker(file,group,progressCb);
-  const summary = await saveProcessedResult(m,group,file.name,progressCb);
+  const summary = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb);
   return {m,summary};
 }
 
@@ -1093,8 +1097,10 @@ $('#importBtn').addEventListener('click', async () => {
       else if(p.phase==='process_progress') setStatus(`Detectando propiedades… ${Number(p.done||0).toLocaleString('es-VE')} / ${Number(p.total||0).toLocaleString('es-VE')}`,48+Math.round((Number(p.done||0)/Math.max(Number(p.total||0),1))*10));
       else if(p.phase==='save') setStatus(`Guardando base local… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,60+Math.round((p.done/Math.max(p.total,1))*35));
     });
-    setStatus('Importación completada',100);
-    $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>Importación completada</h3>
+    const alreadyProcessed=Boolean(summary.already_processed);
+    const importTitle=alreadyProcessed?'ZIP ya procesado anteriormente':'Importación completada';
+    setStatus(importTitle,100);
+    $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>${importTitle}</h3>
       <div class="summaryGrid"><div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes ≤60 días</span></div>
       <div><b>${summary.skipped_age.toLocaleString('es-VE')}</b><span>antiguos omitidos</span></div>
       <div><b>${summary.detected.toLocaleString('es-VE')}</b><span>publicaciones</span></div>
