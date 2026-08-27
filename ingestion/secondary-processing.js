@@ -16,7 +16,7 @@ export function groupConsecutiveEvents(events=[],windowMs=120_000){
 
 export function processSecondaryEvents(rawEvents=[],{locationCatalog=null}={}){
   const valid=[],invalid=[];for(const raw of rawEvents){const result=validateSecondaryEvent(raw);result.ok?valid.push(result.event):invalid.push({messageId:raw?.messageId||null,error:result.error});}
-  const records=[],nonProperty=[],attachments=valid.filter(event=>event.hasMedia).map(event=>({id:`att_secondary_${event.messageId}`,source_message_id:event.messageId,external_media_id:event.messageId,media_type:/image/i.test(event.mediaType)?'IMAGE':/video/i.test(event.mediaType)?'VIDEO':/audio|ptt/i.test(event.mediaType)?'AUDIO':/document/i.test(event.mediaType)?'DOCUMENT':'UNKNOWN',mime_type:null,original_filename:null,size_bytes:null,width:null,height:null,duration_ms:null,sha256:null,storage_locator:null,media_status:'OBSERVED',received_at:event.receivedAt,ingested_at:new Date().toISOString(),metadata_json:{source_type:event.sourceType,source_channel:event.sourceChannel,group_id:event.groupId,group_name:event.groupName,message_type:event.messageType},created_at:new Date().toISOString()}));
+  const records=[],nonProperty=[],attachments=valid.filter(event=>event.hasMedia).map(event=>({id:`att_secondary_${event.messageId}`,source_message_id:null,external_message_id:event.messageId,external_media_id:event.messageId,provenance_status:'UNRESOLVED',media_type:/image/i.test(event.mediaType)?'IMAGE':/video/i.test(event.mediaType)?'VIDEO':/audio|ptt/i.test(event.mediaType)?'AUDIO':/document/i.test(event.mediaType)?'DOCUMENT':'UNKNOWN',mime_type:null,original_filename:null,size_bytes:null,width:null,height:null,duration_ms:null,sha256:null,storage_locator:null,media_status:'OBSERVED',received_at:event.receivedAt,ingested_at:new Date().toISOString(),metadata_json:{source_type:event.sourceType,source_channel:event.sourceChannel,group_id:event.groupId,group_name:event.groupName,message_type:event.messageType},created_at:new Date().toISOString()}));
   for(const bundle of groupConsecutiveEvents(valid)){
     if(!looksLikeRealEstate(bundle.text)){nonProperty.push(...bundle.events.map(x=>x.messageId));continue;}
     const first=bundle.events[0],date=new Date(first.timestamp),message={group:first.groupName||first.groupId,sender:first.authorDisplayName||first.authorId||'Autor no verificable',date:date.toLocaleDateString('en-US'),date_iso:date.toISOString().slice(0,10),date_order:'MDY',time:date.toTimeString().slice(0,8),text:bundle.text};
@@ -26,4 +26,10 @@ export function processSecondaryEvents(rawEvents=[],{locationCatalog=null}={}){
     record.sources=[{group:record.group,sender:record.sender,date:record.date,date_iso:record.date_iso,date_order:record.date_order,time:record.time,phone:record.phone,messageId:first.messageId,sourceType:'whatsapp_secondary',sourceChannel:'secondary_number'}];records.push(record);
   }
   return {records,attachments,validCount:valid.length,invalid,nonProperty,propertiesDetected:records.length,groupsDetected:new Set(valid.map(x=>x.groupId)).size};
+}
+
+export function resolveSecondaryAttachmentSource(attachment,sourceMessage){
+  if(!attachment?.external_message_id||attachment.external_message_id!==sourceMessage?.external_message_id)throw new Error('attachment_source_message_mismatch');
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(sourceMessage.id||'')))throw new Error('internal_source_message_uuid_required');
+  return {...attachment,source_message_id:sourceMessage.id,provenance_status:'RESOLVED'};
 }

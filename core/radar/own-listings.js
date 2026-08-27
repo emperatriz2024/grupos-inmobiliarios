@@ -1,6 +1,6 @@
 export const OWNERSHIP_SCOPES=Object.freeze(['OWN','MARKET','UNKNOWN']);
-const PRIVATE_FIELDS=new Set(['own_listing_details','commission_pct','agreement_type','agreement_start','agreement_end','authorized_price','internal_notes','documents_status','media_authorization_status']);
-export function serializePublicProperty(property={}){return Object.fromEntries(Object.entries(property).filter(([key])=>!PRIVATE_FIELDS.has(key)));}
+export const PUBLIC_PROPERTY_FIELDS=Object.freeze(['id','canonical_code','operation','property_type','territory_id','municipality','zone','residence_name','residence','price_usd','currency','area_m2','land_area_m2','bedrooms','bathrooms','half_bathrooms','parking','status','first_seen_at','last_seen_at','last_verified_at','readiness_status']);
+export function serializePublicProperty(property={}){const output={};for(const key of PUBLIC_PROPERTY_FIELDS)if(Object.hasOwn(property,key))output[key]=structuredClone(property[key]);return output;}
 export class OwnListingRegistry{
   constructor({clock=Date.now,eventSink=()=>{}}={}){this.clock=clock;this.eventSink=eventSink;this.details=new Map();this.history=[];}
   setOwnership(property,scope,{actor_id,provenance='USER_CONFIRMED'}={}){if(!OWNERSHIP_SCOPES.includes(scope))throw new Error('invalid_ownership_scope');if(provenance!=='USER_CONFIRMED')throw new Error('ownership_requires_user_confirmation');const previous=property.ownership_scope||'UNKNOWN',at=new Date(this.clock()).toISOString();property.ownership_scope=scope;property.updated_at=at;const event={event_type:'PROPERTY_OWNERSHIP_CHANGED',aggregate_id:property.id,payload_json:{previous,scope,provenance},actor_type:'user',actor_id:actor_id||null,occurred_at:at};this.history.push(event);this.eventSink(event);return property;}

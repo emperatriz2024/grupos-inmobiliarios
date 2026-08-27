@@ -569,6 +569,15 @@ export function masterSnapshot(p={},id,existing=null){
     first_seen_at:existing?.first_seen_at||p.first_seen_at||now,last_seen_at:p.last_seen_at||existing?.last_seen_at||now
   };
 }
+export function planLegacyMasterArchive(canonical,duplicate,posts=[],now=new Date().toISOString()){
+  if(!canonical?.id||!duplicate?.id||canonical.id===duplicate.id)throw new Error('invalid_master_merge_plan');
+  return {
+    canonical:{...canonical,legacy_ids:[...new Set([...(canonical.legacy_ids||[]),...(duplicate.legacy_ids||[])])],updated_at:now},
+    archived:{...duplicate,status:'ARCHIVED',redirected_to:canonical.id,updated_at:now},
+    redirect:{old_property_id:duplicate.id,canonical_property_id:canonical.id,merged_at:now,reason:'legacy_core_consolidation',decision_reference:null},
+    sources:posts.map(post=>post.master_id===duplicate.id?{...post,master_id:canonical.id,updated_at:now}:post)
+  };
+}
 async function allByIndex(store,indexName,key){
   return reqP(store.index(indexName).getAll(key));
 }
@@ -592,28 +601,26 @@ export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
     legacyToMasters.get(src.legacy_property_id).add(src.master_id);
   }
   const rawMap=new Map(rawRecords.map(x=>[x.id,x]));
-  const mastersToDelete=new Set();
+  const mastersToArchive=new Set(),redirectsToUpsert=new Map();
   const touchedMasters=new Set();
 
   for(const consolidated of consolidatedRecords){
     const legacyIds=[...new Set((consolidated.merged_ids||[consolidated.id]).filter(Boolean))];
-    const linked=[...new Set(legacyIds.flatMap(id=>[...(legacyToMasters.get(id)||[])]))].filter(id=>masterMap.has(id)&&!mastersToDelete.has(id));
+    const linked=[...new Set(legacyIds.flatMap(id=>[...(legacyToMasters.get(id)||[])]))].filter(id=>masterMap.has(id)&&!mastersToArchive.has(id));
     let masterId=linked[0]||`mp_${radarHash(legacyIds.slice().sort().join('|')||consolidated.id||now)}`;
     let existing=masterMap.get(masterId)||null;
 
+    const mergedLegacyIds=[];
     if(linked.length>1){
       const candidates=linked.map(id=>masterMap.get(id)).filter(Boolean).sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||'')));
       masterId=candidates[0]?.id||masterId;existing=masterMap.get(masterId)||existing;
       for(const duplicateId of linked.filter(id=>id!==masterId)){
-        mastersToDelete.add(duplicateId);masterMap.delete(duplicateId);mastersMerged++;
-        for(const [postId,post] of postMap){
-          if(post.master_id===duplicateId)postMap.set(postId,{...post,master_id:masterId,updated_at:now});
-        }
+        const duplicate=masterMap.get(duplicateId),plan=planLegacyMasterArchive(existing,duplicate,[...postMap.values()],now);mastersToArchive.add(duplicateId);mastersMerged++;mergedLegacyIds.push(...(duplicate?.legacy_ids||[]));existing=plan.canonical;masterMap.set(masterId,existing);masterMap.set(duplicateId,plan.archived);touchedMasters.add(duplicateId);redirectsToUpsert.set(duplicateId,plan.redirect);for(const post of plan.sources)postMap.set(post.id,post);
         for(const [legacyId,set] of legacyToMasters){if(set.delete(duplicateId))set.add(masterId);}
       }
     }
 
-    const master=masterSnapshot(consolidated,masterId,existing);
+    const master=masterSnapshot({...consolidated,merged_ids:[...legacyIds,...mergedLegacyIds]},masterId,existing);
     masterMap.set(masterId,master);touchedMasters.add(masterId);
     if(existing)mastersUpdated++;else mastersCreated++;
 
@@ -639,18 +646,18 @@ export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
     }
   }
 
-  const counts=new Map();for(const post of postMap.values())if(!mastersToDelete.has(post.master_id))counts.set(post.master_id,(counts.get(post.master_id)||0)+1);
+  const counts=new Map();for(const post of postMap.values())counts.set(post.master_id,(counts.get(post.master_id)||0)+1);
   for(const masterId of touchedMasters){const m=masterMap.get(masterId);if(m)masterMap.set(masterId,{...m,source_count:counts.get(masterId)||0,updated_at:now});}
 
   await new Promise((resolve,reject)=>{
-    const tx=db.transaction([MASTER_STORE,SOURCE_POST_STORE],'readwrite'),ms=tx.objectStore(MASTER_STORE),ss=tx.objectStore(SOURCE_POST_STORE);
-    for(const id of mastersToDelete)ms.delete(id);
+    const tx=db.transaction([MASTER_STORE,SOURCE_POST_STORE,PROPERTY_REDIRECT_STORE],'readwrite'),ms=tx.objectStore(MASTER_STORE),ss=tx.objectStore(SOURCE_POST_STORE),rs=tx.objectStore(PROPERTY_REDIRECT_STORE);
     for(const masterId of touchedMasters){const m=masterMap.get(masterId);if(m)ms.put(m);}
     // Existing historical source posts are not deleted; only current/changed rows
     // are put again. This preserves the future price/publication history.
     for(const post of postMap.values()){
       if(touchedMasters.has(post.master_id)||post.updated_at===now)ss.put(post);
     }
+    for(const redirect of redirectsToUpsert.values())rs.put(redirect);
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
   });
   db.close();return {mastersCreated,mastersUpdated,mastersMerged,sourcesUpserted};
@@ -658,12 +665,12 @@ export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
 
 export async function getRadarCoreStats(){
   const db=await openDB(),tx=db.transaction([MASTER_STORE,SOURCE_POST_STORE,BUYER_STORE,MATCH_STORE,SYNC_QUEUE_STORE],'readonly');
-  const [masters,sources,buyers,matches,queue]=await Promise.all([
-    reqP(tx.objectStore(MASTER_STORE).count()),reqP(tx.objectStore(SOURCE_POST_STORE).count()),reqP(tx.objectStore(BUYER_STORE).count()),reqP(tx.objectStore(MATCH_STORE).count()),reqP(tx.objectStore(SYNC_QUEUE_STORE).count())
-  ]);db.close();return {masters,sources,buyers,matches,queue};
+  const [masterRows,sources,buyers,matches,queue]=await Promise.all([
+    reqP(tx.objectStore(MASTER_STORE).getAll()),reqP(tx.objectStore(SOURCE_POST_STORE).count()),reqP(tx.objectStore(BUYER_STORE).count()),reqP(tx.objectStore(MATCH_STORE).count()),reqP(tx.objectStore(SYNC_QUEUE_STORE).count())
+  ]);db.close();return {masters:masterRows.filter(row=>row.status!=='ARCHIVED'&&!row.redirected_to).length,sources,buyers,matches,queue};
 }
 
-export async function getMasterProperties(){const db=await openDB(),rows=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll());db.close();return rows;}
+export async function getMasterProperties({includeArchived=false}={}){const db=await openDB(),rows=await reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll());db.close();return includeArchived?rows:rows.filter(row=>row.status!=='ARCHIVED'&&!row.redirected_to);}
 export async function getSourcePostsByMaster(masterId){const db=await openDB(),tx=db.transaction(SOURCE_POST_STORE,'readonly'),rows=await allByIndex(tx.objectStore(SOURCE_POST_STORE),'master_id',masterId);db.close();return rows;}
 
 export async function setMasterOwnership(propertyId,ownershipScope){
@@ -679,7 +686,7 @@ export async function saveOwnListingDetails(record={}){
   const row={...old,...record,workspace_id:record.workspace_id||old?.workspace_id||'local',agreement_type:record.agreement_type||old?.agreement_type||'UNKNOWN',currency:record.currency||old?.currency||'USD',documents_status:record.documents_status||old?.documents_status||'UNKNOWN',media_authorization_status:record.media_authorization_status||old?.media_authorization_status||'UNKNOWN',created_at:old?.created_at||now,updated_at:now};store.put(row);
   await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return row;
 }
-export async function recordSourceAttachments(records=[]){if(!records.length)return 0;const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(SOURCE_ATTACHMENT_STORE,'readwrite'),store=tx.objectStore(SOURCE_ATTACHMENT_STORE);records.forEach(row=>store.put(row));tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return records.length;}
+export async function recordSourceAttachments(records=[]){if(!records.length)return 0;for(const row of records){const resolved=row.provenance_status==='RESOLVED';if(resolved&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(row.source_message_id||'')))throw new Error('source_message_id interno inválido.');if(!resolved&&(row.source_message_id!=null||!row.external_message_id))throw new Error('Attachment pendiente requiere external_message_id y source_message_id nulo.');}const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(SOURCE_ATTACHMENT_STORE,'readwrite'),store=tx.objectStore(SOURCE_ATTACHMENT_STORE);records.forEach(row=>store.put(row));tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return records.length;}
 
 
 

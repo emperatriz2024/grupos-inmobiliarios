@@ -1,12 +1,14 @@
 BEGIN;
 
 CREATE TABLE source_attachments (
-  id uuid PRIMARY KEY, workspace_id uuid NOT NULL REFERENCES workspaces(id), source_message_id uuid NOT NULL REFERENCES source_messages(id),
-  external_media_id text, media_type text NOT NULL CHECK(media_type IN ('IMAGE','FLYER','VIDEO','AUDIO','DOCUMENT','UNKNOWN')),
+  id uuid PRIMARY KEY, workspace_id uuid NOT NULL REFERENCES workspaces(id), source_message_id uuid REFERENCES source_messages(id),
+  external_message_id text, external_media_id text, provenance_status text NOT NULL DEFAULT 'UNRESOLVED' CHECK(provenance_status IN ('UNRESOLVED','RESOLVED')),
+  media_type text NOT NULL CHECK(media_type IN ('IMAGE','FLYER','VIDEO','AUDIO','DOCUMENT','UNKNOWN')),
   mime_type text, original_filename text, size_bytes bigint, width integer, height integer, duration_ms bigint, sha256 text,
   storage_locator text, media_status text NOT NULL CHECK(media_status IN ('OBSERVED','AVAILABLE','STORED','MISSING','FAILED')),
   received_at timestamptz NOT NULL, ingested_at timestamptz NOT NULL, metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK((provenance_status='RESOLVED' AND source_message_id IS NOT NULL) OR (provenance_status='UNRESOLVED' AND source_message_id IS NULL AND external_message_id IS NOT NULL))
 );
 CREATE INDEX source_attachments_message_idx ON source_attachments(source_message_id);
 CREATE INDEX source_attachments_hash_idx ON source_attachments(workspace_id,sha256) WHERE sha256 IS NOT NULL;
