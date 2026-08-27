@@ -7,8 +7,9 @@ import {
   linkLocationPending, createZoneFromPending, createComplexFromPending, discardLocationPending, rematchAllPropertyLocations,
   syncRadarCore, getRadarCoreStats, getMasterProperties, getAllSourcePosts, getExternalSourcePosts, getExternalSourceStats, externalUrlExists, upsertExternalCapture, updateExternalSourceVerification, refreshExternalMasterVigency,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
-  exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary
-} from './db.js?v=0530';
+  exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary,
+  setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments
+} from './db.js?v=0710';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
@@ -427,6 +428,8 @@ $('#selectorApplyBtn').onclick=()=>{
 async function openDetail(id) {
   const p = allProperties.find(x=>x.id===id);
   if (!p) return;
+  const master=(await getMasterProperties()).find(row=>row.id===id||(row.legacy_ids||[]).includes(id))||null;
+  const own=master?await getOwnListingDetails(master.id):null;
   $('#detailType').textContent = [p.operation,p.property_type,p.zone,p.residence].filter(Boolean).join(' · ');
   $('#detailTitle').textContent = propertyTitle(p);
   const phone = effectivePhone(p);
@@ -445,8 +448,28 @@ async function openDetail(id) {
       <div class="sources"><h4>Fuentes encontradas (${(p.sources||[]).length || 1})</h4>
         ${(p.sources||[]).map(s=>`<div class="sourceItem"><b>${esc(s.sender||'Corredor')}</b><br>${esc(s.group||'Grupo')} · ${esc(s.date||'')} ${esc(s.time||'')}</div>`).join('')}
       </div>
+      ${master?`<section class="ownListingPrivate" aria-label="Información privada de captación">
+        <h4>INFORMACIÓN PRIVADA · Captación</h4>
+        <label>Clasificación interna<select id="detailOwnershipScope"><option value="UNKNOWN">Por determinar</option><option value="OWN">Captación propia</option><option value="MARKET">Inventario mercado</option></select></label>
+        <div id="detailOwnFields">
+          <label>Fecha de captación<input id="ownCaptureDate" type="date" value="${esc(own?.capture_date||'')}"></label>
+          <label>Acuerdo<select id="ownAgreementType"><option value="UNKNOWN">Por determinar</option><option value="EXCLUSIVE">Exclusiva</option><option value="OPEN">Abierta</option><option value="DIRECT">Directa</option></select></label>
+          <label>Precio autorizado<input id="ownAuthorizedPrice" type="number" min="0" step="0.01" value="${esc(own?.authorized_price??'')}"></label>
+          <label>Comisión %<input id="ownCommission" type="number" min="0" max="100" step="0.01" value="${esc(own?.commission_pct??'')}"></label>
+          <label>Documentos<select id="ownDocumentsStatus"><option value="UNKNOWN">Por determinar</option><option value="PENDING">Pendientes</option><option value="PARTIAL">Parciales</option><option value="COMPLETE">Completos</option><option value="REVIEW">Revisar</option></select></label>
+          <label>Autorización de medios<select id="ownMediaAuthorization"><option value="UNKNOWN">Por determinar</option><option value="AUTHORIZED">Autorizados</option><option value="NOT_AUTHORIZED">No autorizados</option><option value="PARTIAL">Parcial</option></select></label>
+          <label>Notas internas<textarea id="ownInternalNotes">${esc(own?.internal_notes||'')}</textarea></label>
+        </div>
+        <button id="saveOwnListing" type="button" class="ghost">Guardar información privada</button><small id="ownListingStatus"></small>
+      </section>`:''}
       <button id="detailBackBottom" class="detailBackBottom">← Volver a resultados</button>
     </div>`;
+  if(master){
+    const scope=$('#detailOwnershipScope'),fields=$('#detailOwnFields');scope.value=master.ownership_scope||'UNKNOWN';
+    $('#ownAgreementType').value=own?.agreement_type||'UNKNOWN';$('#ownDocumentsStatus').value=own?.documents_status||'UNKNOWN';$('#ownMediaAuthorization').value=own?.media_authorization_status||'UNKNOWN';
+    const renderOwn=()=>fields.hidden=scope.value!=='OWN';renderOwn();scope.onchange=renderOwn;
+    $('#saveOwnListing').onclick=async()=>{const status=$('#ownListingStatus');try{await setMasterOwnership(master.id,scope.value);if(scope.value==='OWN')await saveOwnListingDetails({property_id:master.id,workspace_id:master.workspace_id||'local',capture_date:$('#ownCaptureDate').value||null,agreement_type:$('#ownAgreementType').value,authorized_price:$('#ownAuthorizedPrice').value?Number($('#ownAuthorizedPrice').value):null,commission_pct:$('#ownCommission').value?Number($('#ownCommission').value):null,documents_status:$('#ownDocumentsStatus').value,media_authorization_status:$('#ownMediaAuthorization').value,internal_notes:$('#ownInternalNotes').value||null});status.textContent='Guardado localmente con confirmación manual.';}catch(error){status.textContent=`No se pudo guardar: ${error.message}`;}};
+  }
   $('#detailDialog').showModal();
 }
 $('#closeDialog').onclick = () => { $('#detailDialog').close(); restoreSearchPosition(); };
@@ -1616,6 +1639,7 @@ async function syncSecondaryWhatsApp({silent=false}={}){
       const source=new SecondaryWhatsAppSource({...config}),page=await source.ingest({cursor,limit:50});const result=processSecondaryEvents(page.events,{locationCatalog});
       for(const record of result.records){const direct=record.publisher?.observed_phone?contactIndex.byId.get(record.publisher.observed_phone):null,evidence=direct?{status:'resolved',contact:direct,confidence:1,reason:'teléfono observado exacto',matched_name:record.publisher?.observed_name||null}:resolvePropertyContact({sender:record.publisher?.observed_name||record.sender},contactIndex);record.publisher.contact_evidence=evidence.status==='resolved'?{status:'resolved',contact_id:evidence.contact?.id||null,confidence:evidence.confidence,reason:evidence.reason,matched_name:evidence.matched_name}:evidence.status==='ambiguous'?{status:'ambiguous',count:evidence.count}:{status:'none'};record.probable_captor_id=null;record.captor_score=null;}
       const saved=await mergeProperties(result.records);if(result.records.length){await learnContactsFromProperties(result.records);await recordLocationPendings(result.records.flatMap(x=>x.location_pending||[]));}
+      if(result.attachments.length)try{await recordSourceAttachments(result.attachments);}catch(error){diagnosticLog('whatsapp_secondary','media_metadata',`Attachment metadata no disponible: ${error?.name||'Error'}`,'warn');}
       stats.received+=result.validCount;stats.processed+=result.validCount;stats.properties+=result.propertiesDetected;stats.groups=Math.max(stats.groups,result.groupsDetected);stats.pending=page.hasMore?1:0;
       cursor=page.nextCursor||cursor;localStorage.setItem(SECONDARY_CURSOR_KEY,cursor);hasMore=page.hasMore;pages++;
       diagnosticLog('whatsapp_secondary','sync_page',`Recibidos ${result.validCount}; propiedades ${result.propertiesDetected}; nuevas ${saved.added}`,'info');

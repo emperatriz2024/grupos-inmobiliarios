@@ -10,6 +10,10 @@
 - Retries de importación, mensaje, enlace y mutación se resuelven mediante claves idempotentes.
 - PostgreSQL es el target futuro; IndexedDB `grupos-inmobiliarios` continúa como datos legacy/cache y no se elimina.
 - El Core está desactivado salvo `RADAR_CORE_ENABLED=true`; cualquier indisponibilidad conserva el flujo legacy.
+- La identidad visual es una señal: pHash nunca autoriza por sí solo un auto-merge.
+- Todo medio conserva provenance y derechos; `UNKNOWN`, `INTERNAL_ONLY` y `SOURCE_LINK_ONLY` no son públicos.
+- OWN requiere confirmación humana y sus detalles contractuales/comerciales son privados.
+- Un fallo de media nunca invalida el mensaje ni sus hechos textuales.
 
 ## Entidades Phase 0A
 

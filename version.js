@@ -1,4 +1,4 @@
-export const APP_VERSION='0.6.1';
-export const APP_LABEL='V0.6.1 WHATSAPP SECONDARY BRIDGE';
-export const ASSET_VERSION='0610';
-export const BACKUP_SCHEMA_VERSION=2;
+export const APP_VERSION='0.7.1-test';
+export const APP_LABEL='V0.7.1 IDENTITY + MEDIA TEST';
+export const ASSET_VERSION='0710';
+export const BACKUP_SCHEMA_VERSION=3;

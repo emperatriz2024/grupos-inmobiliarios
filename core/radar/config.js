@@ -1,7 +1,12 @@
 export const RADAR_CORE_FLAG='RADAR_CORE_ENABLED';
+export const RADAR_IDENTITY_MEDIA_FLAG='RADAR_IDENTITY_MEDIA_ENABLED';
 
 export function radarCoreEnabled(env=globalThis.process?.env||{}){
   return /^(1|true|on|yes)$/i.test(String(env?.[RADAR_CORE_FLAG]||''));
+}
+
+export function radarIdentityMediaEnabled(env=globalThis.process?.env||{}){
+  return /^(1|true|on|yes)$/i.test(String(env?.[RADAR_IDENTITY_MEDIA_FLAG]||''));
 }
 
 export function coreFallback(operation,legacyOperation,{env,logger=()=>{}}={}){

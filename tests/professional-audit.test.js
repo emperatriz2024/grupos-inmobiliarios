@@ -7,6 +7,7 @@ import {cleanPhone} from '../contact-utils.js';
 import {propertyDisplayName} from '../core/property-policy.js';
 import {migrateBackupSnapshot,validateBackupSnapshot} from '../db.js';
 import {SecondaryWhatsAppSource} from '../ingestion/source-ingestion.js';
+import {BACKUP_SCHEMA_VERSION} from '../version.js';
 
 test('precio principal $130.000 no es reemplazado por otro número',()=>{
   const r=extractPriceDetailed('Apartamento en venta\nPrecio: $130.000\nCódigo interno: 70.000','Venta');
@@ -53,7 +54,7 @@ test('comprador exige 2 puestos y dato ausente nunca obtiene 100%',()=>{
 
 test('respaldo V1 migra hacia adelante sin perder fuentes',()=>{
   const old={format:'radar-inmobiliario-backup',backup_version:1,created_at:'2026-01-01T00:00:00Z',stores:{source_posts:[{id:'s1',source_type:'whatsapp',published_at:'2026-01-01'}]}};
-  const next=migrateBackupSnapshot(old);assert.equal(next.schemaVersion,2);assert.equal(next.stores.source_posts.length,1);assert.equal(next.stores.source_posts[0].sourceType,'whatsapp_zip');assert.equal(validateBackupSnapshot(next).valid,true);
+  const next=migrateBackupSnapshot(old);assert.equal(next.schemaVersion,BACKUP_SCHEMA_VERSION);assert.equal(next.stores.source_posts.length,1);assert.equal(next.stores.source_posts[0].sourceType,'whatsapp_zip');assert.equal(validateBackupSnapshot(next).valid,true);
 });
 
 test('teléfonos venezolanos equivalentes se normalizan igual',()=>{
