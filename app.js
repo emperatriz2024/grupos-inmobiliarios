@@ -33,6 +33,7 @@ import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
 import { SecondaryWhatsAppSource } from './ingestion/source-ingestion.js';
 import { processSecondaryEvents } from './ingestion/secondary-processing.js';
+import { APP_LABEL } from './version.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -1653,6 +1654,7 @@ $('#syncSecondaryNow')?.addEventListener('click',()=>syncSecondaryWhatsApp({sile
 $('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,endpointConfigured:Boolean(secondaryConfig().endpoint),tokenConfigured:Boolean(secondaryConfig().token),store:'radar-secondary-whatsapp-v061-test'},null,2);});
 
 async function initApp(){
+  const versionLabel=$('#appVersionLabel');if(versionLabel)versionLabel.textContent=APP_LABEL;
   try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
