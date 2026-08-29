@@ -10,7 +10,7 @@ import {
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary,
   setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments,
   saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching
-} from './db.js?v=0720';
+} from './db.js?v=0721';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
@@ -727,7 +727,7 @@ $('#buyerForm')?.addEventListener('submit',async e=>{
   try{
     const currentId=$('#buyerId').value||null,existing=currentId?await getBuyer(currentId):null;
     const row=await saveBuyer({...existing,...collectBuyerForm()});
-    if(demandEngineEnabled){await mirrorLegacyBuyersToDemands();await runDemandOpportunityMatching({trigger_type:'CLIENT_DEMAND_CHANGED',trigger_entity_id:row.id});}
+    if(demandEngineEnabled){await mirrorLegacyBuyersToDemands();await runDemandOpportunityMatching({trigger_type:'CLIENT_DEMAND_CHANGED',trigger_entity_id:`demand_client_${row.id}`});}
     $('#saveBuyerBtn').disabled=true;$('#saveBuyerBtn').textContent='Calculando coincidencias…';
     await recalculateBuyerMatches(row);
     $('#buyerDialog').close();
@@ -1095,7 +1095,7 @@ function processZipWithWorker(file, group, progressCb) {
 
 async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb) {
   const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
-  if(demandEngineEnabled&&m.result.demand_messages?.length)await saveDemandRecords(processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory}));
+  if(demandEngineEnabled&&m.result.demand_messages?.length){const demands=processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory});await saveDemandRecords(demands);await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...new Set(demands.map(row=>row.id))]});}
   const summary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
     messages:m.result.messages,
     messages_total:m.result.messages_total ?? m.result.messages,
@@ -1218,8 +1218,8 @@ async function loadData() {
   }
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
   const consolidated=consolidateProperties(valid);
-  await syncRadarCore(valid,consolidated);
-  if(demandEngineEnabled)await runDemandOpportunityMatching({trigger_type:'INVENTORY_REFRESH'});
+  const coreSync=await syncRadarCore(valid,consolidated);
+  if(demandEngineEnabled&&coreSync.touchedMasterIds?.length)await runDemandOpportunityMatching({trigger_type:'INVENTORY_REFRESH',trigger_entity_id:coreSync.touchedMasterIds});
   await recalculateAllBuyerMatches({silent:true});
   const radarStats=await getRadarCoreStats();
   contactDirectory=await getAllContacts();contactIndex=buildContactIndex(contactDirectory);
@@ -1663,7 +1663,7 @@ async function syncSecondaryWhatsApp({silent=false}={}){
     while(hasMore&&pages<5){
       const source=new SecondaryWhatsAppSource({...config}),page=await source.ingest({cursor,limit:50});const result=processSecondaryEvents(page.events,{locationCatalog,resolveTerritory:resolveDemandTerritory});
       for(const record of result.records){const direct=record.publisher?.observed_phone?contactIndex.byId.get(record.publisher.observed_phone):null,evidence=direct?{status:'resolved',contact:direct,confidence:1,reason:'teléfono observado exacto',matched_name:record.publisher?.observed_name||null}:resolvePropertyContact({sender:record.publisher?.observed_name||record.sender},contactIndex);record.publisher.contact_evidence=evidence.status==='resolved'?{status:'resolved',contact_id:evidence.contact?.id||null,confidence:evidence.confidence,reason:evidence.reason,matched_name:evidence.matched_name}:evidence.status==='ambiguous'?{status:'ambiguous',count:evidence.count}:{status:'none'};record.probable_captor_id=null;record.captor_score=null;}
-      const saved=await mergeProperties(result.records);if(result.records.length){await learnContactsFromProperties(result.records);await recordLocationPendings(result.records.flatMap(x=>x.location_pending||[]));}if(demandEngineEnabled&&result.demands.length)await saveDemandRecords(result.demands);
+      const saved=await mergeProperties(result.records);if(result.records.length){await learnContactsFromProperties(result.records);await recordLocationPendings(result.records.flatMap(x=>x.location_pending||[]));}if(demandEngineEnabled&&result.demands.length){await saveDemandRecords(result.demands);await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...new Set(result.demands.map(row=>row.id))]});}
       if(result.attachments.length)try{await recordSourceAttachments(result.attachments);}catch(error){diagnosticLog('whatsapp_secondary','media_metadata',`Attachment metadata no disponible: ${error?.name||'Error'}`,'warn');}
       stats.received+=result.validCount;stats.processed+=result.validCount;stats.properties+=result.propertiesDetected;stats.groups=Math.max(stats.groups,result.groupsDetected);stats.pending=page.hasMore?1:0;
       cursor=page.nextCursor||cursor;localStorage.setItem(SECONDARY_CURSOR_KEY,cursor);hasMore=page.hasMore;pages++;
@@ -1696,5 +1696,5 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0720').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0721').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }

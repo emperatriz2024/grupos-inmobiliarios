@@ -21,7 +21,7 @@ export function processSecondaryEvents(rawEvents=[],{locationCatalog=null,resolv
   const records=[],demands=[],nonProperty=[],attachments=valid.filter(event=>event.hasMedia).map(event=>({id:`att_secondary_${event.messageId}`,source_message_id:null,external_message_id:event.messageId,external_media_id:event.messageId,provenance_status:'UNRESOLVED',media_type:/image/i.test(event.mediaType)?'IMAGE':/video/i.test(event.mediaType)?'VIDEO':/audio|ptt/i.test(event.mediaType)?'AUDIO':/document/i.test(event.mediaType)?'DOCUMENT':'UNKNOWN',mime_type:null,original_filename:null,size_bytes:null,width:null,height:null,duration_ms:null,sha256:null,storage_locator:null,media_status:'OBSERVED',received_at:event.receivedAt,ingested_at:new Date().toISOString(),metadata_json:{source_type:event.sourceType,source_channel:event.sourceChannel,group_id:event.groupId,group_name:event.groupName,message_type:event.messageType},created_at:new Date().toISOString()}));
   for(const bundle of groupConsecutiveEvents(valid)){
     if(isDemandRequest(bundle.text)){
-      const first=bundle.events[0],demand=parseDemandRequest({text:bundle.text,messageId:first.messageId,source_channel:'secondary_number',author_id:first.authorId,received_at:first.receivedAt},{origin:'MARKET',sourceChannel:'secondary_number',resolveTerritory});
+      const first=bundle.events[0],demand=parseDemandRequest({text:bundle.text,messageId:first.messageId,source_channel:'secondary_number',author_id:first.authorId,group_id:first.groupId,received_at:first.receivedAt},{origin:'MARKET',sourceChannel:'secondary_number',resolveTerritory});
       if(demand)demands.push(demand);continue;
     }
     if(!looksLikeRealEstate(bundle.text)){nonProperty.push(...bundle.events.map(x=>x.messageId));continue;}

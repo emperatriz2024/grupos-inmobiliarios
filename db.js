@@ -4,10 +4,10 @@ import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-u
 import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0530';
 import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0530';
 import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
-import {legacyBuyerToClientDemand,matchDemandsToProperties,OpportunityEngine} from './core/radar/demand-engine.js';
+import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchPrefilteredCandidates,OpportunityEngine} from './core/radar/demand-engine.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -38,6 +38,7 @@ const MATCH_CANDIDATE_STORE='match_candidates';
 const OPPORTUNITY_STORE='opportunities';
 const OPPORTUNITY_SCORE_STORE='opportunity_scores';
 const OPPORTUNITY_EVENT_STORE='opportunity_events';
+const DEMAND_SOURCE_STORE='demand_sources';
 
 
 function openDB() {
@@ -141,6 +142,9 @@ function openDB() {
       }
       if(!db.objectStoreNames.contains(OPPORTUNITY_EVENT_STORE)){
         const s=db.createObjectStore(OPPORTUNITY_EVENT_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:false});s.createIndex('event_type','event_type',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(DEMAND_SOURCE_STORE)){
+        const s=db.createObjectStore(DEMAND_SOURCE_STORE,{keyPath:'id'});s.createIndex('demand_id','demand_id',{unique:false});s.createIndex('source_reference','source_reference',{unique:false});s.createIndex('observed_at','observed_at',{unique:false});
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -689,7 +693,7 @@ export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
     for(const redirect of redirectsToUpsert.values())rs.put(redirect);
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
   });
-  db.close();return {mastersCreated,mastersUpdated,mastersMerged,sourcesUpserted};
+  db.close();return {mastersCreated,mastersUpdated,mastersMerged,sourcesUpserted,touchedMasterIds:[...touchedMasters]};
 }
 
 export async function getRadarCoreStats(){
@@ -995,8 +999,8 @@ export async function getAllMatches(){
 
 // ---------- Demand → Match → Opportunity (Phase 0C) -------------------------
 export async function saveDemandRecords(records=[]){
-  if(!records.length)return 0;const db=await openDB(),now=new Date().toISOString();
-  await new Promise((resolve,reject)=>{const tx=db.transaction(DEMAND_STORE,'readwrite'),store=tx.objectStore(DEMAND_STORE);for(const record of records)store.put({...record,origin:record.origin||'MANUAL',status:record.status||'ACTIVE',created_at:record.created_at||now,updated_at:now});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+  if(!records.length)return 0;const db=await openDB(),now=new Date().toISOString(),existingDemands=await reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll()),existingSources=await reqP(db.transaction(DEMAND_SOURCE_STORE,'readonly').objectStore(DEMAND_SOURCE_STORE).getAll()),consolidated=consolidateMarketDemands(records,existingDemands,existingSources);
+  await new Promise((resolve,reject)=>{const tx=db.transaction([DEMAND_STORE,DEMAND_SOURCE_STORE],'readwrite'),store=tx.objectStore(DEMAND_STORE),sources=tx.objectStore(DEMAND_SOURCE_STORE);for(const record of consolidated.demands)store.put({...record,origin:record.origin||'MANUAL',status:record.status||'ACTIVE',created_at:record.created_at||now,updated_at:record.updated_at||now});for(const source of consolidated.sources)sources.put(source);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
   db.close();return records.length;
 }
 export async function getClients(){const db=await openDB(),rows=await reqP(db.transaction(CLIENT_STORE,'readonly').objectStore(CLIENT_STORE).getAll());db.close();return rows;}
@@ -1004,6 +1008,7 @@ export async function getDemands({origin=null,status=null}={}){const db=await op
 export async function getOpportunities({includeInvalidated=true}={}){const db=await openDB(),rows=await reqP(db.transaction(OPPORTUNITY_STORE,'readonly').objectStore(OPPORTUNITY_STORE).getAll());db.close();return includeInvalidated?rows:rows.filter(row=>row.status==='ACTIVE');}
 export async function getOpportunityScores(){const db=await openDB(),rows=await reqP(db.transaction(OPPORTUNITY_SCORE_STORE,'readonly').objectStore(OPPORTUNITY_SCORE_STORE).getAll());db.close();return rows;}
 export async function getOpportunityEvents(){const db=await openDB(),rows=await reqP(db.transaction(OPPORTUNITY_EVENT_STORE,'readonly').objectStore(OPPORTUNITY_EVENT_STORE).getAll());db.close();return rows;}
+export async function getDemandSources(demandId=null){const db=await openDB(),rows=await reqP(db.transaction(DEMAND_SOURCE_STORE,'readonly').objectStore(DEMAND_SOURCE_STORE).getAll());db.close();return demandId?rows.filter(row=>row.demand_id===demandId):rows;}
 
 export async function mirrorLegacyBuyersToDemands(){
   const db=await openDB(),buyers=await reqP(db.transaction(BUYER_STORE,'readonly').objectStore(BUYER_STORE).getAll()),now=new Date().toISOString();
@@ -1011,24 +1016,28 @@ export async function mirrorLegacyBuyersToDemands(){
   db.close();return {buyers:buyers.length,clients:buyers.length,demands:buyers.length,mirrored_at:now};
 }
 
-export async function runDemandOpportunityMatching({trigger_type='FULL_RECALC',trigger_entity_id=null,territoryOntology=null}={}){
+export async function runDemandOpportunityMatching({trigger_type='FULL_RECALC',trigger_entity_id=null,territoryOntology=null,now=Date.now()}={}){
   const db=await openDB(),startedAt=new Date().toISOString(),runId=`match_run_${radarHash(`${startedAt}|${trigger_type}|${trigger_entity_id||''}`)}`;
   const [demands,properties,opportunities,scores,events]=await Promise.all([
     reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll()),reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll()),
     reqP(db.transaction(OPPORTUNITY_STORE,'readonly').objectStore(OPPORTUNITY_STORE).getAll()),reqP(db.transaction(OPPORTUNITY_SCORE_STORE,'readonly').objectStore(OPPORTUNITY_SCORE_STORE).getAll()),reqP(db.transaction(OPPORTUNITY_EVENT_STORE,'readonly').objectStore(OPPORTUNITY_EVENT_STORE).getAll())
   ]);
-  const active=demands.filter(row=>row.status==='ACTIVE'),candidates=matchDemandsToProperties(active,properties,{territoryOntology});
-  const engine=new OpportunityEngine({opportunities,scores,events}),state=engine.reconcile(candidates,active),completedAt=new Date().toISOString();
+  const expired=demands.filter(row=>row.origin==='MARKET'&&row.status==='ACTIVE'&&!isDemandActive(row,now)).map(row=>({...row,status:'EXPIRED',updated_at:new Date(now).toISOString()})),active=demands.map(row=>expired.find(x=>x.id===row.id)||row).filter(row=>row.status==='ACTIVE');
+  const entityIds=Array.isArray(trigger_entity_id)?trigger_entity_id.filter(Boolean):trigger_entity_id?[trigger_entity_id]:[],demandTrigger=/DEMAND|CLIENT/.test(trigger_type),propertyTrigger=/INVENTORY|PROPERTY|OWNERSHIP|PRICE/.test(trigger_type);let scope=trigger_type==='FULL_RECALC'?{full:true}:demandTrigger?{full:false,demandIds:entityIds}:propertyTrigger?{full:false,propertyIds:entityIds}:{full:false};
+  if(!scope.full&&expired.length)scope={...scope,demandIds:[...new Set([...(scope.demandIds||[]),...expired.map(row=>row.id)])]};
+  const matched=matchPrefilteredCandidates(active,properties,{territoryOntology,now,demandIds:scope.demandIds,propertyIds:scope.propertyIds}),candidates=matched.candidates;
+  const engine=new OpportunityEngine({opportunities,scores,events}),state=engine.reconcile(candidates,active,scope),completedAt=new Date().toISOString();
   await new Promise((resolve,reject)=>{
-    const tx=db.transaction([MATCH_RUN_STORE,MATCH_CANDIDATE_STORE,OPPORTUNITY_STORE,OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE],'readwrite');
-    tx.objectStore(MATCH_RUN_STORE).put({id:runId,workspace_id:'local',trigger_type,trigger_entity_id,started_at:startedAt,completed_at:completedAt,status:'COMPLETED',metadata_json:{demands:active.length,properties:properties.length,candidates:candidates.length}});
+    const tx=db.transaction([DEMAND_STORE,MATCH_RUN_STORE,MATCH_CANDIDATE_STORE,OPPORTUNITY_STORE,OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE],'readwrite');
+    for(const row of expired)tx.objectStore(DEMAND_STORE).put(row);
+    tx.objectStore(MATCH_RUN_STORE).put({id:runId,workspace_id:'local',trigger_type,trigger_entity_id,started_at:startedAt,completed_at:completedAt,status:'COMPLETED',metadata_json:{...matched.stats,demands:active.length,properties:properties.length,candidates:candidates.length,scope}});
     const candidateStore=tx.objectStore(MATCH_CANDIDATE_STORE);for(const row of candidates)candidateStore.put({...row,id:`${runId}_${row.id}`,match_run_id:runId,created_at:completedAt});
     const opportunityStore=tx.objectStore(OPPORTUNITY_STORE);for(const row of state.opportunities)opportunityStore.put(row);
     const scoreStore=tx.objectStore(OPPORTUNITY_SCORE_STORE);for(const row of state.scores)scoreStore.put(row);
     const eventStore=tx.objectStore(OPPORTUNITY_EVENT_STORE);state.events.forEach((row,index)=>eventStore.put({...row,id:row.id||`op_event_${radarHash(`${row.opportunity_id}|${row.event_type}|${row.occurred_at}|${index}`)}`}));
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
   });
-  db.close();return {run_id:runId,demands:active.length,properties:properties.length,candidates:candidates.length,opportunities:state.opportunities.filter(row=>row.status==='ACTIVE').length};
+  db.close();return {run_id:runId,demands:active.length,properties:properties.length,candidates:candidates.length,opportunities:state.opportunities.filter(row=>row.status==='ACTIVE').length,prefilter:matched.stats,scope};
 }
 
 // ---------- Radar Backup v0.5.0.2 --------------------------------------------
@@ -1039,7 +1048,7 @@ const BACKUP_STORES=[
   ,SOURCE_ATTACHMENT_STORE,MEDIA_ASSET_STORE,PROPERTY_MEDIA_STORE,IDENTITY_LINK_STORE,
   PROPERTY_REDIRECT_STORE,OWN_LISTING_STORE,REVIEW_QUEUE_STORE
   ,CLIENT_STORE,DEMAND_STORE,MATCH_RUN_STORE,MATCH_CANDIDATE_STORE,OPPORTUNITY_STORE,
-  OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE
+  OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE,DEMAND_SOURCE_STORE
 ];
 export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 
