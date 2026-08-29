@@ -5,7 +5,7 @@ import {runOperationalZipBatch,ZIP_BATCH_PHASES} from '../core/operational-zip-b
 const entries=count=>Array.from({length:count},(_,index)=>({name:`chat-${index+1}.zip`,path:`/pending/chat-${index+1}.zip`}));
 
 test('lote operativo de 18 ZIP avanza 1/18 a 18/18 y finaliza una sola vez',async()=>{
-  const files=entries(18),checkpoints=new Set(),moves=[],phases=[],saveProgress=[],finalizations=[];
+  const files=entries(18),checkpoints=new Set(),moves=[],phases=[],saveProgress=[],demandProgress=[],finalizations=[];
   const outcome=await runOperationalZipBatch({
     entries:files,
     download:async entry=>({entry}),
@@ -15,6 +15,7 @@ test('lote operativo de 18 ZIP avanza 1/18 a 18/18 y finaliza una sola vez',asyn
         notify({phase:'save',done,total});saveProgress.push([entry.name,done,total]);
         if(done===total)break;
       }
+      for(let done=200;done<=1200;done+=200){notify({phase:'demand',done,total:1200});demandProgress.push([entry.name,done,1200]);}
       checkpoints.add(entry.name);
       notify({phase:'finalize',done:total,total});
       return {summary:{status:'completed'},demandIds:[],propertyIds:[]};
@@ -28,6 +29,8 @@ test('lote operativo de 18 ZIP avanza 1/18 a 18/18 y finaliza una sola vez',asyn
   assert.equal(moves.length,18);assert.equal(new Set(moves).size,18);assert.equal(finalizations.length,1);
   assert.deepEqual(phases.filter(x=>x.phase===ZIP_BATCH_PHASES.COMPLETED).map(x=>`${x.completed}/${x.total}`),Array.from({length:18},(_,i)=>`${i+1}/18`));
   assert.deepEqual(saveProgress.filter(x=>x[0]==='chat-1.zip').at(-1),['chat-1.zip',1137,1137]);
+  assert.deepEqual(demandProgress.filter(x=>x[0]==='chat-1.zip').at(-1),['chat-1.zip',1200,1200]);
+  assert.equal(phases.filter(x=>x.phase===ZIP_BATCH_PHASES.DEMANDS).length,18*6);
 });
 
 test('checkpoint permite reanudar tras fallo al mover sin reprocesar ni duplicar',async()=>{

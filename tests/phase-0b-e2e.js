@@ -6,7 +6,7 @@ import {serializePublicProperty} from '../core/radar/own-listings.js';
 import {APP_LABEL} from '../version.js';
 
 const DB_NAME='grupos-inmobiliarios';
-const DB_VERSION=9;
+const DB_VERSION=10;
 const STATE_KEY='phase-0b-automated-e2e-state';
 const LEGACY_ID='TEST-PHASE0B-LEGACY-001';
 const OWN_ID='TEST-PHASE0B-MASTER-OWN-001';

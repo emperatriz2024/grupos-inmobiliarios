@@ -4,6 +4,7 @@ export const ZIP_BATCH_PHASES=Object.freeze({
   DOWNLOADING:'DESCARGANDO',
   ANALYZING:'ANALIZANDO',
   SAVING:'GUARDANDO',
+  DEMANDS:'DEMANDAS',
   FINALIZING:'FINALIZANDO',
   MOVING:'MOVIENDO',
   COMPLETED:'COMPLETADO',
@@ -20,7 +21,7 @@ export async function runOperationalZipBatch({entries=[],download,processFile,mo
       const blob=await download(entry);
       emit(ZIP_BATCH_PHASES.ANALYZING,index,entry);
       const result=await processFile(entry,blob,progress=>{
-        const phase=progress.phase==='save'?ZIP_BATCH_PHASES.SAVING:progress.phase==='finalize'?ZIP_BATCH_PHASES.FINALIZING:ZIP_BATCH_PHASES.ANALYZING;
+        const phase=progress.phase==='save'?ZIP_BATCH_PHASES.SAVING:progress.phase==='demand'?ZIP_BATCH_PHASES.DEMANDS:progress.phase==='finalize'?ZIP_BATCH_PHASES.FINALIZING:ZIP_BATCH_PHASES.ANALYZING;
         emit(phase,index,entry,{progress});
       });
       emit(ZIP_BATCH_PHASES.FINALIZING,index,entry,{result});

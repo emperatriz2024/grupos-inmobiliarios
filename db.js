@@ -7,7 +7,7 @@ import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
 import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchPrefilteredCandidates,OpportunityEngine} from './core/radar/demand-engine.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -146,6 +146,12 @@ function openDB() {
       if(!db.objectStoreNames.contains(DEMAND_SOURCE_STORE)){
         const s=db.createObjectStore(DEMAND_SOURCE_STORE,{keyPath:'id'});s.createIndex('demand_id','demand_id',{unique:false});s.createIndex('source_reference','source_reference',{unique:false});s.createIndex('observed_at','observed_at',{unique:false});
       }
+      const importStore=req.transaction.objectStore(IMPORT_STORE);
+      if(!importStore.indexNames.contains('file_hash'))importStore.createIndex('file_hash','file_hash',{unique:false});
+      if(!importStore.indexNames.contains('status'))importStore.createIndex('status','status',{unique:false});
+      const demandStore=req.transaction.objectStore(DEMAND_STORE);
+      if(!demandStore.indexNames.contains('market_identity'))demandStore.createIndex('market_identity',['workspace_id','origin','requester_observed','criteria_fingerprint'],{unique:false});
+      if(!demandStore.indexNames.contains('requester_identity'))demandStore.createIndex('requester_identity',['workspace_id','requester_observed'],{unique:false});
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -262,11 +268,20 @@ export async function addImport(summary) {
   return id;
 }
 
+export async function findImportCheckpointByFileHash(fileHash){
+  if(!fileHash)return null;const db=await openDB();
+  try{const rows=await reqP(db.transaction(IMPORT_STORE,'readonly').objectStore(IMPORT_STORE).index('file_hash').getAll(fileHash));return rows.sort((a,b)=>Number(b.id||0)-Number(a.id||0))[0]||null;}
+  finally{db.close();}
+}
+
+export async function saveImportCheckpoint(fileHash,patch={}){
+  if(!fileHash)throw new Error('file_hash_required');const db=await openDB(),now=new Date().toISOString();
+  try{return await new Promise((resolve,reject)=>{const tx=db.transaction(IMPORT_STORE,'readwrite'),store=tx.objectStore(IMPORT_STORE),request=store.index('file_hash').getAll(fileHash);let saved=null;request.onsuccess=()=>{const current=(request.result||[]).sort((a,b)=>Number(b.id||0)-Number(a.id||0))[0]||null,row={...(current||{}),...patch,file_hash:fileHash,imported_at:current?.imported_at||patch.imported_at||now,checkpoint_updated_at:now};const put=current?store.put(row):store.add(row);put.onsuccess=()=>{saved={...row,id:current?.id||put.result};};};tx.oncomplete=()=>resolve(saved);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
+  finally{db.close();}
+}
+
 export async function findImportByFileHash(fileHash) {
-  if(!fileHash)return null;
-  const db=await openDB(),tx=db.transaction(IMPORT_STORE,'readonly'),store=tx.objectStore(IMPORT_STORE);
-  const found=await new Promise((resolve,reject)=>{const req=store.openCursor(null,'prev');req.onerror=()=>reject(req.error);req.onsuccess=()=>{const cursor=req.result;if(!cursor)return resolve(null);const row=cursor.value,status=String(row?.status||'').toLowerCase();if(row?.file_hash===fileHash&&['completed','complete','already_processed'].includes(status)&&!Number(row?.errors_count||0))return resolve(row);cursor.continue();};});
-  db.close();return found;
+  const row=await findImportCheckpointByFileHash(fileHash),status=String(row?.status||'').toLowerCase();return row&&['completed','complete','already_processed'].includes(status)&&!Number(row?.errors_count||0)?row:null;
 }
 
 export async function getStats() {
@@ -998,10 +1013,24 @@ export async function getAllMatches(){
 }
 
 // ---------- Demand → Match → Opportunity (Phase 0C) -------------------------
-export async function saveDemandRecords(records=[]){
-  if(!records.length)return 0;const db=await openDB(),now=new Date().toISOString(),existingDemands=await reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll()),existingSources=await reqP(db.transaction(DEMAND_SOURCE_STORE,'readonly').objectStore(DEMAND_SOURCE_STORE).getAll()),consolidated=consolidateMarketDemands(records,existingDemands,existingSources);
-  await new Promise((resolve,reject)=>{const tx=db.transaction([DEMAND_STORE,DEMAND_SOURCE_STORE],'readwrite'),store=tx.objectStore(DEMAND_STORE),sources=tx.objectStore(DEMAND_SOURCE_STORE);for(const record of consolidated.demands)store.put({...record,origin:record.origin||'MANUAL',status:record.status||'ACTIVE',created_at:record.created_at||now,updated_at:record.updated_at||now});for(const source of consolidated.sources)sources.put(source);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
-  db.close();return records.length;
+export async function saveDemandRecords(records=[],{onProgress,chunkSize=100}={}){
+  if(!records.length){onProgress?.(0,0);return {processed:0,demandsWritten:0,sourcesWritten:0,demandIds:[]};}
+  const db=await openDB(),now=new Date().toISOString(),existingDemandMap=new Map(),existingSourceMap=new Map();
+  try{
+    const readTx=db.transaction([DEMAND_STORE,DEMAND_SOURCE_STORE],'readonly'),demandStore=readTx.objectStore(DEMAND_STORE),sourceStore=readTx.objectStore(DEMAND_SOURCE_STORE),reads=[];
+    const identities=new Map(),requesters=new Map(),demandIds=new Set(),sourceIds=new Set(),sourceRefs=new Set();
+    for(const row of records){if(row?.id)demandIds.add(row.id);const requester=String(row?.requester_observed||'').trim(),criteria=row?.criteria_fingerprint;if(row?.origin==='MARKET'&&requester&&criteria){const workspace=row.workspace_id||'local';identities.set(`${workspace}|${requester}|${criteria}`,[workspace,'MARKET',requester,criteria]);requesters.set(`${workspace}|${requester}`,[workspace,requester]);}if(row?.source?.id)sourceIds.add(row.source.id);if(row?.source?.source_reference)sourceRefs.add(row.source.source_reference);}
+    for(const id of demandIds)reads.push(reqP(demandStore.get(id)).then(row=>{if(row)existingDemandMap.set(row.id,row);}));
+    for(const key of identities.values())reads.push(reqP(demandStore.index('market_identity').get(key)).then(row=>{if(row)existingDemandMap.set(row.id,row);}));
+    for(const key of requesters.values())reads.push(reqP(demandStore.index('requester_identity').getAll(key)).then(rows=>rows.forEach(row=>existingDemandMap.set(row.id,row))));
+    for(const id of sourceIds)reads.push(reqP(sourceStore.get(id)).then(row=>{if(row)existingSourceMap.set(row.id,row);}));
+    for(const reference of sourceRefs)reads.push(reqP(sourceStore.index('source_reference').getAll(reference)).then(rows=>rows.forEach(row=>existingSourceMap.set(row.id,row))));
+    await Promise.all(reads);
+    const consolidated=consolidateMarketDemands(records,[...existingDemandMap.values()],[...existingSourceMap.values()]),writes=[...consolidated.changedDemands.map(row=>({kind:'demand',row})),...consolidated.changedSources.map(row=>({kind:'source',row}))],size=Math.max(1,Number(chunkSize)||100);
+    for(let start=0;start<writes.length;start+=size){const batch=writes.slice(start,start+size);await new Promise((resolve,reject)=>{const tx=db.transaction([DEMAND_STORE,DEMAND_SOURCE_STORE],'readwrite'),demands=tx.objectStore(DEMAND_STORE),sources=tx.objectStore(DEMAND_SOURCE_STORE);for(const item of batch){if(item.kind==='demand')demands.put({...item.row,origin:item.row.origin||'MANUAL',status:item.row.status||'ACTIVE',created_at:item.row.created_at||now,updated_at:item.row.updated_at||now});else sources.put(item.row);}tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});onProgress?.(Math.min(writes.length,start+size),writes.length);await new Promise(resolve=>setTimeout(resolve,0));}
+    if(!writes.length)onProgress?.(0,0);
+    return {processed:records.length,demandsWritten:consolidated.changedDemands.length,sourcesWritten:consolidated.changedSources.length,demandIds:[...new Set(consolidated.changedDemands.map(row=>row.id))],stats:consolidated.stats};
+  }finally{db.close();}
 }
 export async function getClients(){const db=await openDB(),rows=await reqP(db.transaction(CLIENT_STORE,'readonly').objectStore(CLIENT_STORE).getAll());db.close();return rows;}
 export async function getDemands({origin=null,status=null}={}){const db=await openDB(),rows=await reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll());db.close();return rows.filter(row=>(!origin||row.origin===origin)&&(!status||row.status===status));}
