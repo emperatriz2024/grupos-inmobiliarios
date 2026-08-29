@@ -55,17 +55,24 @@ export function parseDemandRequest(message={},options={}){
 }
 
 export function consolidateMarketDemands(records=[],existingDemands=[],existingSources=[],{activeDays=MARKET_DEMAND_ACTIVE_DAYS}={}){
-  const demandMap=new Map(existingDemands.map(row=>[row.id,{...row}])),sourceMap=new Map(existingSources.map(row=>[row.id,{...row}]));
+  const demandMap=new Map(),sourceMap=new Map(),identityMap=new Map(),requesterRecentMap=new Map(),sourceIdentityMap=new Map(),changedDemandMap=new Map(),changedSourceMap=new Map();
+  const identityKey=row=>row?.origin==='MARKET'&&String(row.requester_observed||'').trim()?`${row.workspace_id||'local'}|MARKET|${String(row.requester_observed||'').trim()}|${row.criteria_fingerprint||demandCriteriaFingerprint(row)}`:null;
+  const requesterKey=row=>row?.origin==='MARKET'&&String(row.requester_observed||'').trim()?`${row.workspace_id||'local'}|${String(row.requester_observed||'').trim()}`:null;
+  const sourceKeys=row=>uniq([row?.id?`id:${row.id}`:null,row?.source_reference?`ref:${row.source_reference}`:null]);
+  const rememberDemand=row=>{if(!row?.id)return;const copy={...row};demandMap.set(copy.id,copy);const identity=identityKey(copy);if(identity)identityMap.set(identity,copy);const requester=requesterKey(copy),seen=Date.parse(copy.last_seen_at||copy.created_at||0);if(requester&&(!requesterRecentMap.has(requester)||seen>=Date.parse(requesterRecentMap.get(requester).last_seen_at||requesterRecentMap.get(requester).created_at||0)))requesterRecentMap.set(requester,copy);};
+  const rememberSource=row=>{if(!row?.id)return;const copy={...row};sourceMap.set(copy.id,copy);for(const key of sourceKeys(copy))sourceIdentityMap.set(key,copy);};
+  existingDemands.forEach(rememberDemand);existingSources.forEach(rememberSource);
   for(const input of records){
-    if(input.origin!=='MARKET'){demandMap.set(input.id,{...input});continue;}
+    if(input.origin!=='MARKET'){const row={...input};rememberDemand(row);changedDemandMap.set(row.id,row);continue;}
     const criteria=input.criteria_fingerprint||demandCriteriaFingerprint(input),requester=String(input.requester_observed||'').trim(),identity=requester?`${input.workspace_id||'local'}|MARKET|${requester}|${criteria}`:null;
-    const prior=identity?[...demandMap.values()].find(row=>row.origin==='MARKET'&&`${row.workspace_id||'local'}|MARKET|${String(row.requester_observed||'').trim()}|${row.criteria_fingerprint||demandCriteriaFingerprint(row)}`===identity):null;
-    const observedAt=input.last_seen_at||input.created_at||new Date().toISOString(),id=prior?.id||input.id,row={...(prior||{}),...input,id,criteria_fingerprint:criteria,first_seen_at:prior?.first_seen_at||input.first_seen_at||observedAt,last_seen_at:observedAt,expires_at:addDays(observedAt,activeDays),status:'ACTIVE',updated_at:observedAt};delete row.source;demandMap.set(id,row);
-    const relatedUpdate=!prior&&requester?[...demandMap.values()].some(candidate=>candidate.id!==id&&candidate.origin==='MARKET'&&String(candidate.requester_observed||'').trim()===requester&&Math.abs(Date.parse(observedAt)-Date.parse(candidate.last_seen_at||candidate.created_at||0))<=activeDays*86400000):false;
-    const priorSource=input.source?.id?sourceMap.get(input.source.id):null,source={...(input.source||{}),demand_id:id,source_kind:priorSource?.source_kind||(prior?'REPOST':relatedUpdate?'UPDATE':'ORIGINAL'),observed_at:input.source?.observed_at||observedAt,raw_text:input.source?.raw_text||input.raw_text};
-    if(source.id)sourceMap.set(source.id,source);
+    const prior=identity?identityMap.get(identity):null;
+    const observedAt=input.last_seen_at||input.created_at||new Date().toISOString(),id=prior?.id||input.id,previousRecent=requesterRecentMap.get(`${input.workspace_id||'local'}|${requester}`),row={...(prior||{}),...input,id,criteria_fingerprint:criteria,first_seen_at:prior?.first_seen_at||input.first_seen_at||observedAt,last_seen_at:observedAt,expires_at:addDays(observedAt,activeDays),status:'ACTIVE',updated_at:observedAt};delete row.source;rememberDemand(row);changedDemandMap.set(id,row);
+    const relatedUpdate=!prior&&requester&&previousRecent?.id!==id&&Math.abs(Date.parse(observedAt)-Date.parse(previousRecent?.last_seen_at||previousRecent?.created_at||0))<=activeDays*86400000;
+    const incomingSource=input.source||{},priorSource=sourceIdentityMap.get(incomingSource.id?`id:${incomingSource.id}`:'')||sourceIdentityMap.get(incomingSource.source_reference?`ref:${incomingSource.source_reference}`:'');
+    const source={...priorSource,...incomingSource,id:priorSource?.id||incomingSource.id,demand_id:id,source_kind:priorSource?.source_kind||(prior?'REPOST':relatedUpdate?'UPDATE':'ORIGINAL'),observed_at:incomingSource.observed_at||observedAt,raw_text:incomingSource.raw_text||input.raw_text};
+    if(source.id){rememberSource(source);changedSourceMap.set(source.id,source);}
   }
-  return {demands:[...demandMap.values()],sources:[...sourceMap.values()]};
+  return {demands:[...demandMap.values()],sources:[...sourceMap.values()],changedDemands:[...changedDemandMap.values()],changedSources:[...changedSourceMap.values()],stats:{identity_index_size:identityMap.size,requester_index_size:requesterRecentMap.size,source_index_size:sourceIdentityMap.size,records_processed:records.length}};
 }
 
 export function legacyBuyerToClientDemand(buyer={}){

@@ -1,6 +1,6 @@
 
 import {
-  mergeProperties, patchPropertyPriceAudits, addImport, findImportByFileHash, getStats, getRecentImports,
+  mergeProperties, patchPropertyPriceAudits, findImportCheckpointByFileHash, saveImportCheckpoint, getStats, getRecentImports,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds,
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, recordLocationPendings,
@@ -1107,23 +1107,27 @@ function processZipWithWorker(file, group, progressCb) {
   });
 }
 
-async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb,{deferMatching=false}={}) {
-  const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
+const IMPORT_PHASE_RANK=Object.freeze({PROPERTIES_SAVED:1,DEMANDS_SAVED:2,COMPLETED:3});
+
+async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb,{deferMatching=false,checkpoint=null}={}) {
+  let phase=String(checkpoint?.status||'').toUpperCase(),saved={added:Number(checkpoint?.added||0),updated:Number(checkpoint?.updated||0)};
+  const baseSummary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
+    messages:m.result.messages,messages_total:m.result.messages_total??m.result.messages,skipped_age:m.result.messages_skipped_age??0,max_age_days:m.result.max_age_days??60,cutoff_date:m.result.cutoff_date??null,detected:m.result.properties_detected,unique:m.result.unique.length,messages_detected:m.result.messages,messages_imported:m.result.messages,started_at:checkpoint?.started_at||startedAt};
+  if((IMPORT_PHASE_RANK[phase]||0)<IMPORT_PHASE_RANK.PROPERTIES_SAVED){
+    saved=await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
+    await learnContactsFromProperties(m.result.unique);await recordLocationPendings(m.result.location_pendings||[]);
+    checkpoint=await saveImportCheckpoint(fileHash,{...baseSummary,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'PROPERTIES_SAVED'});phase='PROPERTIES_SAVED';
+  }
   const demands=demandEngineEnabled&&m.result.demand_messages?.length?processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory}):[];
-  if(demands.length)await saveDemandRecords(demands);
+  let demandIds=[...new Set(checkpoint?.demand_ids||demands.map(row=>row.id))];
+  if((IMPORT_PHASE_RANK[phase]||0)<IMPORT_PHASE_RANK.DEMANDS_SAVED){
+    const demandSave=await saveDemandRecords(demands,{onProgress:(done,total)=>progressCb?.({phase:'demand',done,total})});
+    demandIds=[...new Set([...demandIds,...demandSave.demandIds])];
+    checkpoint=await saveImportCheckpoint(fileHash,{...baseSummary,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'DEMANDS_SAVED',demand_ids:demandIds,demands_written:demandSave.demandsWritten,sources_written:demandSave.sourcesWritten});phase='DEMANDS_SAVED';
+  }
   progressCb?.({phase:'finalize',done:m.result.unique.length,total:m.result.unique.length});
-  const summary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
-    messages:m.result.messages,
-    messages_total:m.result.messages_total ?? m.result.messages,
-    skipped_age:m.result.messages_skipped_age ?? 0,
-    max_age_days:m.result.max_age_days ?? 60,
-    cutoff_date:m.result.cutoff_date ?? null,
-    detected:m.result.properties_detected,unique:m.result.unique.length,
-    messages_detected:m.result.messages,messages_imported:m.result.messages,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'completed',started_at:startedAt,finished_at:new Date().toISOString()};
-  await learnContactsFromProperties(m.result.unique);
-  await recordLocationPendings(m.result.location_pendings||[]);
-  await addImport(summary);
-  const demandIds=[...new Set(demands.map(row=>row.id))],propertyIds=[...new Set(m.result.unique.map(row=>row.id).filter(Boolean))];
+  const summary=await saveImportCheckpoint(fileHash,{...baseSummary,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'COMPLETED',demand_ids:demandIds,finished_at:new Date().toISOString()});
+  const propertyIds=[...new Set(m.result.unique.map(row=>row.id).filter(Boolean))];
   if(demandEngineEnabled&&demandIds.length&&!deferMatching)await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:demandIds});
   return {summary,demandIds,propertyIds};
 }
@@ -1131,10 +1135,11 @@ async function saveProcessedResult(m, group, fileName, fileHash, startedAt, prog
 async function importOneZip(file, group, progressCb,{deferMatching=false}={}) {
   const startedAt=new Date().toISOString();
   const bytes=await file.arrayBuffer(),hashBytes=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
-  const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),existing=await findImportByFileHash(fileHash);
-  if(existing)return {m:null,summary:{...existing,already_processed:true,status:'already_processed'},demandIds:[],propertyIds:[]};
+  const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),checkpoint=await findImportCheckpointByFileHash(fileHash),phase=String(checkpoint?.status||'').toUpperCase();
+  if(phase==='COMPLETED')return {m:null,summary:{...checkpoint,already_processed:true,status:'already_processed'},demandIds:checkpoint.demand_ids||[],propertyIds:[]};
+  if(phase==='DEMANDS_SAVED'){const summary=await saveImportCheckpoint(fileHash,{...checkpoint,status:'COMPLETED',finished_at:new Date().toISOString()});return {m:null,summary,demandIds:summary.demand_ids||[],propertyIds:[]};}
   const m = await processZipWithWorker(file,group,progressCb);
-  const saved = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb,{deferMatching});
+  const saved = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb,{deferMatching,checkpoint});
   return {m,...saved};
 }
 
@@ -1161,6 +1166,7 @@ $('#importBtn').addEventListener('click', async () => {
       else if(p.phase==='process') setStatus('Detectando propiedades…',48);
       else if(p.phase==='process_progress') setStatus(`Detectando propiedades… ${Number(p.done||0).toLocaleString('es-VE')} / ${Number(p.total||0).toLocaleString('es-VE')}`,48+Math.round((Number(p.done||0)/Math.max(Number(p.total||0),1))*10));
       else if(p.phase==='save') setStatus(`Guardando base local… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,60+Math.round((p.done/Math.max(p.total,1))*35));
+      else if(p.phase==='demand') setStatus(`Demandas… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,96);
     });
     const alreadyProcessed=Boolean(summary.already_processed);
     const importTitle=alreadyProcessed?'ZIP ya procesado anteriormente':'Importación completada';
@@ -1574,6 +1580,7 @@ $('#reindexProcessed').onclick=async()=>{
         await importOneZip(file,groupFromName(entry.name),(p)=>{
           if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando ${entry.name}`;
           if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Actualizando índice · ${p.done}/${p.total}`;
+          if(p.phase==='demand') $('#dropboxProgressDetail').textContent=`DEMANDAS · ${p.done}/${p.total}`;
         });
         ok++;
       }catch(e){failed++;console.error('reindex',entry.name,e);}
@@ -1619,6 +1626,7 @@ $('#processPending').onclick=async()=>{
       if(phase===ZIP_BATCH_PHASES.DOWNLOADING)$('#dropboxProgressDetail').textContent=`DESCARGANDO · ${entry.name}`;
       else if(phase===ZIP_BATCH_PHASES.ANALYZING)$('#dropboxProgressDetail').textContent=`ANALIZANDO · ${entry.name}`;
       else if(phase===ZIP_BATCH_PHASES.SAVING)$('#dropboxProgressDetail').textContent=`GUARDANDO · ${entry.name} · ${progress.done}/${progress.total}`;
+      else if(phase===ZIP_BATCH_PHASES.DEMANDS)$('#dropboxProgressDetail').textContent=`DEMANDAS · ${entry.name} · ${progress.done}/${progress.total}`;
       else if(phase===ZIP_BATCH_PHASES.FINALIZING)$('#dropboxProgressDetail').textContent=`FINALIZANDO · ${entry.name}`;
       else if(phase===ZIP_BATCH_PHASES.MOVING)$('#dropboxProgressDetail').textContent=`MOVIENDO · ${entry.name} a ${s.processedPath}`;
       else if(phase===ZIP_BATCH_PHASES.COMPLETED)$('#dropboxProgressDetail').textContent=`COMPLETADO · ${entry.name}`;

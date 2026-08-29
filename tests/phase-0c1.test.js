@@ -50,6 +50,24 @@ test('cambio de criterios del mismo requester queda como UPDATE sin borrar origi
   const original=marketRequest('m1','requester-1'),changed=parseDemandRequest({text:'Solicito Casa San Diego hasta $70.000',messageId:'m2',author_id:'requester-1',received_at:new Date(t0+day).toISOString(),source_channel:'secondary_number'},{origin:'MARKET'}),state=consolidateMarketDemands([original,changed],[],[]);assert.equal(state.demands.length,2);assert.deepEqual(state.sources.map(x=>x.source_kind).sort(),['ORIGINAL','UPDATE']);
 });
 
+test('ingesta MARKET grande indexa linealmente y devuelve solo filas tocadas',()=>{
+  const historySize=25000,incomingSize=1200;
+  const existingDemands=Array.from({length:historySize},(_,i)=>({
+    id:`history-${i}`,workspace_id:'local',origin:'MARKET',status:'ACTIVE',
+    requester_observed:`requester-${i}`,criteria_fingerprint:`criteria-${i}`,
+    first_seen_at:new Date(t0-i).toISOString(),last_seen_at:new Date(t0-i).toISOString()
+  }));
+  const existingSources=existingDemands.map((row,i)=>({id:`history-source-${i}`,demand_id:row.id,source_reference:`history-ref-${i}`,observed_at:row.last_seen_at}));
+  const incoming=Array.from({length:incomingSize},(_,i)=>marketRequest(`scale-${i}`,`scale-requester-${i}`,t0+i));
+  const started=performance.now(),state=consolidateMarketDemands(incoming,existingDemands,existingSources),elapsed=performance.now()-started;
+  assert.equal(state.changedDemands.length,incomingSize);
+  assert.equal(state.changedSources.length,incomingSize);
+  assert.equal(state.demands.length,historySize+incomingSize);
+  assert.equal(state.stats.records_processed,incomingSize);
+  assert.equal(state.stats.identity_index_size,historySize+incomingSize);
+  assert.ok(elapsed<5000,`la consolidacion lineal tardó ${Math.round(elapsed)}ms`);
+});
+
 test('candidate prefilter reduce universo y trigger dirigido no evalúa todo',()=>{
   const demands=Array.from({length:20},(_,i)=>({...client,id:`d${i}`,property_types:[i?'Apartamento':'Casa']})),properties=Array.from({length:100},(_,i)=>({...own,id:`p${i}`,property_type:i?'Apartamento':'Casa'}));
   const directed=matchPrefilteredCandidates(demands,properties,{demandIds:['d0']});assert.equal(directed.stats.cartesian_universe,2000);assert.equal(directed.stats.scoped_demands,1);assert.equal(directed.stats.prefiltered_pairs,1);assert.ok(directed.stats.prefiltered_pairs<directed.stats.cartesian_universe);
