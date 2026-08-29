@@ -265,7 +265,7 @@ export async function addImport(summary) {
 export async function findImportByFileHash(fileHash) {
   if(!fileHash)return null;
   const db=await openDB(),tx=db.transaction(IMPORT_STORE,'readonly'),store=tx.objectStore(IMPORT_STORE);
-  const found=await new Promise((resolve,reject)=>{const req=store.openCursor(null,'prev');req.onerror=()=>reject(req.error);req.onsuccess=()=>{const cursor=req.result;if(!cursor)return resolve(null);if(cursor.value?.file_hash===fileHash)return resolve(cursor.value);cursor.continue();};});
+  const found=await new Promise((resolve,reject)=>{const req=store.openCursor(null,'prev');req.onerror=()=>reject(req.error);req.onsuccess=()=>{const cursor=req.result;if(!cursor)return resolve(null);const row=cursor.value,status=String(row?.status||'').toLowerCase();if(row?.file_hash===fileHash&&['completed','complete','already_processed'].includes(status)&&!Number(row?.errors_count||0))return resolve(row);cursor.continue();};});
   db.close();return found;
 }
 
