@@ -37,6 +37,7 @@ import { SecondaryWhatsAppSource } from './ingestion/source-ingestion.js';
 import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
+import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
 import { APP_LABEL, APP_VERSION } from './version.js';
 
 const $ = (q) => document.querySelector(q);
@@ -1106,9 +1107,11 @@ function processZipWithWorker(file, group, progressCb) {
   });
 }
 
-async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb) {
+async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb,{deferMatching=false}={}) {
   const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
-  if(demandEngineEnabled&&m.result.demand_messages?.length){const demands=processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory});await saveDemandRecords(demands);await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...new Set(demands.map(row=>row.id))]});}
+  const demands=demandEngineEnabled&&m.result.demand_messages?.length?processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory}):[];
+  if(demands.length)await saveDemandRecords(demands);
+  progressCb?.({phase:'finalize',done:m.result.unique.length,total:m.result.unique.length});
   const summary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
     messages:m.result.messages,
     messages_total:m.result.messages_total ?? m.result.messages,
@@ -1117,20 +1120,22 @@ async function saveProcessedResult(m, group, fileName, fileHash, startedAt, prog
     cutoff_date:m.result.cutoff_date ?? null,
     detected:m.result.properties_detected,unique:m.result.unique.length,
     messages_detected:m.result.messages,messages_imported:m.result.messages,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'completed',started_at:startedAt,finished_at:new Date().toISOString()};
-  await addImport(summary);
   await learnContactsFromProperties(m.result.unique);
   await recordLocationPendings(m.result.location_pendings||[]);
-  return summary;
+  await addImport(summary);
+  const demandIds=[...new Set(demands.map(row=>row.id))],propertyIds=[...new Set(m.result.unique.map(row=>row.id).filter(Boolean))];
+  if(demandEngineEnabled&&demandIds.length&&!deferMatching)await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:demandIds});
+  return {summary,demandIds,propertyIds};
 }
 
-async function importOneZip(file, group, progressCb) {
+async function importOneZip(file, group, progressCb,{deferMatching=false}={}) {
   const startedAt=new Date().toISOString();
   const bytes=await file.arrayBuffer(),hashBytes=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
   const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),existing=await findImportByFileHash(fileHash);
-  if(existing)return {m:null,summary:{...existing,already_processed:true,status:'already_processed'}};
+  if(existing)return {m:null,summary:{...existing,already_processed:true,status:'already_processed'},demandIds:[],propertyIds:[]};
   const m = await processZipWithWorker(file,group,progressCb);
-  const summary = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb);
-  return {m,summary};
+  const saved = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb,{deferMatching});
+  return {m,...saved};
 }
 
 const fileInput = $('#zipInput');
@@ -1591,37 +1596,39 @@ $('#processPending').onclick=async()=>{
   const s=getDropboxSettings();
   $('#processPending').disabled=true; $('#refreshDropbox').disabled=true;
   $('#dropboxProgress').hidden=false; $('#dropboxProgressBar').max=pendingDropboxFiles.length;
-  let ok=0, failed=0;
   const queue=[...pendingDropboxFiles];
-  for(let i=0;i<queue.length;i++){
-    const entry=queue[i];
-    $('#dropboxProgressBar').value=i;
-    $('#dropboxProgressTitle').textContent='Procesando chats pendientes';
-    $('#dropboxProgressCount').textContent=`${i+1}/${queue.length}`;
-    $('#dropboxProgressDetail').textContent=`Descargando ${entry.name}`;
-    try{
-      const blob=await downloadDropboxFile(entry.path_lower||entry.path_display);
+  const touchedDemandIds=new Set();
+  const outcome=await runOperationalZipBatch({
+    entries:queue,
+    download:entry=>downloadDropboxFile(entry.path_lower||entry.path_display),
+    processFile:async(entry,blob,notify)=>{
       const file=new File([blob],entry.name,{type:'application/zip'});
-      const group=groupFromName(entry.name);
-      const {summary}=await importOneZip(file,group,(p)=>{
-        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando últimos 60 días · ${entry.name}`;
-        if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Guardando ${entry.name} · ${p.done}/${p.total}`;
-      });
-      $('#dropboxProgressDetail').textContent=`Moviendo ${entry.name} a ${s.processedPath}`;
-      await moveDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name);
-      ok++;
+      const result=await importOneZip(file,groupFromName(entry.name),notify,{deferMatching:true});
+      result.demandIds.forEach(id=>touchedDemandIds.add(id));
+      return result;
+    },
+    move:entry=>moveDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name),
+    finalize:async()=>{
+      if(demandEngineEnabled&&touchedDemandIds.size)await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...touchedDemandIds]});
       await loadData();
-    }catch(e){
-      failed++;
-      console.error(entry.name,e);
-      $('#dropboxProgressDetail').textContent=`Error en ${entry.name}: ${e.message}`;
-      await new Promise(r=>setTimeout(r,1200));
+    },
+    onProgress:({phase,index,total,entry,progress,error,completed,finalization})=>{
+      $('#dropboxProgressTitle').textContent='Procesando chats pendientes';
+      $('#dropboxProgressBar').value=phase===ZIP_BATCH_PHASES.COMPLETED?completed:index;
+      $('#dropboxProgressCount').textContent=`${Math.min(index+1,total)}/${total}`;
+      if(phase===ZIP_BATCH_PHASES.DOWNLOADING)$('#dropboxProgressDetail').textContent=`DESCARGANDO · ${entry.name}`;
+      else if(phase===ZIP_BATCH_PHASES.ANALYZING)$('#dropboxProgressDetail').textContent=`ANALIZANDO · ${entry.name}`;
+      else if(phase===ZIP_BATCH_PHASES.SAVING)$('#dropboxProgressDetail').textContent=`GUARDANDO · ${entry.name} · ${progress.done}/${progress.total}`;
+      else if(phase===ZIP_BATCH_PHASES.FINALIZING)$('#dropboxProgressDetail').textContent=`FINALIZANDO · ${entry.name}`;
+      else if(phase===ZIP_BATCH_PHASES.MOVING)$('#dropboxProgressDetail').textContent=`MOVIENDO · ${entry.name} a ${s.processedPath}`;
+      else if(phase===ZIP_BATCH_PHASES.COMPLETED)$('#dropboxProgressDetail').textContent=`COMPLETADO · ${entry.name}`;
+      else if(phase===ZIP_BATCH_PHASES.ERROR){console.error(finalization?'zip batch finalize':entry?.name,error);$('#dropboxProgressDetail').textContent=finalization?`ERROR DE FINALIZACIÓN · ${error.message}`:`ERROR · ${entry.name}: ${error.message}`;}
     }
-  }
+  });
   $('#dropboxProgressBar').value=queue.length;
-  $('#dropboxProgressTitle').textContent=failed?'Proceso terminado con avisos':'Todos los pendientes fueron procesados';
-  $('#dropboxProgressCount').textContent=`${ok} OK${failed?` · ${failed} error`:''}`;
-  $('#dropboxProgressDetail').textContent=failed?'Los archivos con error permanecen en Chat pendiente.':'Los ZIP procesados fueron movidos a Procesado.';
+  $('#dropboxProgressTitle').textContent=outcome.failed||outcome.finalizationError?'Proceso terminado con avisos':'Todos los pendientes fueron procesados';
+  $('#dropboxProgressCount').textContent=`${outcome.completed} OK${outcome.failed?` · ${outcome.failed} error`:''}`;
+  $('#dropboxProgressDetail').textContent=outcome.finalizationError?'Los ZIP se guardaron y movieron; el recálculo final podrá reintentarse al recargar.':outcome.failed?'Los archivos con error permanecen en Chat pendiente.':'Los ZIP procesados fueron movidos a Procesado.';
   $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
   await refreshDropboxPending();
   await maybeAutoBackup();
