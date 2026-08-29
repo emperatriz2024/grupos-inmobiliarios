@@ -10,7 +10,7 @@ import {
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary,
   setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments,
   saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching
-} from './db.js?v=0721';
+} from './db.js?v=072-operativo';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
@@ -37,11 +37,11 @@ import { SecondaryWhatsAppSource } from './ingestion/source-ingestion.js';
 import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
-import { APP_LABEL, APP_VERSION } from './version.js';
+import { APP_LABEL, APP_VERSION, RADAR_DEMAND_ENGINE_DEFAULT } from './version.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
-const demandEngineEnabled=radarDemandEngineEnabled({RADAR_DEMAND_ENGINE_ENABLED:globalThis.RADAR_DEMAND_ENGINE_ENABLED||localStorage.getItem('RADAR_DEMAND_ENGINE_ENABLED')||''});
+const demandEngineEnabled=radarDemandEngineEnabled({RADAR_DEMAND_ENGINE_ENABLED:globalThis.RADAR_DEMAND_ENGINE_ENABLED||localStorage.getItem('RADAR_DEMAND_ENGINE_ENABLED')||(RADAR_DEMAND_ENGINE_DEFAULT?'true':'')});
 let allProperties = [];
 let favoriteIds = new Set();
 let currentResults = [];
@@ -1696,5 +1696,5 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0721').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=072-operativo').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }
