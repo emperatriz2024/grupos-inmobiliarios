@@ -4,9 +4,10 @@ import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-u
 import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0530';
 import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0530';
 import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
+import {legacyBuyerToClientDemand,matchDemandsToProperties,OpportunityEngine} from './core/radar/demand-engine.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -30,6 +31,13 @@ const IDENTITY_LINK_STORE='property_identity_links';
 const PROPERTY_REDIRECT_STORE='property_redirects';
 const OWN_LISTING_STORE='own_listing_details';
 const REVIEW_QUEUE_STORE='review_queue';
+const CLIENT_STORE='clients';
+const DEMAND_STORE='demands';
+const MATCH_RUN_STORE='match_runs';
+const MATCH_CANDIDATE_STORE='match_candidates';
+const OPPORTUNITY_STORE='opportunities';
+const OPPORTUNITY_SCORE_STORE='opportunity_scores';
+const OPPORTUNITY_EVENT_STORE='opportunity_events';
 
 
 function openDB() {
@@ -112,6 +120,27 @@ function openDB() {
       }
       if(!db.objectStoreNames.contains(REVIEW_QUEUE_STORE)){
         const s=db.createObjectStore(REVIEW_QUEUE_STORE,{keyPath:'id'});s.createIndex('status','status',{unique:false});s.createIndex('review_type','review_type',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(CLIENT_STORE)){
+        const s=db.createObjectStore(CLIENT_STORE,{keyPath:'id'});s.createIndex('legacy_buyer_id','legacy_buyer_id',{unique:true});s.createIndex('status','status',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(DEMAND_STORE)){
+        const s=db.createObjectStore(DEMAND_STORE,{keyPath:'id'});s.createIndex('client_id','client_id',{unique:false});s.createIndex('origin','origin',{unique:false});s.createIndex('status','status',{unique:false});s.createIndex('source_fingerprint','source_fingerprint',{unique:true});
+      }
+      if(!db.objectStoreNames.contains(MATCH_RUN_STORE)){
+        const s=db.createObjectStore(MATCH_RUN_STORE,{keyPath:'id'});s.createIndex('started_at','started_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(MATCH_CANDIDATE_STORE)){
+        const s=db.createObjectStore(MATCH_CANDIDATE_STORE,{keyPath:'id'});s.createIndex('match_run_id','match_run_id',{unique:false});s.createIndex('demand_id','demand_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(OPPORTUNITY_STORE)){
+        const s=db.createObjectStore(OPPORTUNITY_STORE,{keyPath:'id'});s.createIndex('demand_id','demand_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('status','status',{unique:false});s.createIndex('opportunity_type','opportunity_type',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(OPPORTUNITY_SCORE_STORE)){
+        const s=db.createObjectStore(OPPORTUNITY_SCORE_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(OPPORTUNITY_EVENT_STORE)){
+        const s=db.createObjectStore(OPPORTUNITY_EVENT_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:false});s.createIndex('event_type','event_type',{unique:false});
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -964,6 +993,44 @@ export async function getAllMatches(){
   const db=await openDB(),rows=await reqP(db.transaction(MATCH_STORE,'readonly').objectStore(MATCH_STORE).getAll());db.close();return rows;
 }
 
+// ---------- Demand → Match → Opportunity (Phase 0C) -------------------------
+export async function saveDemandRecords(records=[]){
+  if(!records.length)return 0;const db=await openDB(),now=new Date().toISOString();
+  await new Promise((resolve,reject)=>{const tx=db.transaction(DEMAND_STORE,'readwrite'),store=tx.objectStore(DEMAND_STORE);for(const record of records)store.put({...record,origin:record.origin||'MANUAL',status:record.status||'ACTIVE',created_at:record.created_at||now,updated_at:now});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+  db.close();return records.length;
+}
+export async function getClients(){const db=await openDB(),rows=await reqP(db.transaction(CLIENT_STORE,'readonly').objectStore(CLIENT_STORE).getAll());db.close();return rows;}
+export async function getDemands({origin=null,status=null}={}){const db=await openDB(),rows=await reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll());db.close();return rows.filter(row=>(!origin||row.origin===origin)&&(!status||row.status===status));}
+export async function getOpportunities({includeInvalidated=true}={}){const db=await openDB(),rows=await reqP(db.transaction(OPPORTUNITY_STORE,'readonly').objectStore(OPPORTUNITY_STORE).getAll());db.close();return includeInvalidated?rows:rows.filter(row=>row.status==='ACTIVE');}
+export async function getOpportunityScores(){const db=await openDB(),rows=await reqP(db.transaction(OPPORTUNITY_SCORE_STORE,'readonly').objectStore(OPPORTUNITY_SCORE_STORE).getAll());db.close();return rows;}
+export async function getOpportunityEvents(){const db=await openDB(),rows=await reqP(db.transaction(OPPORTUNITY_EVENT_STORE,'readonly').objectStore(OPPORTUNITY_EVENT_STORE).getAll());db.close();return rows;}
+
+export async function mirrorLegacyBuyersToDemands(){
+  const db=await openDB(),buyers=await reqP(db.transaction(BUYER_STORE,'readonly').objectStore(BUYER_STORE).getAll()),now=new Date().toISOString();
+  await new Promise((resolve,reject)=>{const tx=db.transaction([CLIENT_STORE,DEMAND_STORE],'readwrite'),clients=tx.objectStore(CLIENT_STORE),demands=tx.objectStore(DEMAND_STORE);for(const buyer of buyers){const pair=legacyBuyerToClientDemand(buyer);clients.put(pair.client);demands.put(pair.demand);}tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+  db.close();return {buyers:buyers.length,clients:buyers.length,demands:buyers.length,mirrored_at:now};
+}
+
+export async function runDemandOpportunityMatching({trigger_type='FULL_RECALC',trigger_entity_id=null,territoryOntology=null}={}){
+  const db=await openDB(),startedAt=new Date().toISOString(),runId=`match_run_${radarHash(`${startedAt}|${trigger_type}|${trigger_entity_id||''}`)}`;
+  const [demands,properties,opportunities,scores,events]=await Promise.all([
+    reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll()),reqP(db.transaction(MASTER_STORE,'readonly').objectStore(MASTER_STORE).getAll()),
+    reqP(db.transaction(OPPORTUNITY_STORE,'readonly').objectStore(OPPORTUNITY_STORE).getAll()),reqP(db.transaction(OPPORTUNITY_SCORE_STORE,'readonly').objectStore(OPPORTUNITY_SCORE_STORE).getAll()),reqP(db.transaction(OPPORTUNITY_EVENT_STORE,'readonly').objectStore(OPPORTUNITY_EVENT_STORE).getAll())
+  ]);
+  const active=demands.filter(row=>row.status==='ACTIVE'),candidates=matchDemandsToProperties(active,properties,{territoryOntology});
+  const engine=new OpportunityEngine({opportunities,scores,events}),state=engine.reconcile(candidates,active),completedAt=new Date().toISOString();
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction([MATCH_RUN_STORE,MATCH_CANDIDATE_STORE,OPPORTUNITY_STORE,OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE],'readwrite');
+    tx.objectStore(MATCH_RUN_STORE).put({id:runId,workspace_id:'local',trigger_type,trigger_entity_id,started_at:startedAt,completed_at:completedAt,status:'COMPLETED',metadata_json:{demands:active.length,properties:properties.length,candidates:candidates.length}});
+    const candidateStore=tx.objectStore(MATCH_CANDIDATE_STORE);for(const row of candidates)candidateStore.put({...row,id:`${runId}_${row.id}`,match_run_id:runId,created_at:completedAt});
+    const opportunityStore=tx.objectStore(OPPORTUNITY_STORE);for(const row of state.opportunities)opportunityStore.put(row);
+    const scoreStore=tx.objectStore(OPPORTUNITY_SCORE_STORE);for(const row of state.scores)scoreStore.put(row);
+    const eventStore=tx.objectStore(OPPORTUNITY_EVENT_STORE);state.events.forEach((row,index)=>eventStore.put({...row,id:row.id||`op_event_${radarHash(`${row.opportunity_id}|${row.event_type}|${row.occurred_at}|${index}`)}`}));
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();return {run_id:runId,demands:active.length,properties:properties.length,candidates:candidates.length,opportunities:state.opportunities.filter(row=>row.status==='ACTIVE').length};
+}
+
 // ---------- Radar Backup v0.5.0.2 --------------------------------------------
 const BACKUP_STORES=[
   PROP_STORE,IMPORT_STORE,FAV_STORE,CONTACT_STORE,MUNICIPALITY_STORE,ZONE_STORE,
@@ -971,6 +1038,8 @@ const BACKUP_STORES=[
   MATCH_STORE,SYNC_QUEUE_STORE
   ,SOURCE_ATTACHMENT_STORE,MEDIA_ASSET_STORE,PROPERTY_MEDIA_STORE,IDENTITY_LINK_STORE,
   PROPERTY_REDIRECT_STORE,OWN_LISTING_STORE,REVIEW_QUEUE_STORE
+  ,CLIENT_STORE,DEMAND_STORE,MATCH_RUN_STORE,MATCH_CANDIDATE_STORE,OPPORTUNITY_STORE,
+  OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE
 ];
 export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 

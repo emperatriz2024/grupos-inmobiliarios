@@ -475,10 +475,11 @@ export function processChatText(text, group='Grupo', options={}) {
 
   const properties=[];
   let requestsSkipped=0;
+  const demandMessages=[];
   let multiItemsCreated=0;
   for(let messageIndex=0;messageIndex<messages.length;messageIndex++){
     const m=messages[messageIndex];
-    if(isDemandRequest(m.text)){ requestsSkipped++; continue; }
+    if(isDemandRequest(m.text)){ requestsSkipped++;demandMessages.push({...m,source_channel:options.sourceChannel||'primary_number',source_id:m.messageId||`${m.date_iso||m.date}|${m.time||''}|${m.sender||''}`});continue; }
     const parts=splitMultiListingMessage(m);
     if(parts.length>1) multiItemsCreated += parts.length;
     for(const part of parts){
@@ -517,6 +518,7 @@ export function processChatText(text, group='Grupo', options={}) {
     cutoff_date:messages.cutoffDate ?? null,
     date_order:messages.dateOrder ?? 'MDY',
     requests_skipped:requestsSkipped,
+    demand_messages:demandMessages,
     multi_items_created:multiItemsCreated,
     properties_detected:properties.length,
     location_pendings:properties.flatMap(p=>p.location_pending||[]),

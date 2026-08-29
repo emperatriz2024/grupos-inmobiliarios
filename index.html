@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0610" />
+  <link rel="stylesheet" href="./styles.css?v=0720" />
 </head>
 <body>
   <main class="shell">
@@ -159,6 +159,13 @@
       <div id="buyersEmpty" class="empty" hidden>
         Todavía no has creado compradores. Toca <b>Nuevo comprador</b> para comenzar el matching.
       </div>
+      <section id="demandCommercialPanel" class="card" hidden>
+        <div class="sectionTitle"><span>◎</span><div><h2>Demandas y oportunidades</h2><p>Motor compartido CLIENT / MARKET · explicaciones auditables</p></div></div>
+        <div id="demandCommercialSummary" class="buyerStats"></div>
+        <details open><summary>Clientes y demandas</summary><div id="clientDemandList"></div></details>
+        <details><summary>Solicitudes del mercado</summary><div id="marketDemandList"></div></details>
+        <details open><summary>Oportunidades</summary><div id="opportunityList"></div></details>
+      </section>
     </section>
 
     <section id="viewImport" class="view">
@@ -626,6 +633,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0710"></script>
+  <script type="module" src="./app.js?v=0720"></script>
 </body>
 </html>

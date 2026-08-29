@@ -8,8 +8,9 @@ import {
   syncRadarCore, getRadarCoreStats, getMasterProperties, getAllSourcePosts, getExternalSourcePosts, getExternalSourceStats, externalUrlExists, upsertExternalCapture, updateExternalSourceVerification, refreshExternalMasterVigency,
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary,
-  setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments
-} from './db.js?v=0710';
+  setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments,
+  saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching
+} from './db.js?v=0720';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
@@ -24,7 +25,8 @@ import {
 } from './dropbox.js?v=0530';
 import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0530';
 import { normLocation } from './location-catalog.js?v=0530';
-import { BUYER_FEATURES, calculateBuyerMatches, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0530';
+import { BUYER_FEATURES, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0530';
+import { legacyBuyerToClientDemand, evaluateDemandProperty } from './core/radar/demand-engine.js';
 import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0530';
 import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0530';
 import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0530';
@@ -33,10 +35,13 @@ import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
 import { SecondaryWhatsAppSource } from './ingestion/source-ingestion.js';
 import { processSecondaryEvents } from './ingestion/secondary-processing.js';
-import { APP_LABEL } from './version.js';
+import { processZipDemandMessages } from './ingestion/demand-processing.js';
+import { radarDemandEngineEnabled } from './core/radar/config.js';
+import { APP_LABEL, APP_VERSION } from './version.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
+const demandEngineEnabled=radarDemandEngineEnabled({RADAR_DEMAND_ENGINE_ENABLED:globalThis.RADAR_DEMAND_ENGINE_ENABLED||localStorage.getItem('RADAR_DEMAND_ENGINE_ENABLED')||''});
 let allProperties = [];
 let favoriteIds = new Set();
 let currentResults = [];
@@ -469,7 +474,7 @@ async function openDetail(id) {
     const scope=$('#detailOwnershipScope'),fields=$('#detailOwnFields');scope.value=master.ownership_scope||'UNKNOWN';
     $('#ownAgreementType').value=own?.agreement_type||'UNKNOWN';$('#ownDocumentsStatus').value=own?.documents_status||'UNKNOWN';$('#ownMediaAuthorization').value=own?.media_authorization_status||'UNKNOWN';
     const renderOwn=()=>fields.hidden=scope.value!=='OWN';renderOwn();scope.onchange=renderOwn;
-    $('#saveOwnListing').onclick=async()=>{const status=$('#ownListingStatus');try{await setMasterOwnership(master.id,scope.value);if(scope.value==='OWN')await saveOwnListingDetails({property_id:master.id,workspace_id:master.workspace_id||'local',capture_date:$('#ownCaptureDate').value||null,agreement_type:$('#ownAgreementType').value,authorized_price:$('#ownAuthorizedPrice').value?Number($('#ownAuthorizedPrice').value):null,commission_pct:$('#ownCommission').value?Number($('#ownCommission').value):null,documents_status:$('#ownDocumentsStatus').value,media_authorization_status:$('#ownMediaAuthorization').value,internal_notes:$('#ownInternalNotes').value||null});status.textContent='Guardado localmente con confirmación manual.';}catch(error){status.textContent=`No se pudo guardar: ${error.message}`;}};
+    $('#saveOwnListing').onclick=async()=>{const status=$('#ownListingStatus');try{await setMasterOwnership(master.id,scope.value);if(scope.value==='OWN')await saveOwnListingDetails({property_id:master.id,workspace_id:master.workspace_id||'local',capture_date:$('#ownCaptureDate').value||null,agreement_type:$('#ownAgreementType').value,authorized_price:$('#ownAuthorizedPrice').value?Number($('#ownAuthorizedPrice').value):null,commission_pct:$('#ownCommission').value?Number($('#ownCommission').value):null,documents_status:$('#ownDocumentsStatus').value,media_authorization_status:$('#ownMediaAuthorization').value,internal_notes:$('#ownInternalNotes').value||null});if(demandEngineEnabled){await runDemandOpportunityMatching({trigger_type:'OWNERSHIP_CHANGED',trigger_entity_id:master.id});await refreshDemandCommercialPanel();}status.textContent='Guardado localmente con confirmación manual.';}catch(error){status.textContent=`No se pudo guardar: ${error.message}`;}};
   }
   $('#detailDialog').showModal();
 }
@@ -576,8 +581,8 @@ function collectBuyerForm(){
 async function recalculateBuyerMatches(buyer){
   if(!buyer?.id)return 0;
   if(buyer.status==='closed'){await replaceBuyerMatches(buyer.id,[]);return 0;}
-  const masters=await getMasterProperties();
-  const matches=calculateBuyerMatches(buyer,masters);
+  const masters=await getMasterProperties(),demand=legacyBuyerToClientDemand(buyer).demand;
+  const matches=masters.map(master=>({master,...evaluateDemandProperty(demand,master)})).filter(row=>row.classification!=='REJECTED').map(row=>({...row,score:row.ready_score,tier:row.classification==='EXACT'?'excelente':row.classification==='ALTERNATIVE'?'alternativa':'revisar',match_kind:row.classification.toLowerCase(),strict_ok:row.classification==='EXACT',recency_days:0})).sort((a,b)=>b.score-a.score);
   await replaceBuyerMatches(buyer.id,matches.map(m=>({
     master_id:m.master.id,score:m.score,tier:m.tier,match_kind:m.match_kind,strict_ok:m.strict_ok,reasons:m.reasons,gaps:m.gaps,recency_days:m.recency_days
   })));
@@ -632,6 +637,22 @@ async function refreshBuyersData(){
   if($('#buyersHotCount'))$('#buyersHotCount').textContent=hot.toLocaleString('es-VE');
   if($('#buyersMatchesCount'))$('#buyersMatchesCount').textContent=allBuyerMatches.length.toLocaleString('es-VE');
   renderBuyersList();
+  if(demandEngineEnabled)await refreshDemandCommercialPanel();
+}
+function resolveDemandTerritory(text=''){
+  const haystack=normLoc(text),rows=[...(locationCatalog.zones||[]),...(locationCatalog.municipalities||[])].map(row=>({id:row.id,name:row.nombre||row.name||''})).filter(row=>row.name&&haystack.includes(normLoc(row.name))).sort((a,b)=>b.name.length-a.name.length);
+  return rows[0]?{id:rows[0].id,query:rows[0].name}:null;
+}
+async function refreshDemandCommercialPanel(){
+  const panel=$('#demandCommercialPanel');if(!panel||!demandEngineEnabled)return;panel.hidden=false;
+  const [clients,demands,opportunities,scores]=await Promise.all([getClients(),getDemands(),getOpportunities(),getOpportunityScores()]),scoreByOpportunity=new Map();
+  for(const score of scores){const old=scoreByOpportunity.get(score.opportunity_id);if(!old||String(score.created_at)>String(old.created_at))scoreByOpportunity.set(score.opportunity_id,score);}
+  const market=demands.filter(row=>row.origin==='MARKET'),active=opportunities.filter(row=>row.status==='ACTIVE');
+  $('#demandCommercialSummary').innerHTML=`<div><strong>${clients.length}</strong><span>clientes</span></div><div><strong>${demands.length}</strong><span>demandas</span></div><div><strong>${active.length}</strong><span>oportunidades</span></div>`;
+  const demandCard=row=>`<article class="buyerCard"><div class="buyerCardTop"><div><h3>${buyerEsc(row.origin==='CLIENT'?'Demanda cliente':'Solicitud mercado')}</h3><p>${buyerEsc(row.raw_text||buyerCriteriaText(row,locationCatalog))}</p></div><span class="buyerStatus active">${buyerEsc(row.status)}</span></div></article>`;
+  $('#clientDemandList').innerHTML=demands.filter(row=>row.origin==='CLIENT').map(demandCard).join('')||'<div class="empty">Sin demandas CLIENT.</div>';
+  $('#marketDemandList').innerHTML=market.map(demandCard).join('')||'<div class="empty">Sin solicitudes MARKET.</div>';
+  $('#opportunityList').innerHTML=opportunities.map(row=>{const score=scoreByOpportunity.get(row.id)||{};return `<article class="buyerMatchCard"><div class="matchScore ${row.status==='ACTIVE'?'excelente':'alternativa'}"><strong>${buyerEsc(row.classification||row.status)}</strong><span>${buyerEsc(row.opportunity_type)}</span></div><div class="matchMain"><p>${buyerEsc(row.demand_id)} → ${buyerEsc(row.property_id)}</p><div class="matchMeta"><span>Fit ${Number(score.fit_score||0)}</span><span>Evidence ${Number(score.evidence_score||0)}</span><span>Availability ${Number(score.availability_score||0)}</span><span>Ready ${Number(score.ready_score||0)}</span></div><div class="matchReasons">${(row.reasons||[]).map(x=>`<span>✓ ${buyerEsc(x)}</span>`).join('')}</div><div class="matchGaps">${[...(row.gaps||[]),...(row.conflicts||[])].map(x=>`<span>△ ${buyerEsc(x)}</span>`).join('')}</div></div></article>`;}).join('')||'<div class="empty">Sin oportunidades.</div>';
 }
 function renderBuyersList(){
   const box=$('#buyersList');if(!box)return;
@@ -706,6 +727,7 @@ $('#buyerForm')?.addEventListener('submit',async e=>{
   try{
     const currentId=$('#buyerId').value||null,existing=currentId?await getBuyer(currentId):null;
     const row=await saveBuyer({...existing,...collectBuyerForm()});
+    if(demandEngineEnabled){await mirrorLegacyBuyersToDemands();await runDemandOpportunityMatching({trigger_type:'CLIENT_DEMAND_CHANGED',trigger_entity_id:row.id});}
     $('#saveBuyerBtn').disabled=true;$('#saveBuyerBtn').textContent='Calculando coincidencias…';
     await recalculateBuyerMatches(row);
     $('#buyerDialog').close();
@@ -1073,6 +1095,7 @@ function processZipWithWorker(file, group, progressCb) {
 
 async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb) {
   const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
+  if(demandEngineEnabled&&m.result.demand_messages?.length)await saveDemandRecords(processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory}));
   const summary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
     messages:m.result.messages,
     messages_total:m.result.messages_total ?? m.result.messages,
@@ -1196,6 +1219,7 @@ async function loadData() {
   const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
   const consolidated=consolidateProperties(valid);
   await syncRadarCore(valid,consolidated);
+  if(demandEngineEnabled)await runDemandOpportunityMatching({trigger_type:'INVENTORY_REFRESH'});
   await recalculateAllBuyerMatches({silent:true});
   const radarStats=await getRadarCoreStats();
   contactDirectory=await getAllContacts();contactIndex=buildContactIndex(contactDirectory);
@@ -1637,9 +1661,9 @@ async function syncSecondaryWhatsApp({silent=false}={}){
   try{
     let hasMore=true;
     while(hasMore&&pages<5){
-      const source=new SecondaryWhatsAppSource({...config}),page=await source.ingest({cursor,limit:50});const result=processSecondaryEvents(page.events,{locationCatalog});
+      const source=new SecondaryWhatsAppSource({...config}),page=await source.ingest({cursor,limit:50});const result=processSecondaryEvents(page.events,{locationCatalog,resolveTerritory:resolveDemandTerritory});
       for(const record of result.records){const direct=record.publisher?.observed_phone?contactIndex.byId.get(record.publisher.observed_phone):null,evidence=direct?{status:'resolved',contact:direct,confidence:1,reason:'teléfono observado exacto',matched_name:record.publisher?.observed_name||null}:resolvePropertyContact({sender:record.publisher?.observed_name||record.sender},contactIndex);record.publisher.contact_evidence=evidence.status==='resolved'?{status:'resolved',contact_id:evidence.contact?.id||null,confidence:evidence.confidence,reason:evidence.reason,matched_name:evidence.matched_name}:evidence.status==='ambiguous'?{status:'ambiguous',count:evidence.count}:{status:'none'};record.probable_captor_id=null;record.captor_score=null;}
-      const saved=await mergeProperties(result.records);if(result.records.length){await learnContactsFromProperties(result.records);await recordLocationPendings(result.records.flatMap(x=>x.location_pending||[]));}
+      const saved=await mergeProperties(result.records);if(result.records.length){await learnContactsFromProperties(result.records);await recordLocationPendings(result.records.flatMap(x=>x.location_pending||[]));}if(demandEngineEnabled&&result.demands.length)await saveDemandRecords(result.demands);
       if(result.attachments.length)try{await recordSourceAttachments(result.attachments);}catch(error){diagnosticLog('whatsapp_secondary','media_metadata',`Attachment metadata no disponible: ${error?.name||'Error'}`,'warn');}
       stats.received+=result.validCount;stats.processed+=result.validCount;stats.properties+=result.propertiesDetected;stats.groups=Math.max(stats.groups,result.groupsDetected);stats.pending=page.hasMore?1:0;
       cursor=page.nextCursor||cursor;localStorage.setItem(SECONDARY_CURSOR_KEY,cursor);hasMore=page.hasMore;pages++;
@@ -1655,7 +1679,7 @@ $('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondar
 
 async function initApp(){
   const versionLabel=$('#appVersionLabel');if(versionLabel)versionLabel.textContent=APP_LABEL;
-  try{await initLocationSystem();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
 setInterval(()=>{if(document.visibilityState==='visible')syncSecondaryWhatsApp({silent:true});},5*60*1000);
@@ -1670,7 +1694,7 @@ document.addEventListener('visibilitychange',()=>{
 if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
 if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
-    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version==='0.6.1')console.info('Radar V0.6.1 listo para usar.');
+    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0610').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0720').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }
