@@ -5,9 +5,10 @@ import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0530';
 import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0530';
 import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
 import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchPrefilteredCandidates,OpportunityEngine} from './core/radar/demand-engine.js';
+import {reconcileReadiness} from './core/radar/readiness-engine.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -39,6 +40,10 @@ const OPPORTUNITY_STORE='opportunities';
 const OPPORTUNITY_SCORE_STORE='opportunity_scores';
 const OPPORTUNITY_EVENT_STORE='opportunity_events';
 const DEMAND_SOURCE_STORE='demand_sources';
+const READINESS_STORE='readiness_assessments';
+const ENRICHMENT_TASK_STORE='enrichment_tasks';
+const PROPERTY_PACKAGE_STORE='property_packages';
+const PACKAGE_MEDIA_STORE='package_media';
 
 
 function openDB() {
@@ -145,6 +150,18 @@ function openDB() {
       }
       if(!db.objectStoreNames.contains(DEMAND_SOURCE_STORE)){
         const s=db.createObjectStore(DEMAND_SOURCE_STORE,{keyPath:'id'});s.createIndex('demand_id','demand_id',{unique:false});s.createIndex('source_reference','source_reference',{unique:false});s.createIndex('observed_at','observed_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(READINESS_STORE)){
+        const s=db.createObjectStore(READINESS_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:true});s.createIndex('property_id','property_id',{unique:false});s.createIndex('status','status',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(ENRICHMENT_TASK_STORE)){
+        const s=db.createObjectStore(ENRICHMENT_TASK_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('status','status',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(PROPERTY_PACKAGE_STORE)){
+        const s=db.createObjectStore(PROPERTY_PACKAGE_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:true});s.createIndex('property_id','property_id',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(PACKAGE_MEDIA_STORE)){
+        const s=db.createObjectStore(PACKAGE_MEDIA_STORE,{keyPath:'id'});s.createIndex('package_id','package_id',{unique:false});s.createIndex('media_asset_id','media_asset_id',{unique:false});
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -1037,7 +1054,37 @@ export async function runDemandOpportunityMatching({trigger_type='FULL_RECALC',t
     const eventStore=tx.objectStore(OPPORTUNITY_EVENT_STORE);state.events.forEach((row,index)=>eventStore.put({...row,id:row.id||`op_event_${radarHash(`${row.opportunity_id}|${row.event_type}|${row.occurred_at}|${index}`)}`}));
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
   });
-  db.close();return {run_id:runId,demands:active.length,properties:properties.length,candidates:candidates.length,opportunities:state.opportunities.filter(row=>row.status==='ACTIVE').length,prefilter:matched.stats,scope};
+  db.close();
+  const readinessScope=scope.full?{full:true}:scope.propertyIds?.length?{propertyIds:scope.propertyIds}:{opportunityIds:state.opportunities.filter(row=>scope.demandIds?.includes(row.demand_id)).map(row=>row.id)};
+  const readiness=await runOpportunityReadiness({...readinessScope,now});
+  return {run_id:runId,demands:active.length,properties:properties.length,candidates:candidates.length,opportunities:state.opportunities.filter(row=>row.status==='ACTIVE').length,prefilter:matched.stats,scope,readiness};
+}
+
+// ---------- Ready-to-send + enrichment (Phase 0D) --------------------------
+export async function getReadinessAssessments(){const db=await openDB(),rows=await reqP(db.transaction(READINESS_STORE,'readonly').objectStore(READINESS_STORE).getAll());db.close();return rows;}
+export async function getEnrichmentTasks(){const db=await openDB(),rows=await reqP(db.transaction(ENRICHMENT_TASK_STORE,'readonly').objectStore(ENRICHMENT_TASK_STORE).getAll());db.close();return rows;}
+export async function getPropertyPackages(){const db=await openDB(),rows=await reqP(db.transaction(PROPERTY_PACKAGE_STORE,'readonly').objectStore(PROPERTY_PACKAGE_STORE).getAll());db.close();return rows;}
+export async function getPackageMedia(){const db=await openDB(),rows=await reqP(db.transaction(PACKAGE_MEDIA_STORE,'readonly').objectStore(PACKAGE_MEDIA_STORE).getAll());db.close();return rows;}
+
+export async function runOpportunityReadiness({full=false,opportunityIds=[],propertyIds=[],now=Date.now()}={}){
+  if(!full&&!opportunityIds.length&&!propertyIds.length)return {evaluated:0,assessments:0,tasks:0,packages:0,scope:{full:false,opportunityIds:[],propertyIds:[]}};
+  const db=await openDB();
+  const read=name=>reqP(db.transaction(name,'readonly').objectStore(name).getAll());
+  const [opportunities,properties,mediaAssets,propertyMedia,identityLinks,reviewQueue,existingTasks,existingPackages]=await Promise.all([read(OPPORTUNITY_STORE),read(MASTER_STORE),read(MEDIA_ASSET_STORE),read(PROPERTY_MEDIA_STORE),read(IDENTITY_LINK_STORE),read(REVIEW_QUEUE_STORE),read(ENRICHMENT_TASK_STORE),read(PROPERTY_PACKAGE_STORE)]);
+  const scope={full,opportunityIds:[...new Set(opportunityIds)],propertyIds:[...new Set(propertyIds)]};
+  const result=reconcileReadiness({opportunities,properties,mediaAssets,propertyMedia,identityLinks,reviewQueue,scope,now});
+  const assessedIds=new Set(result.assessments.map(row=>row.opportunity_id)),packageIds=new Set(result.packages.map(row=>row.id)),at=new Date(now).toISOString();
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction([READINESS_STORE,ENRICHMENT_TASK_STORE,PROPERTY_PACKAGE_STORE,PACKAGE_MEDIA_STORE,OPPORTUNITY_EVENT_STORE],'readwrite'),assessments=tx.objectStore(READINESS_STORE),tasks=tx.objectStore(ENRICHMENT_TASK_STORE),packages=tx.objectStore(PROPERTY_PACKAGE_STORE),packageMediaStore=tx.objectStore(PACKAGE_MEDIA_STORE),events=tx.objectStore(OPPORTUNITY_EVENT_STORE);
+    for(const row of result.assessments){assessments.put(row);events.put({id:`readiness_event_${radarHash(`${row.opportunity_id}|${row.status}|${row.assessed_at}`)}`,opportunity_id:row.opportunity_id,event_type:'READINESS_ASSESSED',payload_json:{status:row.status,reasons:row.reasons,gaps:row.gaps,readiness_score:row.readiness_score},occurred_at:row.assessed_at});}
+    for(const old of existingTasks.filter(row=>assessedIds.has(row.opportunity_id))){const current=result.tasks.find(row=>row.id===old.id);if(!current&&old.status==='OPEN')tasks.put({...old,status:'CANCELLED',updated_at:at});}
+    for(const row of result.tasks){const old=existingTasks.find(item=>item.id===row.id);tasks.put({...row,created_at:old?.created_at||row.created_at});}
+    for(const old of existingPackages.filter(row=>assessedIds.has(row.opportunity_id)&&!packageIds.has(row.id)))packages.put({...old,status:'INVALIDATED',updated_at:at});
+    for(const row of result.packages){const old=existingPackages.find(item=>item.id===row.id);packages.put({...row,created_at:old?.created_at||row.created_at});}
+    for(const row of result.packageMedia)packageMediaStore.put(row);
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  db.close();return {evaluated:result.evaluated,assessments:result.assessments.length,tasks:result.tasks.length,packages:result.packages.length,scope};
 }
 
 // ---------- Radar Backup v0.5.0.2 --------------------------------------------
@@ -1048,7 +1095,8 @@ const BACKUP_STORES=[
   ,SOURCE_ATTACHMENT_STORE,MEDIA_ASSET_STORE,PROPERTY_MEDIA_STORE,IDENTITY_LINK_STORE,
   PROPERTY_REDIRECT_STORE,OWN_LISTING_STORE,REVIEW_QUEUE_STORE
   ,CLIENT_STORE,DEMAND_STORE,MATCH_RUN_STORE,MATCH_CANDIDATE_STORE,OPPORTUNITY_STORE,
-  OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE,DEMAND_SOURCE_STORE
+  OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE,DEMAND_SOURCE_STORE,
+  READINESS_STORE,ENRICHMENT_TASK_STORE,PROPERTY_PACKAGE_STORE,PACKAGE_MEDIA_STORE
 ];
 export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 
