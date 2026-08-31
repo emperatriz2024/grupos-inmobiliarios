@@ -617,6 +617,12 @@ export function masterSnapshot(p={},id,existing=null){
     first_seen_at:existing?.first_seen_at||p.first_seen_at||now,last_seen_at:p.last_seen_at||existing?.last_seen_at||now
   };
 }
+export function inferReliablePropertyType(primaryType,evidenceRows=[]){
+  if(String(primaryType||'').trim())return primaryType;
+  const groups=new Map();
+  for(const row of evidenceRows){const value=row?.property_type||row?.observed_property_type;if(!String(value||'').trim())continue;const key=String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();if(!groups.has(key))groups.set(key,[]);groups.get(key).push(value);}
+  return groups.size===1?[...groups.values()][0][0]:null;
+}
 export function planLegacyMasterArchive(canonical,duplicate,posts=[],now=new Date().toISOString()){
   if(!canonical?.id||!duplicate?.id||canonical.id===duplicate.id)throw new Error('invalid_master_merge_plan');
   return {
@@ -668,7 +674,9 @@ export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
       }
     }
 
-    const master=masterSnapshot({...consolidated,merged_ids:[...legacyIds,...mergedLegacyIds]},masterId,existing);
+    const typeEvidence=[...legacyIds.map(id=>rawMap.get(id)).filter(Boolean),...[...postMap.values()].filter(post=>post.master_id===masterId)];
+    const propertyType=inferReliablePropertyType(consolidated.property_type,typeEvidence);
+    const master=masterSnapshot({...consolidated,property_type:propertyType,merged_ids:[...legacyIds,...mergedLegacyIds]},masterId,existing);
     masterMap.set(masterId,master);touchedMasters.add(masterId);
     if(existing)mastersUpdated++;else mastersCreated++;
 
@@ -684,7 +692,7 @@ export async function syncRadarCore(rawRecords=[],consolidatedRecords=[]){
           channel_name:src.group||p.group||null,agent_name:src.sender||p.sender||null,agent_phone:src.phone||p.phone||null,
           published_at:sourceDateTime(src,p),detected_at:old?.detected_at||p.first_seen_at||now,last_detected_at:p.last_seen_at||old?.last_detected_at||now,
           external_id:null,external_url:null,external_code:null,original_text:p.text||'',normalized_text:p.normalized||'',
-          observed_price:p.price_usd??null,observed_area_m2:p.area_m2??null,observed_residence:p.residence||null,
+          observed_price:p.price_usd??null,observed_area_m2:p.area_m2??null,observed_residence:p.residence||null,observed_property_type:p.property_type||null,
           municipality_id:p.municipality_id||null,zone_id:p.zone_id||null,complex_id:p.complex_id||null,
           created_at:old?.created_at||now,updated_at:now
         });

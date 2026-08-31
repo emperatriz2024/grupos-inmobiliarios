@@ -432,6 +432,7 @@
 .buyerMatchNumber{text-align:right;min-width:64px}
 .buyerMatchNumber strong{display:block;color:var(--gold2);font-size:26px;line-height:1}
 .buyerMatchNumber span{font-size:8px;color:#777}
+.buyerMatchNumber small{display:block;margin-top:5px;color:#888;font-size:9px}
 .buyerMatchBands{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 8px}
 .buyerMatchBands span{font-size:9px;padding:6px 8px;border-radius:8px;background:#0a0a0a;border:1px solid #242424;color:#888}
 .buyerMatchBands b{color:#ddd}
@@ -475,6 +476,7 @@
 .matchFilterBtn{border:1px solid #2a2a2a;background:#0a0a0a;color:#888;border-radius:999px;padding:7px 11px;font-size:9px}
 .matchFilterBtn.active{color:#080808;background:var(--gold2);border-color:var(--gold2);font-weight:800}
 .buyerMatchesList{padding:0 13px 15px}
+.matchScore.revisar strong{font-size:11px;color:#f0c36a}.matchScore.revisar small{display:block;color:#888;margin-top:5px;font-size:9px}
 .buyerMatchCard{display:grid;grid-template-columns:70px minmax(0,1fr);gap:10px;background:#0b0b0b;border:1px solid #252525;border-radius:15px;padding:11px;margin:8px 0}
 .matchScore{border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:78px;background:#171717;border:1px solid #2a2a2a}
 .matchScore strong{font-size:21px;color:#ddd}
