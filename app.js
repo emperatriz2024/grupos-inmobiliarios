@@ -59,7 +59,9 @@ let selectorDraft=new Set();
 let buyers=[];
 let allBuyerMatches=[];
 let currentMatchBuyerId=null;
-let buyerMatchMinScore=0;
+let buyerMatchFilter='all';
+let detailReturnToBuyerMatches=null;
+let detailClosingToMatches=false;
 let externalDraft=null;
 let externalFreshnessFilter='action';
 const SEARCH_SCROLL_KEY='gi_search_scroll_v042';
@@ -431,7 +433,8 @@ $('#selectorApplyBtn').onclick=()=>{
   updateSelectorUI();rememberSearchPosition();$('#multiSelectorDialog').close();
 };
 
-async function openDetail(id) {
+async function openDetail(id,{returnToBuyerMatches=null}={}) {
+  detailReturnToBuyerMatches=returnToBuyerMatches;
   const p = allProperties.find(x=>x.id===id);
   if (!p) return;
   const master=(await getMasterProperties()).find(row=>row.id===id||(row.legacy_ids||[]).includes(id))||null;
@@ -476,10 +479,16 @@ async function openDetail(id) {
     const renderOwn=()=>fields.hidden=scope.value!=='OWN';renderOwn();scope.onchange=renderOwn;
     $('#saveOwnListing').onclick=async()=>{const status=$('#ownListingStatus');try{await setMasterOwnership(master.id,scope.value);if(scope.value==='OWN')await saveOwnListingDetails({property_id:master.id,workspace_id:master.workspace_id||'local',capture_date:$('#ownCaptureDate').value||null,agreement_type:$('#ownAgreementType').value,authorized_price:$('#ownAuthorizedPrice').value?Number($('#ownAuthorizedPrice').value):null,commission_pct:$('#ownCommission').value?Number($('#ownCommission').value):null,documents_status:$('#ownDocumentsStatus').value,media_authorization_status:$('#ownMediaAuthorization').value,internal_notes:$('#ownInternalNotes').value||null});if(demandEngineEnabled){await runDemandOpportunityMatching({trigger_type:'OWNERSHIP_CHANGED',trigger_entity_id:master.id});await refreshDemandCommercialPanel();}status.textContent='Guardado localmente con confirmación manual.';}catch(error){status.textContent=`No se pudo guardar: ${error.message}`;}};
   }
+  $('#detailBackBottom').onclick=async()=>{
+    const context=detailReturnToBuyerMatches;detailClosingToMatches=Boolean(context);$('#detailDialog').close();detailReturnToBuyerMatches=null;
+    if(context){currentMatchBuyerId=context.buyerId;buyerMatchFilter=context.filter;document.querySelectorAll('.matchFilterBtn').forEach(button=>button.classList.toggle('active',button.dataset.kind===buyerMatchFilter));$('#buyerMatchesDialog').showModal();await renderBuyerMatches();requestAnimationFrame(()=>{$('#buyerMatchesList').scrollTop=context.scrollTop;});}
+    else restoreSearchPosition();
+    detailClosingToMatches=false;
+  };
   $('#detailDialog').showModal();
 }
-$('#closeDialog').onclick = () => { $('#detailDialog').close(); restoreSearchPosition(); };
-$('#detailDialog').addEventListener('close',()=>restoreSearchPosition());
+$('#closeDialog').onclick = () => { detailReturnToBuyerMatches=null;$('#detailDialog').close();restoreSearchPosition(); };
+$('#detailDialog').addEventListener('close',()=>{if(!detailClosingToMatches&&!detailReturnToBuyerMatches)restoreSearchPosition();});
 
 async function renderSaved() {
   const box = $('#savedResults');
@@ -509,6 +518,9 @@ function buyerStatusLabel(status){
   return status==='paused'?'Pausado':status==='closed'?'Cerrado':'Activo';
 }
 function buyerUrgencyLabel(u){return u==='alta'?'Urgente':u==='baja'?'Baja':'Media';}
+function buyerMatchCategory(match={}){if(match.strict_ok||match.match_kind==='exact'||match.match_kind==='estricto'||match.tier==='excelente')return'exact';if(match.match_kind==='alternative'||match.match_kind==='alternativa'||match.tier==='alternativa')return'alternative';return'verify';}
+function buyerMatchRank(match={}){return {exact:0,verify:1,alternative:2}[buyerMatchCategory(match)];}
+function buyerMatchCounts(matches=[]){return matches.reduce((counts,match)=>{counts[buyerMatchCategory(match)]++;return counts;},{exact:0,verify:0,alternative:0});}
 
 function renderBuyerTypeChecks(selected=[]){
   const set=new Set(selected||[]),box=$('#buyerTypeChecks');if(!box)return;
@@ -602,7 +614,7 @@ async function refreshRadarBuyerCounters(){
   if($('#radarMatchCount'))$('#radarMatchCount').textContent=s.matches.toLocaleString('es-VE');
 }
 function buyerCardHTML(buyer,matches){
-  const top90=matches.filter(m=>m.score>=90).length,top80=matches.filter(m=>m.score>=80).length;
+  const counts=buyerMatchCounts(matches);
   const whatsapp=buyerWhatsAppHref(buyer);
   const urgency=buyer.urgency||'media';
   return `<article class="buyerCard" data-id="${buyerEsc(buyer.id)}">
@@ -615,10 +627,10 @@ function buyerCardHTML(buyer,matches){
         <h3>${buyerEsc(buyer.name)}</h3>
         <p>${buyerEsc(buyerCriteriaText(buyer,locationCatalog))}</p>
       </div>
-      <div class="buyerMatchNumber"><strong>${matches.length.toLocaleString('es-VE')}</strong><span>matches</span></div>
+      <div class="buyerMatchNumber"><strong>${counts.exact.toLocaleString('es-VE')}</strong><span>compatibles</span><small>${counts.verify} por verificar · ${counts.alternative} alternativas</small></div>
     </div>
     <div class="buyerMatchBands">
-      <span><b>${top90}</b> 90%+</span><span><b>${top80}</b> 80%+</span>
+      <span><b>${counts.exact}</b> Compatibles</span><span><b>${counts.verify}</b> Por verificar</span><span><b>${counts.alternative}</b> Alternativas</span>
       ${buyer.max_price?`<span><b>$${Number(buyer.max_price).toLocaleString('es-VE')}</b> tope</span>`:''}
     </div>
     ${buyer.notes?`<div class="buyerNotesPreview">${buyerEsc(buyer.notes.slice(0,180))}${buyer.notes.length>180?'…':''}</div>`:''}
@@ -645,14 +657,15 @@ function resolveDemandTerritory(text=''){
 }
 async function refreshDemandCommercialPanel(){
   const panel=$('#demandCommercialPanel');if(!panel||!demandEngineEnabled)return;panel.hidden=false;
-  const [clients,demands,opportunities,scores]=await Promise.all([getClients(),getDemands(),getOpportunities(),getOpportunityScores()]),scoreByOpportunity=new Map();
+  const [clients,demands,opportunities,scores,masters]=await Promise.all([getClients(),getDemands(),getOpportunities(),getOpportunityScores(),getMasterProperties()]),scoreByOpportunity=new Map();
   for(const score of scores){const old=scoreByOpportunity.get(score.opportunity_id);if(!old||String(score.created_at)>String(old.created_at))scoreByOpportunity.set(score.opportunity_id,score);}
   const market=demands.filter(row=>row.origin==='MARKET'),active=opportunities.filter(row=>row.status==='ACTIVE');
   $('#demandCommercialSummary').innerHTML=`<div><strong>${clients.length}</strong><span>clientes</span></div><div><strong>${demands.length}</strong><span>demandas</span></div><div><strong>${active.length}</strong><span>oportunidades</span></div>`;
   const demandCard=row=>`<article class="buyerCard"><div class="buyerCardTop"><div><h3>${buyerEsc(row.origin==='CLIENT'?'Demanda cliente':'Solicitud mercado')}</h3><p>${buyerEsc(row.raw_text||buyerCriteriaText(row,locationCatalog))}</p></div><span class="buyerStatus active">${buyerEsc(row.status)}</span></div></article>`;
   $('#clientDemandList').innerHTML=demands.filter(row=>row.origin==='CLIENT').map(demandCard).join('')||'<div class="empty">Sin demandas CLIENT.</div>';
   $('#marketDemandList').innerHTML=market.map(demandCard).join('')||'<div class="empty">Sin solicitudes MARKET.</div>';
-  $('#opportunityList').innerHTML=opportunities.map(row=>{const score=scoreByOpportunity.get(row.id)||{};return `<article class="buyerMatchCard"><div class="matchScore ${row.status==='ACTIVE'?'excelente':'alternativa'}"><strong>${buyerEsc(row.classification||row.status)}</strong><span>${buyerEsc(row.opportunity_type)}</span></div><div class="matchMain"><p>${buyerEsc(row.demand_id)} → ${buyerEsc(row.property_id)}</p><div class="matchMeta"><span>Fit ${Number(score.fit_score||0)}</span><span>Evidence ${Number(score.evidence_score||0)}</span><span>Availability ${Number(score.availability_score||0)}</span><span>Ready ${Number(score.ready_score||0)}</span></div><div class="matchReasons">${(row.reasons||[]).map(x=>`<span>✓ ${buyerEsc(x)}</span>`).join('')}</div><div class="matchGaps">${[...(row.gaps||[]),...(row.conflicts||[])].map(x=>`<span>△ ${buyerEsc(x)}</span>`).join('')}</div></div></article>`;}).join('')||'<div class="empty">Sin oportunidades.</div>';
+  const demandMap=new Map(demands.map(row=>[row.id,row])),masterMap=new Map(masters.map(row=>[row.id,row]));
+  $('#opportunityList').innerHTML=opportunities.map(row=>{const score=scoreByOpportunity.get(row.id)||{},demand=demandMap.get(row.demand_id),buyer=buyers.find(item=>item.id===demand?.legacy_buyer_id),master=masterMap.get(row.property_id),from=buyer?.name||(demand?.origin==='MARKET'?'Solicitud de mercado':'Comprador'),to=master?.residence||master?.property_type||'Propiedad';return `<article class="buyerMatchCard"><div class="matchScore ${row.status==='ACTIVE'?'excelente':'alternativa'}"><strong>${buyerEsc(row.classification||row.status)}</strong><span>${buyerEsc(row.opportunity_type)}</span></div><div class="matchMain"><p>${buyerEsc(from)} → ${buyerEsc(to)}</p><div class="matchMeta"><span>Fit ${Number(score.fit_score||0)}</span><span>Evidence ${Number(score.evidence_score||0)}</span><span>Availability ${Number(score.availability_score||0)}</span><span>Ready ${Number(score.ready_score||0)}</span></div><div class="matchReasons">${(row.reasons||[]).map(x=>`<span>✓ ${buyerEsc(x)}</span>`).join('')}</div><div class="matchGaps">${[...(row.gaps||[]),...(row.conflicts||[])].map(x=>`<span>△ ${buyerEsc(x)}</span>`).join('')}</div></div></article>`;}).join('')||'<div class="empty">Sin oportunidades.</div>';
 }
 function renderBuyersList(){
   const box=$('#buyersList');if(!box)return;
@@ -675,8 +688,9 @@ function masterMatchCard(master,match){
   if(master.bedrooms)metas.push(`${master.bedrooms} Hab`);
   if(master.bathrooms)metas.push(`${master.bathrooms} Baños`);
   if(master.parking)metas.push(`${master.parking} Puestos`);
+  const category=buyerMatchCategory(match),score=category==='verify'?`<strong>POR VERIFICAR</strong><small>Score orientativo ${match.score}%</small>`:`<strong>${match.score}%</strong><span>${buyerEsc(matchTierLabel(match.tier))}</span>`;
   return `<article class="buyerMatchCard" data-master="${buyerEsc(master.id)}">
-    <div class="matchScore ${buyerEsc(match.tier)}"><strong>${match.score}%</strong><span>${buyerEsc(matchTierLabel(match.tier))}</span></div>
+    <div class="matchScore ${buyerEsc(match.tier)}">${score}</div>
     <div class="matchMain">
       <div class="matchTitleRow"><div><h3>${buyerEsc(master.residence||master.property_type||'Inmueble')}</h3><p>${buyerEsc([master.zone,master.municipality].filter(Boolean).join(' · ')||'Ubicación por revisar')}</p></div><b>${buyerEsc(formatMoney(master.price_usd))}</b></div>
       ${metas.length?`<div class="matchMeta">${metas.map(x=>`<span>${buyerEsc(x)}</span>`).join('')}</div>`:''}
@@ -689,7 +703,7 @@ function masterMatchCard(master,match){
 async function renderBuyerMatches(){
   const list=$('#buyerMatchesList');if(!list||!currentMatchBuyerId)return;
   const buyer=buyers.find(b=>b.id===currentMatchBuyerId)||await getBuyer(currentMatchBuyerId);
-  const matches=(await getMatchesForBuyer(currentMatchBuyerId)).filter(m=>Number(m.score||0)>=buyerMatchMinScore);
+  const all=await getMatchesForBuyer(currentMatchBuyerId),matches=all.filter(match=>buyerMatchFilter==='all'||buyerMatchCategory(match)===buyerMatchFilter).sort((a,b)=>buyerMatchRank(a)-buyerMatchRank(b)||Number(b.score||0)-Number(a.score||0));
   const masters=await getMasterProperties(),map=new Map(masters.map(m=>[m.id,m]));
   const rows=matches.map(m=>({m,master:map.get(m.master_id)})).filter(x=>x.master);
   list.innerHTML=rows.length?rows.map(x=>masterMatchCard(x.master,x.m)).join(''):'<div class="empty">No hay coincidencias con este umbral.</div>';
@@ -698,16 +712,15 @@ async function renderBuyerMatches(){
     const ids=new Set(master.legacy_ids||[]);
     const p=allProperties.find(x=>ids.has(x.id)||(x.merged_ids||[]).some(id=>ids.has(id)));
     if(!p)return alert('La ficha original ya no está disponible en el inventario vigente.');
-    $('#buyerMatchesDialog').close();showView('viewSearch');openDetail(p.id);
+    const context={buyerId:currentMatchBuyerId,filter:buyerMatchFilter,scrollTop:list.scrollTop};$('#buyerMatchesDialog').close();showView('viewSearch');openDetail(p.id,{returnToBuyerMatches:context});
   });
-  const all=await getMatchesForBuyer(currentMatchBuyerId);
-  const n90=all.filter(m=>m.score>=90).length,n80=all.filter(m=>m.score>=80).length;
-  $('#buyerMatchesSummary').innerHTML=`<div><strong>${all.length}</strong><span>coincidencias</span></div><div><strong>${n90}</strong><span>90%+</span></div><div><strong>${n80}</strong><span>80%+</span></div>`;
+  const counts=buyerMatchCounts(all);
+  $('#buyerMatchesSummary').innerHTML=`<div><strong>${counts.exact}</strong><span>Compatibles</span></div><div><strong>${counts.verify}</strong><span>Por verificar</span></div><div><strong>${counts.alternative}</strong><span>Alternativas</span></div>`;
   $('#buyerMatchesTitle').textContent=buyer?.name||'Coincidencias';
 }
 async function openBuyerMatches(buyerId){
-  currentMatchBuyerId=buyerId;buyerMatchMinScore=0;
-  document.querySelectorAll('.matchFilterBtn').forEach(b=>b.classList.toggle('active',Number(b.dataset.minScore||0)===0));
+  currentMatchBuyerId=buyerId;buyerMatchFilter='all';
+  document.querySelectorAll('.matchFilterBtn').forEach(b=>b.classList.toggle('active',b.dataset.kind==='all'));
   $('#buyerMatchesDialog').showModal();await renderBuyerMatches();
 }
 
@@ -718,7 +731,7 @@ $('#buyerZoneSearch')?.addEventListener('input',()=>renderBuyerZones(buyerSelect
 $('#buyerSearchInput')?.addEventListener('input',renderBuyersList);
 $('#buyerStatusFilter')?.addEventListener('change',renderBuyersList);
 document.querySelectorAll('.matchFilterBtn').forEach(btn=>btn.addEventListener('click',async()=>{
-  buyerMatchMinScore=Number(btn.dataset.minScore||0);
+  buyerMatchFilter=btn.dataset.kind||'all';
   document.querySelectorAll('.matchFilterBtn').forEach(b=>b.classList.toggle('active',b===btn));
   await renderBuyerMatches();
 }));

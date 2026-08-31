@@ -55,9 +55,10 @@ function locationGate(buyer, master) {
 }
 
 function typeGate(buyer, master) {
-  const types=(buyer.property_types||[]).map(norm).filter(Boolean);
+  const configured=(buyer.property_types||[]).filter(Boolean),types=(configured.length?configured:buyer.property_type?[buyer.property_type]:[]).map(norm).filter(Boolean);
   if(!types.length) return {pass:true,earned:0,possible:0,reason:null};
   const mt=norm(master.property_type);
+  if(!mt)return {pass:true,unknown:true,reason:'Tipo de inmueble no detectado'};
   if(types.includes(mt)) return {pass:true,earned:14,possible:14,reason:'Tipo de inmueble exacto'};
   return {pass:false,reason:'Tipo de inmueble distinto'};
 }
@@ -128,7 +129,7 @@ export function scoreBuyerMaster(buyer, master) {
   if(!op.pass)return null;if(op.reason)reasons.push(op.reason);
 
   const type=typeGate(buyer,master);
-  if(!type.pass)return null;if(type.reason)reasons.push(type.reason);
+  if(!type.pass)return null;if(type.unknown)unknownHard.push(type.reason);else if(type.reason)reasons.push(type.reason);
 
   const loc=locationGate(buyer,master);
   if(!loc.pass)return null;if(loc.reason)reasons.push(loc.reason);
