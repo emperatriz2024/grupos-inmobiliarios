@@ -39,6 +39,7 @@ import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
 import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
 import { APP_LABEL, APP_VERSION, RADAR_DEMAND_ENGINE_DEFAULT } from './version.js';
+import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -73,6 +74,7 @@ const SECONDARY_ENDPOINT_KEY='radar_secondary_endpoint_v061';
 const SECONDARY_TOKEN_KEY='radar_secondary_token_v061_session';
 const SECONDARY_CURSOR_KEY='radar_secondary_cursor_v061';
 const SECONDARY_STATS_KEY='radar_secondary_stats_v061';
+const INGESTION_BATCH_KEY='radar_operational_ingestion_batch_v1';
 let secondarySyncing=false;
 
 function rememberSearchPosition(cardId='') {
@@ -1585,49 +1587,31 @@ $('#reindexProcessed').onclick=async()=>{
   }
 };
 
-$('#processPending').onclick=async()=>{
-  if(!pendingDropboxFiles.length){await refreshDropboxPending(); if(!pendingDropboxFiles.length) return;}
-  const s=getDropboxSettings();
-  $('#processPending').disabled=true; $('#refreshDropbox').disabled=true;
-  $('#dropboxProgress').hidden=false; $('#dropboxProgressBar').max=pendingDropboxFiles.length;
-  const queue=[...pendingDropboxFiles];
+async function applyWorkerResults(state){
   const touchedDemandIds=new Set();
-  const outcome=await runOperationalZipBatch({
-    entries:queue,
-    download:entry=>downloadDropboxFile(entry.path_lower||entry.path_display),
-    processFile:async(entry,blob,notify)=>{
-      const file=new File([blob],entry.name,{type:'application/zip'});
-      const result=await importOneZip(file,groupFromName(entry.name),notify,{deferMatching:true});
-      result.demandIds.forEach(id=>touchedDemandIds.add(id));
-      return result;
-    },
-    move:entry=>moveDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name),
-    finalize:async()=>{
-      if(demandEngineEnabled&&touchedDemandIds.size)await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...touchedDemandIds]});
-      await loadData();
-    },
-    onProgress:({phase,index,total,entry,progress,error,completed,finalization})=>{
-      $('#dropboxProgressTitle').textContent='Procesando chats pendientes';
-      $('#dropboxProgressBar').value=phase===ZIP_BATCH_PHASES.COMPLETED?completed:index;
-      $('#dropboxProgressCount').textContent=`${Math.min(index+1,total)}/${total}`;
-      if(phase===ZIP_BATCH_PHASES.DOWNLOADING)$('#dropboxProgressDetail').textContent=`DESCARGANDO · ${entry.name}`;
-      else if(phase===ZIP_BATCH_PHASES.ANALYZING)$('#dropboxProgressDetail').textContent=`ANALIZANDO · ${entry.name}`;
-      else if(phase===ZIP_BATCH_PHASES.SAVING)$('#dropboxProgressDetail').textContent=`GUARDANDO · ${entry.name} · ${progress.done}/${progress.total}`;
-      else if(phase===ZIP_BATCH_PHASES.DEMANDS)$('#dropboxProgressDetail').textContent=`DEMANDAS · ${entry.name} · ${progress.done}/${progress.total}`;
-      else if(phase===ZIP_BATCH_PHASES.FINALIZING)$('#dropboxProgressDetail').textContent=`FINALIZANDO · ${entry.name}`;
-      else if(phase===ZIP_BATCH_PHASES.MOVING)$('#dropboxProgressDetail').textContent=`MOVIENDO · ${entry.name} a ${s.processedPath}`;
-      else if(phase===ZIP_BATCH_PHASES.COMPLETED)$('#dropboxProgressDetail').textContent=`COMPLETADO · ${entry.name}`;
-      else if(phase===ZIP_BATCH_PHASES.ERROR){console.error(finalization?'zip batch finalize':entry?.name,error);$('#dropboxProgressDetail').textContent=finalization?`ERROR DE FINALIZACIÓN · ${error.message}`:`ERROR · ${entry.name}: ${error.message}`;}
+  for(const job of state.jobs.filter(row=>row.status==='COMPLETED'&&!row.duplicate_of)){
+    for(let index=0;index<Number(job.result_chunks||0);index++){
+      const key=`radar_ingestion_applied_${job.id}_${index}`;if(localStorage.getItem(key))continue;
+      const chunk=await getIngestionResultChunk(job.id,index);await mergeProperties(chunk.properties||[]);await learnContactsFromProperties(chunk.properties||[]);await recordLocationPendings(chunk.location_pendings||[]);
+      const demands=demandEngineEnabled&&chunk.demand_messages?.length?processZipDemandMessages(chunk.demand_messages,{resolveTerritory:resolveDemandTerritory}):[],saved=await saveDemandRecords(demands);saved.demandIds.forEach(id=>touchedDemandIds.add(id));localStorage.setItem(key,'1');await new Promise(resolve=>setTimeout(resolve,0));
     }
-  });
-  $('#dropboxProgressBar').value=queue.length;
-  $('#dropboxProgressTitle').textContent=outcome.failed||outcome.finalizationError?'Proceso terminado con avisos':'Todos los pendientes fueron procesados';
-  $('#dropboxProgressCount').textContent=`${outcome.completed} OK${outcome.failed?` · ${outcome.failed} error`:''}`;
-  $('#dropboxProgressDetail').textContent=outcome.finalizationError?'Los ZIP se guardaron y movieron; el recálculo final podrá reintentarse al recargar.':outcome.failed?'Los archivos con error permanecen en Chat pendiente.':'Los ZIP procesados fueron movidos a Procesado.';
-  $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
-  await refreshDropboxPending();
-  await maybeAutoBackup();
-};
+    if(job.file_hash)await saveImportCheckpoint(job.file_hash,{file_hash:job.file_hash,file_name:job.name,status:'COMPLETED',added:Number(job.result_summary?.unique||0),worker_job_id:job.id,finished_at:job.finished_at});
+  }
+  if(demandEngineEnabled&&touchedDemandIds.size)await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...touchedDemandIds]});await loadData();
+}
+
+async function monitorIngestionBatch(batchId){
+  $('#processPending').disabled=true;$('#refreshDropbox').disabled=true;$('#dropboxProgress').hidden=false;
+  for(;;){
+    const state=await getIngestionBatch(batchId),active=state.jobs.find(row=>!['COMPLETED','FAILED'].includes(row.status));
+    $('#dropboxProgressTitle').textContent=`Worker · build ${String(state.build_sha||'').slice(0,12)}`;$('#dropboxProgressBar').max=Math.max(state.total,1);$('#dropboxProgressBar').value=state.completed+state.failed;$('#dropboxProgressCount').textContent=`${state.completed+state.failed}/${state.total}`;
+    $('#dropboxProgressDetail').textContent=active?`${active.checkpoint} · ${active.name}`:state.failed?`${state.completed} OK · ${state.failed} con error`:'Procesamiento server-side completado';
+    if(state.status!=='RUNNING'){await applyWorkerResults(state);localStorage.removeItem(INGESTION_BATCH_KEY);break;}await new Promise(resolve=>setTimeout(resolve,2000));
+  }
+  $('#processPending').disabled=false;$('#refreshDropbox').disabled=false;await refreshDropboxPending();await maybeAutoBackup();
+}
+
+$('#processPending').onclick=async()=>{try{const started=await startIngestionJob();localStorage.setItem(INGESTION_BATCH_KEY,started.batch_id);await monitorIngestionBatch(started.batch_id);}catch(error){$('#dropboxProgress').hidden=false;$('#dropboxProgressTitle').textContent='Worker no disponible';$('#dropboxProgressDetail').textContent=error.message;$('#processPending').disabled=false;$('#refreshDropbox').disabled=false;}};
 
 async function initDropbox() {
   renderDropboxState();
@@ -1693,8 +1677,8 @@ $('#syncSecondaryNow')?.addEventListener('click',()=>syncSecondaryWhatsApp({sile
 $('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,endpointConfigured:Boolean(secondaryConfig().endpoint),tokenConfigured:Boolean(secondaryConfig().token),store:'radar-secondary-whatsapp-v061-test'},null,2);});
 
 async function initApp(){
-  const versionLabel=$('#appVersionLabel');if(versionLabel)versionLabel.textContent=APP_LABEL;
-  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  const versionLabel=$('#appVersionLabel');if(versionLabel){versionLabel.textContent=APP_LABEL;getWorkerInfo().then(info=>{versionLabel.textContent=`${APP_LABEL} · ${String(info.build_sha||'').slice(0,12)}`;}).catch(()=>{});}
+  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();const resumableBatch=localStorage.getItem(INGESTION_BATCH_KEY);if(resumableBatch)await monitorIngestionBatch(resumableBatch);renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
 setInterval(()=>{if(document.visibilityState==='visible')syncSecondaryWhatsApp({silent:true});},5*60*1000);
