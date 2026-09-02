@@ -8,7 +8,7 @@ import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchP
 import {reconcileReadiness} from './core/radar/readiness-engine.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -152,7 +152,7 @@ function openDB() {
         const s=db.createObjectStore(DEMAND_SOURCE_STORE,{keyPath:'id'});s.createIndex('demand_id','demand_id',{unique:false});s.createIndex('source_reference','source_reference',{unique:false});s.createIndex('observed_at','observed_at',{unique:false});
       }
       if(!db.objectStoreNames.contains(READINESS_STORE)){
-        const s=db.createObjectStore(READINESS_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:true});s.createIndex('property_id','property_id',{unique:false});s.createIndex('status','status',{unique:false});
+        const s=db.createObjectStore(READINESS_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('status','status',{unique:false});s.createIndex('current_key','current_key',{unique:true});
       }
       if(!db.objectStoreNames.contains(ENRICHMENT_TASK_STORE)){
         const s=db.createObjectStore(ENRICHMENT_TASK_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('status','status',{unique:false});
@@ -161,7 +161,11 @@ function openDB() {
         const s=db.createObjectStore(PROPERTY_PACKAGE_STORE,{keyPath:'id'});s.createIndex('opportunity_id','opportunity_id',{unique:true});s.createIndex('property_id','property_id',{unique:false});
       }
       if(!db.objectStoreNames.contains(PACKAGE_MEDIA_STORE)){
-        const s=db.createObjectStore(PACKAGE_MEDIA_STORE,{keyPath:'id'});s.createIndex('package_id','package_id',{unique:false});s.createIndex('media_asset_id','media_asset_id',{unique:false});
+        const s=db.createObjectStore(PACKAGE_MEDIA_STORE,{keyPath:'id'});s.createIndex('package_id','package_id',{unique:false});s.createIndex('media_asset_id','media_asset_id',{unique:false});s.createIndex('status','status',{unique:false});
+      }
+      if(req.oldVersion>0&&req.oldVersion<11){
+        const readiness=req.transaction.objectStore(READINESS_STORE);if(readiness.indexNames.contains('opportunity_id'))readiness.deleteIndex('opportunity_id');readiness.createIndex('opportunity_id','opportunity_id',{unique:false});if(!readiness.indexNames.contains('current_key'))readiness.createIndex('current_key','current_key',{unique:true});
+        const packageMedia=req.transaction.objectStore(PACKAGE_MEDIA_STORE);if(!packageMedia.indexNames.contains('status'))packageMedia.createIndex('status','status',{unique:false});
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -1061,7 +1065,8 @@ export async function runDemandOpportunityMatching({trigger_type='FULL_RECALC',t
 }
 
 // ---------- Ready-to-send + enrichment (Phase 0D) --------------------------
-export async function getReadinessAssessments(){const db=await openDB(),rows=await reqP(db.transaction(READINESS_STORE,'readonly').objectStore(READINESS_STORE).getAll());db.close();return rows;}
+export async function getReadinessAssessments({currentOnly=false}={}){const db=await openDB(),rows=await reqP(db.transaction(READINESS_STORE,'readonly').objectStore(READINESS_STORE).getAll());db.close();return currentOnly?rows.filter(row=>row.is_current===true||row.current_key===row.opportunity_id):rows;}
+export async function getLatestReadinessAssessment(opportunityId){const rows=await getReadinessAssessments();return rows.filter(row=>row.opportunity_id===opportunityId).sort((a,b)=>String(b.assessed_at).localeCompare(String(a.assessed_at)))[0]||null;}
 export async function getEnrichmentTasks(){const db=await openDB(),rows=await reqP(db.transaction(ENRICHMENT_TASK_STORE,'readonly').objectStore(ENRICHMENT_TASK_STORE).getAll());db.close();return rows;}
 export async function getPropertyPackages(){const db=await openDB(),rows=await reqP(db.transaction(PROPERTY_PACKAGE_STORE,'readonly').objectStore(PROPERTY_PACKAGE_STORE).getAll());db.close();return rows;}
 export async function getPackageMedia(){const db=await openDB(),rows=await reqP(db.transaction(PACKAGE_MEDIA_STORE,'readonly').objectStore(PACKAGE_MEDIA_STORE).getAll());db.close();return rows;}
@@ -1070,18 +1075,26 @@ export async function runOpportunityReadiness({full=false,opportunityIds=[],prop
   if(!full&&!opportunityIds.length&&!propertyIds.length)return {evaluated:0,assessments:0,tasks:0,packages:0,scope:{full:false,opportunityIds:[],propertyIds:[]}};
   const db=await openDB();
   const read=name=>reqP(db.transaction(name,'readonly').objectStore(name).getAll());
-  const [opportunities,properties,mediaAssets,propertyMedia,identityLinks,reviewQueue,existingTasks,existingPackages]=await Promise.all([read(OPPORTUNITY_STORE),read(MASTER_STORE),read(MEDIA_ASSET_STORE),read(PROPERTY_MEDIA_STORE),read(IDENTITY_LINK_STORE),read(REVIEW_QUEUE_STORE),read(ENRICHMENT_TASK_STORE),read(PROPERTY_PACKAGE_STORE)]);
+  const [opportunities,properties,sourcePosts,mediaAssets,propertyMedia,identityLinks,reviewQueue,existingAssessments,existingTasks,existingPackages,existingPackageMedia]=await Promise.all([read(OPPORTUNITY_STORE),read(MASTER_STORE),read(SOURCE_POST_STORE),read(MEDIA_ASSET_STORE),read(PROPERTY_MEDIA_STORE),read(IDENTITY_LINK_STORE),read(REVIEW_QUEUE_STORE),read(READINESS_STORE),read(ENRICHMENT_TASK_STORE),read(PROPERTY_PACKAGE_STORE),read(PACKAGE_MEDIA_STORE)]);
   const scope={full,opportunityIds:[...new Set(opportunityIds)],propertyIds:[...new Set(propertyIds)]};
-  const result=reconcileReadiness({opportunities,properties,mediaAssets,propertyMedia,identityLinks,reviewQueue,scope,now});
+  const result=reconcileReadiness({opportunities,properties,sourcePosts,mediaAssets,propertyMedia,identityLinks,reviewQueue,scope,now});
   const assessedIds=new Set(result.assessments.map(row=>row.opportunity_id)),packageIds=new Set(result.packages.map(row=>row.id)),at=new Date(now).toISOString();
   await new Promise((resolve,reject)=>{
     const tx=db.transaction([READINESS_STORE,ENRICHMENT_TASK_STORE,PROPERTY_PACKAGE_STORE,PACKAGE_MEDIA_STORE,OPPORTUNITY_EVENT_STORE],'readwrite'),assessments=tx.objectStore(READINESS_STORE),tasks=tx.objectStore(ENRICHMENT_TASK_STORE),packages=tx.objectStore(PROPERTY_PACKAGE_STORE),packageMediaStore=tx.objectStore(PACKAGE_MEDIA_STORE),events=tx.objectStore(OPPORTUNITY_EVENT_STORE);
-    for(const row of result.assessments){assessments.put(row);events.put({id:`readiness_event_${radarHash(`${row.opportunity_id}|${row.status}|${row.assessed_at}`)}`,opportunity_id:row.opportunity_id,event_type:'READINESS_ASSESSED',payload_json:{status:row.status,reasons:row.reasons,gaps:row.gaps,readiness_score:row.readiness_score},occurred_at:row.assessed_at});}
-    for(const old of existingTasks.filter(row=>assessedIds.has(row.opportunity_id))){const current=result.tasks.find(row=>row.id===old.id);if(!current&&old.status==='OPEN')tasks.put({...old,status:'CANCELLED',updated_at:at});}
-    for(const row of result.tasks){const old=existingTasks.find(item=>item.id===row.id);tasks.put({...row,created_at:old?.created_at||row.created_at});}
+    const emit=(opportunityId,eventType,payload)=>events.put({id:`readiness_event_${radarHash(`${opportunityId}|${eventType}|${at}`)}`,opportunity_id:opportunityId,event_type:eventType,payload_json:payload,occurred_at:at});
+    for(const row of result.assessments){
+      const previous=existingAssessments.filter(item=>item.opportunity_id===row.opportunity_id).sort((a,b)=>String(b.assessed_at).localeCompare(String(a.assessed_at)))[0]||null;
+      for(const old of existingAssessments.filter(item=>item.opportunity_id===row.opportunity_id&&(item.is_current===true||item.current_key===row.opportunity_id)))assessments.put({...old,is_current:false,current_key:null,superseded_at:at});
+      assessments.put({...row,current_key:row.opportunity_id});
+      const changed=!previous||previous.status!==row.status||JSON.stringify(previous.reasons)!==JSON.stringify(row.reasons)||JSON.stringify(previous.gaps)!==JSON.stringify(row.gaps);
+      if(changed){emit(row.opportunity_id,'READINESS_EVALUATED',{previous_status:previous?.status||null,status:row.status,reasons:row.reasons,gaps:row.gaps,readiness_score:row.readiness_score});if(previous?.status!=='READY'&&row.status==='READY')emit(row.opportunity_id,'PROPERTY_BECAME_READY',{previous_status:previous?.status||null});if(previous?.status==='READY'&&row.status!=='READY')emit(row.opportunity_id,'PROPERTY_BECAME_NOT_READY',{status:row.status});}
+    }
+    for(const old of existingTasks.filter(row=>assessedIds.has(row.opportunity_id))){const current=result.tasks.find(row=>row.id===old.id);if(!current&&['OPEN','IN_PROGRESS','FAILED'].includes(old.status)){tasks.put({...old,status:'RESOLVED',resolved_at:at,updated_at:at});emit(old.opportunity_id,'ENRICHMENT_TASK_RESOLVED',{task_id:old.id,task_type:old.task_type});}}
+    for(const row of result.tasks){const old=existingTasks.find(item=>item.id===row.id);if(old)tasks.put({...row,status:['IN_PROGRESS','DISMISSED','FAILED'].includes(old.status)?old.status:'OPEN',created_at:old.created_at||row.created_at});else{tasks.put(row);emit(row.opportunity_id,'ENRICHMENT_TASK_CREATED',{task_id:row.id,task_type:row.task_type});}}
     for(const old of existingPackages.filter(row=>assessedIds.has(row.opportunity_id)&&!packageIds.has(row.id)))packages.put({...old,status:'INVALIDATED',updated_at:at});
-    for(const row of result.packages){const old=existingPackages.find(item=>item.id===row.id);packages.put({...row,created_at:old?.created_at||row.created_at});}
-    for(const row of result.packageMedia)packageMediaStore.put(row);
+    for(const row of result.packages){const old=existingPackages.find(item=>item.id===row.id),changed=!old||old.status!==row.status||JSON.stringify(old.payload_json)!==JSON.stringify(row.payload_json);packages.put({...row,created_at:old?.created_at||row.created_at});if(changed)emit(row.opportunity_id,old?'PACKAGE_UPDATED':'PACKAGE_CREATED',{package_id:row.id});}
+    const activeMediaIds=new Set(result.packageMedia.map(row=>row.id));for(const old of existingPackageMedia.filter(row=>packageIds.has(row.package_id)&&!activeMediaIds.has(row.id)&&row.status!=='REVOKED'))packageMediaStore.put({...old,status:'REVOKED',revoked_at:at,updated_at:at});
+    for(const row of result.packageMedia){const old=existingPackageMedia.find(item=>item.id===row.id);packageMediaStore.put({...row,created_at:old?.created_at||row.created_at,revoked_at:null});}
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
   });
   db.close();return {evaluated:result.evaluated,assessments:result.assessments.length,tasks:result.tasks.length,packages:result.packages.length,scope};

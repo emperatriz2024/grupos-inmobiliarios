@@ -4,7 +4,7 @@ import {assessOpportunity,buildClientPackage,reconcileReadiness,READINESS_STATUS
 
 const NOW=Date.parse('2026-08-28T12:00:00Z');
 const opportunity=(id,property_id)=>({id,property_id,workspace_id:'ws',status:'ACTIVE'});
-const property=(id,extra={})=>({id,operation:'SALE',property_type:'HOUSE',price_usd:55000,status:'active',availability_status:'verified',last_verified_at:'2026-08-27T12:00:00Z',last_seen_at:'2026-08-27T12:00:00Z',...extra});
+const property=(id,extra={})=>({id,territory_id:'san-diego',operation:'SALE',property_type:'HOUSE',price_usd:55000,area_m2:120,bedrooms:3,bathrooms:2,status:'active',availability_status:'verified',last_verified_at:'2026-08-27T12:00:00Z',last_seen_at:'2026-08-27T12:00:00Z',...extra});
 const media=(property_id,rights_status='AUTHORIZED')=>({mediaAssets:[{id:`m_${property_id}`,rights_status,storage_key:`media/${property_id}.jpg`,mime_type:'image/jpeg'}],propertyMedia:[{id:`pm_${property_id}`,property_id,media_asset_id:`m_${property_id}`,client_allowed:true,is_primary:true}]});
 
 test('P1 exact + current facts + AUTHORIZED media is READY',()=>{
@@ -24,7 +24,7 @@ test('P3 active price conflict never resolves silently',()=>{
 });
 
 test('P4 insufficient freshness requires availability verification',()=>{
-  const out=assessOpportunity({opportunity:opportunity('o4','p4'),property:property('p4',{availability_status:'unverified',last_verified_at:null,last_seen_at:'2026-08-01T00:00:00Z'}),...media('p4'),now:NOW});
+  const out=assessOpportunity({opportunity:opportunity('o4','p4'),property:property('p4',{source_types:['external_web'],availability_status:'unverified',last_verified_at:null,last_seen_at:'2026-08-01T00:00:00Z'}),...media('p4'),now:NOW});
   assert.equal(out.assessment.status,'VERIFY_AVAILABILITY');assert.equal(out.tasks[0].task_type,'VERIFY_AVAILABILITY');
 });
 

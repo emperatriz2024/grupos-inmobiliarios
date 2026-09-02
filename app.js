@@ -10,7 +10,7 @@ import {
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary,
   setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments,
   saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching
-} from './db.js?v=0730';
+} from './db.js?v=0731';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
@@ -1696,5 +1696,5 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0730').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0731').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }
