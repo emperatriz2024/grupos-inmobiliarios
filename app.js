@@ -9,7 +9,8 @@ import {
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary,
   setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments,
-  saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching
+  saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching,
+  syncClientTwin,getClientTwins,getClientPropertyStates,setClientPropertyState,saveClientFollowUp,getTwinEvents,getBrokerTwinAgenda,createBrokerDraft
 } from './db.js?v=0731';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
@@ -561,6 +562,7 @@ function fillBuyerForm(buyer=null){
   $('#buyerMinPrice').value=b.min_price||'';
   $('#buyerMaxPrice').value=b.max_price||'';
   $('#buyerBudgetTolerance').value=String(b.budget_tolerance??0);
+  $('#buyerAlternativesAuthorized').checked=b.alternatives_authorized!==false;
   $('#buyerMinBedrooms').value=b.min_bedrooms||'';
   $('#buyerMinBathrooms').value=b.min_bathrooms||'';
   $('#buyerMinParking').value=b.min_parking||'';
@@ -586,7 +588,7 @@ function collectBuyerForm(){
     property_types:buyerSelected('buyerTypeChecks'),
     municipality_ids:buyerSelected('buyerMunicipalityChecks'),
     zone_ids:buyerSelected('buyerZoneChecks'),
-    min_price:buyerNumber('buyerMinPrice'),max_price:buyerNumber('buyerMaxPrice'),budget_tolerance:Number($('#buyerBudgetTolerance').value||0),
+    min_price:buyerNumber('buyerMinPrice'),max_price:buyerNumber('buyerMaxPrice'),budget_tolerance:Number($('#buyerBudgetTolerance').value||0),alternatives_authorized:$('#buyerAlternativesAuthorized').checked,
     min_bedrooms:buyerNumber('buyerMinBedrooms'),min_bathrooms:buyerNumber('buyerMinBathrooms'),min_parking:buyerNumber('buyerMinParking'),
     min_area:buyerNumber('buyerMinArea'),max_area:buyerNumber('buyerMaxArea'),
     required_features:required,desired_features:desired,notes:$('#buyerNotes').value.trim()
@@ -639,6 +641,7 @@ function buyerCardHTML(buyer,matches){
     ${buyer.notes?`<div class="buyerNotesPreview">${buyerEsc(buyer.notes.slice(0,180))}${buyer.notes.length>180?'…':''}</div>`:''}
     <div class="buyerCardActions">
       <button class="buyerMatchesBtn primary" data-id="${buyerEsc(buyer.id)}">Ver coincidencias</button>
+      <button class="buyerTwinBtn ghost" data-id="${buyerEsc(buyer.id)}">Client Twin</button>
       <button class="buyerEditBtn ghost" data-id="${buyerEsc(buyer.id)}">Editar</button>
       ${whatsapp?`<a class="buyerWhatsappBtn ghost" href="${buyerEsc(whatsapp)}">WhatsApp</a>`:''}
     </div>
@@ -646,13 +649,20 @@ function buyerCardHTML(buyer,matches){
 }
 async function refreshBuyersData(){
   buyers=await getBuyers();allBuyerMatches=await getAllMatches();
+  await Promise.all(buyers.map(b=>syncClientTwin(b)));
   const active=buyers.filter(b=>b.status==='active').length;
   const hot=buyers.filter(b=>b.status==='active'&&b.urgency==='alta').length;
   if($('#buyersActiveCount'))$('#buyersActiveCount').textContent=active.toLocaleString('es-VE');
   if($('#buyersHotCount'))$('#buyersHotCount').textContent=hot.toLocaleString('es-VE');
   if($('#buyersMatchesCount'))$('#buyersMatchesCount').textContent=allBuyerMatches.length.toLocaleString('es-VE');
   renderBuyersList();
+  await renderBrokerTwin();
   if(demandEngineEnabled)await refreshDemandCommercialPanel();
+}
+async function renderBrokerTwin(){
+  const box=$('#brokerTwinList');if(!box)return;const agenda=await getBrokerTwinAgenda();$('#brokerTwinCount').textContent=String(agenda.length);
+  box.innerHTML=agenda.slice(0,20).map(item=>`<article class="brokerAction"><div><b>${buyerEsc(item.title)}</b><p>${buyerEsc(item.why)}</p></div><button class="brokerOpenBuyer ghost" data-buyer="${buyerEsc(item.buyer_id)}">Abrir</button></article>`).join('')||'<div class="empty">Sin acciones comerciales pendientes.</div>';
+  box.querySelectorAll('.brokerOpenBuyer').forEach(btn=>btn.onclick=()=>openClientTwin(btn.dataset.buyer));
 }
 function resolveDemandTerritory(text=''){
   const haystack=normLoc(text),rows=[...(locationCatalog.zones||[]),...(locationCatalog.municipalities||[])].map(row=>({id:row.id,name:row.nombre||row.name||''})).filter(row=>row.name&&haystack.includes(normLoc(row.name))).sort((a,b)=>b.name.length-a.name.length);
@@ -678,6 +688,14 @@ function renderBuyersList(){
   box.innerHTML=rows.map(b=>buyerCardHTML(b,allBuyerMatches.filter(m=>m.buyer_id===b.id))).join('');
   box.querySelectorAll('.buyerMatchesBtn').forEach(btn=>btn.onclick=()=>openBuyerMatches(btn.dataset.id));
   box.querySelectorAll('.buyerEditBtn').forEach(btn=>btn.onclick=async()=>openBuyerDialog(await getBuyer(btn.dataset.id)));
+  box.querySelectorAll('.buyerTwinBtn').forEach(btn=>btn.onclick=()=>openClientTwin(btn.dataset.id));
+}
+async function openClientTwin(buyerId){
+  const [buyer,twins,states,events,masters]=await Promise.all([getBuyer(buyerId),getClientTwins(),getClientPropertyStates(buyerId),getTwinEvents(buyerId),getMasterProperties()]);if(!buyer)return;
+  const twin=twins.find(x=>x.buyer_id===buyerId)||await syncClientTwin(buyer),masterMap=new Map(masters.map(x=>[x.id,x]));$('#clientTwinBuyerId').value=buyerId;$('#clientTwinTitle').textContent=buyer.name;$('#clientTwinIntent').value=twin.intent||'BUSCANDO';$('#clientTwinNextAction').value=twin.next_action||'';$('#clientTwinNextAt').value=twin.next_action_at?String(twin.next_action_at).slice(0,16):'';
+  $('#clientTwinRequirements').innerHTML=`<b>Obligatorios</b><p>${buyerEsc([...(twin.mandatory.property_types||[]),twin.mandatory.max_price?`Hasta $${Number(twin.mandatory.max_price).toLocaleString('es-VE')}`:null].filter(Boolean).join(' · ')||'Sin requisitos definidos')}</p><b>Preferencias</b><p>${buyerEsc((twin.preferences.features||[]).join(' · ')||'Sin preferencias')}</p>`;
+  $('#clientTwinPropertyHistory').innerHTML=states.map(s=>`<article><b>${buyerEsc(masterMap.get(s.property_id)?.residence||masterMap.get(s.property_id)?.property_type||'Propiedad')}</b><span>${buyerEsc(s.status)}</span>${s.reason?`<p>${buyerEsc(s.reason)}</p>`:''}</article>`).join('')||'<div class="empty">Sin propiedades revisadas todavía.</div>';
+  $('#clientTwinTimeline').innerHTML=events.slice(0,12).map(e=>`<li><b>${buyerEsc(e.event_type.replaceAll('_',' '))}</b><small>${buyerEsc(new Date(e.occurred_at).toLocaleString('es-VE'))}</small></li>`).join('');const selected=states.filter(s=>s.status==='SELECTED').map(s=>s.property_id);$('#clientTwinDraft').disabled=!selected.length;$('#clientTwinDraft').dataset.properties=selected.join(',');$('#clientTwinDialog').showModal();
 }
 async function openBuyerDialog(buyer=null){
   fillBuyerForm(buyer);$('#buyerDialog').showModal();
@@ -706,10 +724,11 @@ function masterMatchCard(master,match){
 async function renderBuyerMatches(){
   const list=$('#buyerMatchesList');if(!list||!currentMatchBuyerId)return;
   const buyer=buyers.find(b=>b.id===currentMatchBuyerId)||await getBuyer(currentMatchBuyerId);
-  const all=await getMatchesForBuyer(currentMatchBuyerId),matches=all.filter(match=>buyerMatchFilter==='all'||buyerMatchCategory(match)===buyerMatchFilter).sort((a,b)=>buyerMatchRank(a)-buyerMatchRank(b)||Number(b.score||0)-Number(a.score||0));
-  const masters=await getMasterProperties(),map=new Map(masters.map(m=>[m.id,m]));
+  const allRaw=await getMatchesForBuyer(currentMatchBuyerId),states=await getClientPropertyStates(currentMatchBuyerId),stateMap=new Map(states.map(x=>[x.property_id,x]));
+  const masters=await getMasterProperties(),map=new Map(masters.map(m=>[m.id,m])),all=allRaw.filter(match=>{const state=stateMap.get(match.master_id),master=map.get(match.master_id);if(buyer?.alternatives_authorized===false&&buyerMatchCategory(match)==='alternative')return false;return !state||state.status!=='DISCARDED'||(master?.updated_at&&String(master.updated_at)>String(state.updated_at));}),matches=all.filter(match=>buyerMatchFilter==='all'||buyerMatchCategory(match)===buyerMatchFilter).sort((a,b)=>buyerMatchRank(a)-buyerMatchRank(b)||Number(b.score||0)-Number(a.score||0));
   const rows=matches.map(m=>({m,master:map.get(m.master_id)})).filter(x=>x.master);
   list.innerHTML=rows.length?rows.map(x=>masterMatchCard(x.master,x.m)).join(''):'<div class="empty">No hay coincidencias con este umbral.</div>';
+  list.querySelectorAll('.buyerMatchCard').forEach(card=>{const id=card.dataset.master,actions=document.createElement('div');actions.className='twinPropertyActions';actions.innerHTML='<button data-state="REVIEWED" class="ghost">Revisada</button><button data-state="SELECTED" class="ghost">Seleccionar</button><button data-state="DISCARDED" class="ghost">Descartar</button>';actions.querySelectorAll('button').forEach(btn=>btn.onclick=async()=>{const status=btn.dataset.state,reason=status==='DISCARDED'?prompt('Motivo del descarte:','No cumple la necesidad actual'):null;if(status==='DISCARDED'&&reason===null)return;await setClientPropertyState({buyer_id:currentMatchBuyerId,property_id:id,status,reason});await renderBuyerMatches();await renderBrokerTwin();});card.querySelector('.matchMain')?.append(actions);});
   list.querySelectorAll('.viewMatchedProperty').forEach(btn=>btn.onclick=()=>{
     const master=map.get(btn.dataset.master);if(!master)return;
     const ids=new Set(master.legacy_ids||[]);
@@ -730,6 +749,9 @@ async function openBuyerMatches(buyerId){
 $('#newBuyerBtn')?.addEventListener('click',()=>openBuyerDialog());
 $('#closeBuyerDialog')?.addEventListener('click',()=>$('#buyerDialog').close());
 $('#closeBuyerMatchesDialog')?.addEventListener('click',()=>$('#buyerMatchesDialog').close());
+$('#closeClientTwinDialog')?.addEventListener('click',()=>$('#clientTwinDialog').close());
+$('#clientTwinFollowForm')?.addEventListener('submit',async e=>{e.preventDefault();const id=$('#clientTwinBuyerId').value;await saveClientFollowUp(id,{intent:$('#clientTwinIntent').value,next_action:$('#clientTwinNextAction').value.trim(),next_action_at:$('#clientTwinNextAt').value?new Date($('#clientTwinNextAt').value).toISOString():null});await openClientTwin(id);await renderBrokerTwin();});
+$('#clientTwinDraft')?.addEventListener('click',async()=>{const id=$('#clientTwinBuyerId').value,properties=($('#clientTwinDraft').dataset.properties||'').split(',').filter(Boolean),draft=await createBrokerDraft(id,properties);$('#clientTwinDraftText').value=draft.message;});
 $('#buyerZoneSearch')?.addEventListener('input',()=>renderBuyerZones(buyerSelected('buyerZoneChecks')));
 $('#buyerSearchInput')?.addEventListener('input',renderBuyersList);
 $('#buyerStatusFilter')?.addEventListener('change',renderBuyersList);
@@ -743,6 +765,7 @@ $('#buyerForm')?.addEventListener('submit',async e=>{
   try{
     const currentId=$('#buyerId').value||null,existing=currentId?await getBuyer(currentId):null;
     const row=await saveBuyer({...existing,...collectBuyerForm()});
+    await syncClientTwin(row);
     if(demandEngineEnabled){await mirrorLegacyBuyersToDemands();await runDemandOpportunityMatching({trigger_type:'CLIENT_DEMAND_CHANGED',trigger_entity_id:`demand_client_${row.id}`});}
     $('#saveBuyerBtn').disabled=true;$('#saveBuyerBtn').textContent='Calculando coincidencias…';
     await recalculateBuyerMatches(row);

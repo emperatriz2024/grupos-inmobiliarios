@@ -155,6 +155,11 @@
         </select>
       </div>
 
+      <section id="brokerTwinPanel" class="card brokerTwinPanel">
+        <div class="sectionTitle"><span>⚡</span><div><h2>Broker Twin</h2><p>Próximas acciones comerciales explicables · nada se envía automáticamente</p></div><strong id="brokerTwinCount">0</strong></div>
+        <div id="brokerTwinList"></div>
+      </section>
+
       <section id="buyersList"></section>
       <div id="buyersEmpty" class="empty" hidden>
         Todavía no has creado compradores. Toca <b>Nuevo comprador</b> para comenzar el matching.
@@ -547,6 +552,7 @@
                   <option value="10">Permitir +10%</option>
                 </select>
               </label>
+              <label class="checkLine"><input id="buyerAlternativesAuthorized" type="checkbox" checked> Mostrar alternativas autorizadas separadas</label>
               <label>Habitaciones mín.
                 <select id="buyerMinBedrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
               </label>
@@ -604,6 +610,18 @@
       <div id="buyerMatchesList" class="buyerMatchesList"></div>
     </dialog>
 
+    <dialog id="clientTwinDialog" class="buyerMatchesDialog clientTwinDialog">
+      <div class="dialogHead"><div><span>CLIENT TWIN</span><h2 id="clientTwinTitle">Comprador</h2></div><button id="closeClientTwinDialog" type="button">×</button></div>
+      <input id="clientTwinBuyerId" type="hidden">
+      <div class="clientTwinGrid">
+        <section class="card"><h3>Perfil operativo</h3><div id="clientTwinRequirements"></div></section>
+        <form id="clientTwinFollowForm" class="card"><h3>Seguimiento</h3><label>Intención<select id="clientTwinIntent"><option value="BUSCANDO">Buscando</option><option value="DECIDIENDO">Decidiendo</option><option value="PAUSADO">Pausado</option><option value="CERRADO">Cerrado</option></select></label><label>Próxima acción<input id="clientTwinNextAction" placeholder="Ej. llamar y confirmar presupuesto"></label><label>Fecha<input id="clientTwinNextAt" type="datetime-local"></label><button class="primary" type="submit">Guardar seguimiento</button></form>
+        <section class="card"><h3>Propiedades revisadas</h3><div id="clientTwinPropertyHistory"></div></section>
+        <section class="card"><h3>Preparar mensaje</h3><button id="clientTwinDraft" class="ghost" type="button">Preparar con seleccionadas</button><textarea id="clientTwinDraftText" rows="5" readonly placeholder="Selecciona propiedades desde Coincidencias. El borrador nunca se envía solo."></textarea></section>
+        <section class="card"><h3>Historial</h3><ol id="clientTwinTimeline"></ol></section>
+      </div>
+    </dialog>
+
     <dialog id="multiSelectorDialog" class="multiSelectorDialog">
       <div class="selectorSheet">
         <div class="selectorSheetHead"><div><small>Filtro múltiple</small><h3 id="selectorTitle">Seleccionar</h3></div><button id="closeMultiSelector" type="button">×</button></div>
@@ -634,6 +652,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0731"></script>
+  <script type="module" src="./app.js?v=0740"></script>
 </body>
 </html>

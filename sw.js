@@ -15,7 +15,7 @@ self.addEventListener('activate',event=>event.waitUntil((async()=>{
   await Promise.all(keys.filter(key=>key.startsWith(CACHE_PREFIX)&&key!==CACHE).map(key=>caches.delete(key)));
   await self.clients.claim();
   const clients=await self.clients.matchAll({type:'window'});
-  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.7.3-test'}));
+  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.7.4-test'}));
 })()));
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||new URL(event.request.url).origin!==self.location.origin)return;
