@@ -1,6 +1,6 @@
-import { normLoc } from './location-utils.js?v=0414';
-import { propertyTimestamp } from './date-utils.js?v=0414';
-import { isDemandRequest } from './intent-utils.js?v=0414';
+import { normLoc } from './location-utils.js?v=0530';
+import { propertyTimestamp } from './date-utils.js?v=0530';
+import { isDemandRequest } from './intent-utils.js?v=0530';
 
 const STOP=new Set('venta vendo vende alquiler alquilo alquila propiedad inmueble oportunidad precio ref referencia whatsapp colega asesor asesora inmobiliario inmobiliaria carabobo valencia disponible disponibilidad contacto informacion info habitaciones habitacion banos bano puestos puesto estacionamiento estacionamientos mts m2 metros con para por del de la el los las una uno un y en se'.split(' '));
 function norm(s=''){return normLoc(String(s)).replace(/\b(?:0412|0414|0416|0424|0426)\s*\d+\b/g,' ').replace(/\b\d{6,}\b/g,' ').replace(/\s+/g,' ').trim();}
@@ -40,14 +40,26 @@ function coarseBucket(p){
   const pr=p.price_usd?Math.round(Number(p.price_usd)/10000)*10000:0;
   return `F|${t}|${z}|${a}|${b}|${pr}`;
 }
-function sameProperty(a,b){
-  if(typeKey(a)&&typeKey(b)&&typeKey(a)!==typeKey(b)) return false;
-  const za=zoneKey(a),zb=zoneKey(b); if(za&&zb&&za!==zb&&!za.includes(zb)&&!zb.includes(za)) return false;
+function normalizedPhone(p={}){return String(p.phone||p.agent_phone||'').replace(/\D/g,'').replace(/^0058/,'58').replace(/^0(?=4(?:12|14|16|24|26))/, '58');}
+function explicitReference(p={}){
+  const text=String(p.external_code||p.reference||p.text||'');
+  const m=text.match(/\b(?:codigo|cod|ref(?:erencia)?(?:\s+inmobiliaria)?)\s*[:#.-]?\s*([a-z0-9-]{4,24})\b/i);
+  return m?m[1].toLowerCase():'';
+}
+function safeUrl(p={}){try{const u=new URL(p.external_url||'');return /^https?:$/.test(u.protocol)?u.toString():'';}catch{return '';}}
+
+export function comparePropertyCandidates(a={},b={}){
+  const signals=[],conflicts=[];
+  if(typeKey(a)&&typeKey(b)&&typeKey(a)!==typeKey(b)) conflicts.push('tipo diferente');
+  const za=zoneKey(a),zb=zoneKey(b);if(za&&zb&&za!==zb&&!za.includes(zb)&&!zb.includes(za))conflicts.push('zona diferente');
+  const ua=safeUrl(a),ub=safeUrl(b),refA=explicitReference(a),refB=explicitReference(b);
+  if(ua&&ub&&ua===ub)signals.push({name:'mismo enlace',weight:100,strength:'muy_fuerte'});
+  if(refA&&refB&&refA===refB)signals.push({name:'misma referencia',weight:96,strength:'muy_fuerte'});
   const ca=canonicalText(a.text), cb=canonicalText(b.text);
-  if(ca&&cb&&ca===cb) return true;
+  if(ca&&cb&&ca===cb)signals.push({name:'texto canónico idéntico',weight:95,strength:'muy_fuerte'});
   const sa=normSender(a.sender), sb=normSender(b.sender);
   const sameSender=!!sa&&sa===sb;
-  const samePhone=!!a.phone&&!!b.phone&&String(a.phone).replace(/\D/g,'')===String(b.phone).replace(/\D/g,'');
+  const pa=normalizedPhone(a),pb=normalizedPhone(b),samePhone=!!pa&&pa===pb;
   const ra=residenceKey(a), rb=residenceKey(b), sameRes=!!ra&&ra===rb;
   const txt=jaccard(a.text,b.text);
   const area=closeNum(a.area_m2,b.area_m2,4);
@@ -56,17 +68,31 @@ function sameProperty(a,b){
   const parking=a.parking&&b.parking&&Number(a.parking)===Number(b.parking);
   const price=priceClose(a.price_usd,b.price_usd);
   const facts=[area,beds,baths,parking,price].filter(Boolean).length;
+  if(samePhone&&sameRes)signals.push({name:'mismo teléfono y conjunto',weight:72,strength:'muy_fuerte'});
+  else if(samePhone)signals.push({name:'mismo teléfono',weight:34,strength:'fuerte'});
+  if(sameRes)signals.push({name:'mismo conjunto',weight:18,strength:'fuerte'});
+  if(area)signals.push({name:'metraje compatible',weight:14,strength:'fuerte'});
+  if(beds)signals.push({name:'habitaciones iguales',weight:9,strength:'fuerte'});
+  if(baths)signals.push({name:'baños iguales',weight:7,strength:'fuerte'});
+  if(parking)signals.push({name:'puestos iguales',weight:8,strength:'fuerte'});
+  if(price)signals.push({name:'precio compatible',weight:12,strength:'fuerte'});
+  if(txt>=.72)signals.push({name:'descripción muy similar',weight:34,strength:'fuerte'});
+  else if(txt>=.45)signals.push({name:'descripción similar',weight:18,strength:'media'});
+  if(sameSender)signals.push({name:'mismo publicador',weight:8,strength:'media'});
+  if(za&&zb&&(za===zb||za.includes(zb)||zb.includes(za)))signals.push({name:'misma zona',weight:4,strength:'debil'});
+  if(typeKey(a)&&typeKey(a)===typeKey(b))signals.push({name:'mismo tipo',weight:2,strength:'debil'});
 
-  // Same captador: repeated reposts commonly change emojis/order but keep core facts.
-  if(sameSender && sameRes && facts>=2) return true;
-  if(sameSender && facts>=3 && txt>=0.28) return true;
-  if(sameSender && price && (area||beds) && txt>=0.38) return true;
-
-  // Different captators: be conservative so unique units are not hidden.
-  if(samePhone && facts>=2 && (sameRes||txt>=0.45)) return true;
-  if(sameRes && facts>=3 && txt>=0.72) return true;
-  return false;
+  let score=Math.min(100,signals.reduce((sum,x)=>sum+x.weight,0));
+  if(conflicts.length)score=Math.min(score,39);
+  // Same building is merely context. Automatic consolidation requires either
+  // an identity signal or a rich, highly similar factual fingerprint.
+  const identity=signals.some(x=>['mismo enlace','misma referencia','texto canónico idéntico'].includes(x.name))||(samePhone&&sameRes&&facts>=2);
+  const richFingerprint=sameRes&&facts>=4&&txt>=.72;
+  const automatic=!conflicts.length&&score>=82&&(identity||richFingerprint);
+  const level=automatic?'fuerte':score>=65?'probable':score>=35?'debil':'nuevo';
+  return {score,level,automatic,signals,conflicts,textSimilarity:txt,factsMatched:facts};
 }
+function sameProperty(a,b){return comparePropertyCandidates(a,b).automatic;}
 function newer(a,b){return propertyTimestamp(a)>=propertyTimestamp(b)?a:b;}
 function mergeInto(a,b){
   const latest=newer(a,b), other=latest===a?b:a;

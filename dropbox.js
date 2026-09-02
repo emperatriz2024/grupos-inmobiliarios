@@ -285,3 +285,28 @@ export async function listDropboxContactFiles(path){
   const e=await listDropboxFolder(path);
   return e.filter(x=>x['.tag']==='file'&&/\.(?:vcf|vcard|csv|tsv|txt|json|zip)$/i.test(x.name)).sort((a,b)=>String(b.server_modified||'').localeCompare(String(a.server_modified||'')));
 }
+
+
+// Radar Backup v0.5.0.2: upload/overwrite a generated JSON backup.
+export async function uploadDropboxFile(path,content){
+  path=normalizePath(path);
+  if(!path) throw new Error('Falta la ruta del respaldo en Dropbox.');
+  const slash=path.lastIndexOf('/');
+  const folder=slash>0?path.slice(0,slash):'';
+  if(folder) await ensureDropboxFolder(folder);
+  const body=content instanceof Blob?content:new Blob([content],{type:'application/json'});
+  const send=async token=>fetch(CONTENT+'/files/upload',{
+    method:'POST',
+    headers:{
+      'Authorization':`Bearer ${token}`,
+      'Content-Type':'application/octet-stream',
+      'Dropbox-API-Arg':JSON.stringify({path,mode:'overwrite',autorename:false,mute:true,strict_conflict:false})
+    },
+    body
+  });
+  let token=await getAccessToken(),r=await send(token);
+  if(r.status===401){token=await refreshToken();r=await send(token);}
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data?.error_summary||data?.error?.['.tag']||`Dropbox upload ${r.status}`);
+  return data;
+}

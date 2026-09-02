@@ -1,7 +1,7 @@
-import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0414';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0414';
-import { resolveLocationRecord } from './location-catalog.js?v=0414';
-import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0414';
+import { isDemandRequest, listingIntentScore } from './intent-utils.js?v=0530';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0530';
+import { resolveLocationRecord } from './location-catalog.js?v=0530';
+import { detectDateOrderFromText, parseFlexibleDate, toISODate } from './date-utils.js?v=0530';
 /* Grupos Inmobiliarios — Motor v0.1
    Núcleo portable para navegador/iPhone. Recibe el texto _chat.txt ya extraído.
 */
@@ -43,13 +43,7 @@ function cutoffForDays(maxAgeDays, now=Date.now()) {
 export function parseWhatsAppText(text, group='Grupo', options={}) {
   const maxAgeDays = Number(options.maxAgeDays ?? 60);
   const now = options.now ?? Date.now();
-  const ageCutoff = maxAgeDays > 0 ? cutoffForDays(maxAgeDays, now) : null;
-  const sinceTs = Number(options.sinceTs || 0);
-  const overlapHours = Number(options.overlapHours ?? 48);
-  const incrementalCutoff = sinceTs > 0 ? new Date(sinceTs - overlapHours*60*60*1000) : null;
-  const cutoff = ageCutoff && incrementalCutoff
-    ? new Date(Math.max(ageCutoff.getTime(), incrementalCutoff.getTime()))
-    : (incrementalCutoff || ageCutoff);
+  const cutoff = maxAgeDays > 0 ? cutoffForDays(maxAgeDays, now) : null;
   // WhatsApp export follows the device locale. Your current exports are MDY,
   // but we detect it automatically so the engine also supports DMY exports.
   const dateOrder = detectDateOrderFromText(text, 'MDY');
@@ -76,21 +70,16 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
       totalMessages++;
 
       const msgDate = parseMessageDate(m[1], dateOrder);
+      if (cutoff && msgDate && msgDate < cutoff) {
+        skippedOld++;
+        current = null; // no acumulamos ni las líneas del mensaje viejo
+        continue;
+      }
 
       let hour = Number(m[2]);
       const ap = m[5].toLowerCase();
       if (ap === 'p' && hour !== 12) hour += 12;
       if (ap === 'a' && hour === 12) hour = 0;
-
-      // Compare full date+time. This matters for fast incremental imports:
-      // comparing only midnight would incorrectly discard same-day messages.
-      const msgDateTime = msgDate ? new Date(msgDate) : null;
-      if (msgDateTime) msgDateTime.setHours(hour,Number(m[3])||0,Number(m[4])||0,0);
-      if (cutoff && msgDateTime && msgDateTime < cutoff) {
-        skippedOld++;
-        current = null; // no acumulamos ni las líneas del mensaje viejo
-        continue;
-      }
 
       current = {
         date: m[1],
@@ -112,9 +101,6 @@ export function parseWhatsAppText(text, group='Grupo', options={}) {
   rows.maxAgeDays = maxAgeDays;
   rows.dateOrder = dateOrder;
   rows.cutoffDate = cutoff ? cutoff.toISOString().slice(0,10) : null;
-  rows.incremental = sinceTs > 0;
-  rows.incrementalSinceTs = sinceTs || 0;
-  rows.overlapHours = overlapHours;
   return rows;
 }
 
@@ -171,27 +157,187 @@ function parseNumber(raw) {
   return Number(x);
 }
 
-function extractPrice(text, operation=null) {
-  const t=cleanText(text);
-  const found=[];
-  const pats=[
-    /(?:US\s*\$|USD\s*\$?|\$)\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)/gi,
-    /\b([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{2,7})\s*(?:US\$|USD|\$)/gi,
-    /\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*k\b/gi,
-    /\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*mil\b/gi,
-    /\b(?:precio(?:\s+de\s+(?:venta|inversion))?|ref(?:erencia)?\.?|canon)\s*[:.\-]?\s*(?:us\s*\$|usd)?\s*([0-9]{2,3}(?:[.,][0-9]{3})+|[0-9]{2,7})/gi
-  ];
-  pats.forEach((rx,idx)=>{
-    for(const m of t.matchAll(rx)){
+function priceContextFlags(line=''){
+  const n=normalizeText(line);
+  return {
+    negative:/\b(condominio|mantenimiento|mensualidad|cuota|reserva|apartado|honorarios|comision|contrato|deposito|adelantad[oa]s?|gastos?|servicios?|codigo|cod|id|referencia\s+(?:inmobiliaria|interna)|m2|mts2|metros?)\b/i.test(n),
+    current:/\b(ahora|oferta|nuevo\s+precio|precio\s+actual|rebaja|remate|precio\s+final)\b/i.test(n),
+    old:/\b(antes|precio\s+anterior|precio\s+viejo)\b/i.test(n),
+    sale:/\b(precio|precio\s+de\s+venta|venta|vendo|vende|inversion|valor)\b/i.test(n),
+    rent:/\b(canon|alquiler|mensual)\b/i.test(n)
+  };
+}
+
+export function extractPriceDetailed(text, operation=null) {
+  const raw=cleanText(text);
+  const candidates=[];
+  const add=(line,lineIndex,pos,rawValue,value,kind,baseScore)=>{
+    if(!Number.isFinite(value)||value<=0||value>50000000)return;
+    const flags=priceContextFlags(line);
+    const before=normalizeText(line.slice(0,Math.max(0,pos)));
+    const currentAt=Math.max(before.lastIndexOf('ahora'),before.lastIndexOf('nuevo precio'),before.lastIndexOf('precio actual'),before.lastIndexOf('rebaja'));
+    const oldAt=Math.max(before.lastIndexOf('antes'),before.lastIndexOf('precio anterior'),before.lastIndexOf('precio viejo'));
+    if(currentAt>=0||oldAt>=0){flags.current=currentAt>oldAt;flags.old=oldAt>currentAt;}
+    let score=baseScore;
+    if(flags.negative) score-=90;
+    if(flags.current) score+=18;
+    if(flags.old) score-=18;
+    if(operation==='Venta'&&flags.sale)score+=14;
+    if(operation==='Alquiler'&&flags.rent)score+=14;
+    candidates.push({line:line.trim(),lineIndex,pos,raw:rawValue,value,kind,score,flags});
+  };
+
+  raw.split('\n').slice(0,35).forEach((line,lineIndex)=>{
+    // Highest confidence: explicit commercial label near the amount.
+    const explicit=/\b(precio(?:\s+de\s+(?:venta|inversion))?|inversion|valor(?:\s+de\s+venta)?|canon)\s*[:.\-]?\s*(?:us\s*\$|usd\s*\$?|\$)?\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)(?:\s*(k|mil))?/gi;
+    for(const m of line.matchAll(explicit)){
+      let v=parseNumber(m[2]); const shorthand=!!m[3];
+      if(shorthand)v*=1000;
+      else if(operation==='Venta'&&v>=10&&v<1000)v*=1000; // "Precio 130" => 130k; only explicit context.
+      add(line,lineIndex,m.index,m[0],v,'explicit',125);
+    }
+
+    // Explicit shorthand: 130k / 130 mil. Safe for sale prices.
+    const short=/\b([0-9]{2,3}(?:[.,][0-9]+)?)\s*(k|mil)\b/gi;
+    for(const m of line.matchAll(short)){
+      add(line,lineIndex,m.index,m[0],parseNumber(m[1])*1000,'shorthand',105);
+    }
+
+    // Currency amounts. Important guardrail:
+    // "$70" in a SALE is NOT converted to $70,000 unless the line itself says price/ref/venta.
+    const currency=/(?:US\s*\$|USD\s*\$?|\$)\s*([0-9]{1,3}(?:[.,][0-9]{3})+(?:[.,][0-9]{1,2})?|[0-9]{2,7}(?:[.,][0-9]{1,2})?)/gi;
+    for(const m of line.matchAll(currency)){
       let v=parseNumber(m[1]);
-      if(idx===2 || idx===3) v*=1000;
-      if(v>=10 && v<=50000000) found.push({pos:m.index,value:v,priority:idx===4?-1:0});
+      const flags=priceContextFlags(line);
+      if(operation==='Venta'&&v<1000){
+        if(flags.sale) v*=1000;
+        else continue; // likely condo fee, service, reservation, etc.
+      }
+      add(line,lineIndex,m.index,m[0],v,'currency',72);
+    }
+
+    const currencyAfter=/\b([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{2,7})\s*(?:US\$|USD|\$)/gi;
+    for(const m of line.matchAll(currencyAfter)){
+      let v=parseNumber(m[1]);
+      const flags=priceContextFlags(line);
+      if(operation==='Venta'&&v<1000){
+        if(flags.sale)v*=1000; else continue;
+      }
+      add(line,lineIndex,m.index,m[0],v,'currency',70);
     }
   });
-  found.sort((a,b)=>a.priority-b.priority || a.pos-b.pos);
-  let value=found[0]?.value ?? null;
-  if(operation==='Venta' && value!=null && value>=10 && value<1000) value*=1000;
-  return value;
+
+  const usable=candidates.filter(c=>c.score>=35).sort((a,b)=>b.score-a.score || a.lineIndex-b.lineIndex || a.pos-b.pos);
+  if(!usable.length) return {value:null,confidence:'missing',status:'missing',evidence:null,candidates:[]};
+
+  const best=usable[0];
+  const peers=usable.filter(c=>c.score>=best.score-8);
+  const materiallyDifferent=peers.filter(c=>Math.abs(c.value-best.value)/Math.max(c.value,best.value)>.12);
+  const ambiguous=materiallyDifferent.length>0;
+
+  let confidence=best.score>=115?'high':best.score>=85?'medium':'low';
+  if(ambiguous&&confidence==='high')confidence='medium';
+  if(ambiguous&&confidence==='medium')confidence='low';
+
+  return {
+    // Two equally plausible, materially different prices are not a confirmed
+    // price. Preserve every candidate for manual review instead of guessing.
+    value:ambiguous?null:best.value,
+    confidence,
+    status:ambiguous?'ambiguous':'ok',
+    evidence:best.line||best.raw,
+    candidates:usable.slice(0,8).map(c=>({
+      value:c.value,score:c.score,kind:c.kind,line:c.line,
+      role:c.flags.old?'previous':c.flags.current?'current':c.flags.negative?'non_price':c.flags.rent?'rent':c.flags.sale?'principal':'ambiguous'
+    }))
+  };
+}
+
+function extractPrice(text, operation=null) {
+  return extractPriceDetailed(text,operation).value;
+}
+
+export function auditExistingPropertyPrice(property={}){
+  const detail=extractPriceDetailed(property.text||'',property.operation||null);
+  const old=property.price_usd==null?null:Number(property.price_usd);
+  const next=detail.value==null?null:Number(detail.value);
+  const changed=(old==null)!=(next==null)||(old!=null&&next!=null&&Math.abs(old-next)>0.01);
+  return {
+    ...property,
+    price_usd:next,
+    price_confidence:detail.confidence,
+    price_audit_status:changed?'corrected':detail.status,
+    price_evidence:detail.evidence,
+    price_audit_version:'0600',
+    price_audited:true
+  };
+}
+
+function evidenceLine(raw='', index=0){
+  const lines=cleanText(raw).split('\n');
+  return String(lines[index]||'').trim();
+}
+function matchDetailed(raw='', patterns=[]){
+  const clean=cleanText(raw);
+  const lines=clean.split('\n');
+  for(const spec of patterns){
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i];
+      const normalized=normalizeText(line);
+      const m=normalized.match(spec.rx);
+      if(!m)continue;
+      const value=parseNumber(m[spec.group||1]);
+      if(value==null)continue;
+      return {
+        value,
+        evidence:line.trim(),
+        confidence:spec.confidence||'high',
+        kind:spec.kind||'explicit'
+      };
+    }
+  }
+  return {value:null,evidence:null,confidence:'missing',kind:'missing'};
+}
+
+export function extractStructuredFieldsDetailed(rawText=''){
+  // Explicit "label: value" patterns are evaluated BEFORE shorthand patterns.
+  // This prevents a nearby unrelated number from overriding a line such as:
+  // "Estacionamiento: 2 puestos".
+  const area=matchDetailed(rawText,[
+    {rx:/\b(?:area(?:\s+(?:total|de\s+construccion))?|superficie|metros?\s+cuadrados?)\s*[:\-]?\s*(\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|mts?|metros?)?\b/i,kind:'explicit'},
+    {rx:/\b(\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|metros?\s+cuadrados?)\b/i,confidence:'medium',kind:'shorthand'}
+  ]);
+
+  const bedrooms=matchDetailed(rawText,[
+    {rx:/\b(?:habitaciones?|dormitorios?|cuartos?)\s*[:\-]?\s*(\d{1,2})\b/i,kind:'explicit'},
+    {rx:/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?|dormitorios?)\b/i,confidence:'medium',kind:'shorthand'}
+  ]);
+
+  const bathrooms=matchDetailed(rawText,[
+    {rx:/\b(?:banos?|baños?)\s*[:\-]?\s*(\d{1,2})(?:[.,]5)?\b/i,kind:'explicit'},
+    {rx:/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?|baños?)\b/i,confidence:'medium',kind:'shorthand'}
+  ]);
+
+  const parking=matchDetailed(rawText,[
+    // Highest priority: label BEFORE value.
+    {rx:/\b(?:estacionamientos?|estacionamiento|puestos?(?:\s+de)?\s+estacionamiento|puestos?\s+de\s+parking|parking)\s*[:\-]?\s*(\d{1,2})\s*(?:puestos?|vehiculos?|vehículos?|carros?)?\b/i,kind:'explicit'},
+    // Common real-estate phrasing: "2 puestos", "2 puestos de estacionamiento", "2 P/E".
+    {rx:/\b(\d{1,2})\s*(?:puestos?(?:\s+de)?\s+estacionamiento|puestos?|p\s*\/?\s*e|estacionamientos?)\b/i,confidence:'medium',kind:'shorthand'},
+    {rx:/\bpuestos?\s*[:\-]?\s*(\d{1,2})\b/i,confidence:'medium',kind:'explicit'}
+  ]);
+  const noParkingLine=cleanText(rawText).split('\n').find(line=>/\b(?:no\s+(?:tiene|posee|incluye|cuenta\s+con)|sin)\s+(?:puesto|puestos|estacionamiento|parking)\b/i.test(normalizeText(line)));
+  if(noParkingLine){parking.value=0;parking.evidence=noParkingLine.trim();parking.confidence='high';parking.kind='explicit_zero';}
+
+  const normalized=normalizeText(rawText);
+  const study=/\bestudio\b/i.test(normalized);
+  const studyAsBedroom=/\bestudio\s+(?:funciona|usado|convertido|habilitado)\s+como\s+(?:habitacion|dormitorio)\b/i.test(normalized);
+  const serviceBedroom=/\b(?:habitacion|cuarto|dormitorio)\s+de\s+servicio\b|\bservicio\s+con\s+(?:habitacion|cuarto)\b/i.test(normalized);
+  return {
+    area_m2:area,bedrooms,bathrooms,parking,
+    study:{value:study,evidence:study?(cleanText(rawText).split('\n').find(x=>/\bestudio\b/i.test(x))||'').trim()||null:null,confidence:study?'high':'missing',kind:'explicit'},
+    study_as_bedroom:{value:studyAsBedroom,evidence:studyAsBedroom?(cleanText(rawText).split('\n').find(x=>/\bestudio\b/i.test(x))||'').trim()||null:null,confidence:studyAsBedroom?'high':'missing',kind:'explicit'},
+    service_bedroom:{value:serviceBedroom,evidence:serviceBedroom?(cleanText(rawText).split('\n').find(x=>/\bservicio\b/i.test(x))||'').trim()||null:null,confidence:serviceBedroom?'high':'missing',kind:'explicit'}
+  };
 }
 
 function firstNumber(n, patterns) {
@@ -238,7 +384,9 @@ export function extractProperty(message, options={}) {
   const smartLocation=resolveLocationRecord(message.text,options.locationCatalog||null,{existingComplex:residenceDetected});
   const locationTerms=smartLocation.location_terms?.length?smartLocation.location_terms:extractLocationTerms(message.text);
   const zone=smartLocation.zone||bestZone(message.text,locationTerms[0]||null);
-  const price=extractPrice(message.text, operation);
+  const priceDetail=extractPriceDetailed(message.text, operation);
+  const price=priceDetail.value;
+  const structured=extractStructuredFieldsDetailed(message.text);
   const rec={
     group:message.group,date:message.date,date_iso:message.date_iso,date_order:message.date_order,time:message.time,sender:message.sender,
     operation,property_type:propertyType,
@@ -246,10 +394,32 @@ export function extractProperty(message, options={}) {
     zone_id:smartLocation.zone_id,zone,zone_detected:smartLocation.zone_detected,zone_detected_norm:smartLocation.zone_detected_norm,zone_confidence:smartLocation.zone_confidence,zone_matches:smartLocation.zone_matches,
     complex_id:smartLocation.complex_id,complex_detected:smartLocation.complex_detected,complex_detected_norm:smartLocation.complex_detected_norm,complex_confidence:smartLocation.complex_confidence,location_requires_review:smartLocation.requires_review,
     location_terms:locationTerms,residence:smartLocation.complex||smartLocation.complex_detected||null,price_usd:price,
-    area_m2:firstNumber(n,[/\b(\d{1,3}(?:[.,]\d{3})+|\d{2,5}(?:[.,]\d{1,2})?)\s*(?:m2|mt2|mts2|mts\s*2|mtrs?2?|mts?|metros(?:\s+cuadrados?)?)\b/i]),
-    bedrooms:firstNumber(n,[/\b(\d{1,2})\s*(?:h|hab|habs|habitaciones?)\b/i,/\bhabitaciones?\s*[:\-]?\s*(\d{1,2})\b/i]),
-    bathrooms:firstNumber(n,[/\b(\d{1,2})(?:[.,]5)?\s*(?:b|banos?)\b/i,/\bbanos?\s*[:\-]?\s*(\d{1,2})/i]),
-    parking:firstNumber(n,[/\b(\d{1,2})\s*(?:p\s*\/?\s*e|puestos?(?:\s+de)?\s+estacionamiento|estacionamientos?)\b/i,/\bpuestos?\s*[:\-]?\s*(\d{1,2})/i]),
+    price_confidence:priceDetail.confidence,price_audit_status:priceDetail.status,price_evidence:priceDetail.evidence,price_audit_version:'0600',price_audited:true,
+    area_m2:structured.area_m2.value,
+    bedrooms:structured.bedrooms.value,
+    bathrooms:structured.bathrooms.value,
+    parking:structured.parking.value,
+    study:structured.study.value,
+    study_as_bedroom:structured.study_as_bedroom.value,
+    service_bedroom:structured.service_bedroom.value,
+    extraction_evidence:{
+      price:priceDetail.evidence||null,
+      area_m2:structured.area_m2.evidence||null,
+      bedrooms:structured.bedrooms.evidence||null,
+      bathrooms:structured.bathrooms.evidence||null,
+      parking:structured.parking.evidence||null
+      ,study:structured.study.evidence||null
+      ,service_bedroom:structured.service_bedroom.evidence||null
+    },
+    extraction_confidence:{
+      price:priceDetail.confidence||'missing',
+      area_m2:structured.area_m2.confidence,
+      bedrooms:structured.bedrooms.confidence,
+      bathrooms:structured.bathrooms.confidence,
+      parking:structured.parking.confidence
+      ,study:structured.study.confidence
+      ,service_bedroom:structured.service_bedroom.confidence
+    },
     phone:extractPhone(message.text),
     planta_electrica:/\bplanta\s+(?:electrica|100|50|total|parcial)|\bplanta\s*100\s*%/i.test(n),
     planta_100:/\bplanta(?:\s+electrica)?\s*(?:100\s*%|total)\b/i.test(n),
@@ -259,7 +429,12 @@ export function extractProperty(message, options={}) {
     financiamiento:/\b(financiamiento|financia|cuotas?|inicial)\b/i.test(n),
     piscina:/\bpiscina\b/i.test(n),
     text:message.text,
-    normalized:n
+    normalized:n,
+    sourceType:options.sourceType||'whatsapp_zip',
+    sourceChannel:options.sourceChannel||'primary_number',
+    sourceId:options.sourceId||null,
+    importedAt:options.importedAt||new Date().toISOString(),
+    publishedAt:message.date_iso||message.date||null
   };
   rec.id = simpleHash(n);
   rec.location_pending=(smartLocation.pending||[]).map(x=>({...x,property_id:rec.id,group:message.group,sender:message.sender,date:message.date,date_iso:message.date_iso,sample_text:message.text.slice(0,1800)}));
@@ -296,24 +471,25 @@ function splitMultiListingMessage(message){
 
 export function processChatText(text, group='Grupo', options={}) {
   const maxAgeDays = Number(options.maxAgeDays ?? 60);
-  const messages = parseWhatsAppText(text, group, {
-    maxAgeDays,
-    now: options.now ?? Date.now(),
-    sinceTs: options.sinceTs || 0,
-    overlapHours: options.overlapHours ?? 48
-  });
+  const messages = parseWhatsAppText(text, group, {maxAgeDays, now: options.now ?? Date.now()});
 
   const properties=[];
   let requestsSkipped=0;
+  const demandMessages=[];
   let multiItemsCreated=0;
-  for(const m of messages){
-    if(isDemandRequest(m.text)){ requestsSkipped++; continue; }
+  for(let messageIndex=0;messageIndex<messages.length;messageIndex++){
+    const m=messages[messageIndex];
+    if(isDemandRequest(m.text)){ requestsSkipped++;demandMessages.push({...m,source_channel:options.sourceChannel||'primary_number',source_id:m.messageId||`${m.date_iso||m.date}|${m.time||''}|${m.sender||''}`});continue; }
     const parts=splitMultiListingMessage(m);
     if(parts.length>1) multiItemsCreated += parts.length;
     for(const part of parts){
-      const r=extractProperty(part,{locationCatalog:options.locationCatalog});
+      const r=extractProperty(part,{
+        locationCatalog:options.locationCatalog,sourceType:options.sourceType,sourceChannel:options.sourceChannel,
+        sourceId:options.sourceId,importedAt:options.importedAt
+      });
       if(r) properties.push(r);
     }
+    if(messageIndex%250===0||messageIndex===messages.length-1)options.onProgress?.({done:messageIndex+1,total:messages.length});
   }
 
   const unique=new Map();
@@ -334,11 +510,6 @@ export function processChatText(text, group='Grupo', options={}) {
     }
   }
 
-  const latestMessage = messages.length ? messages[messages.length-1] : null;
-  const latestMessageTs = latestMessage
-    ? messageDateTime(latestMessage.date,latestMessage.time,latestMessage.date_iso,latestMessage.date_order)
-    : 0;
-
   return {
     messages:messages.length,
     messages_total:messages.totalMessages ?? messages.length,
@@ -346,13 +517,8 @@ export function processChatText(text, group='Grupo', options={}) {
     max_age_days:maxAgeDays,
     cutoff_date:messages.cutoffDate ?? null,
     date_order:messages.dateOrder ?? 'MDY',
-    incremental:messages.incremental ?? false,
-    incremental_since_ts:messages.incrementalSinceTs ?? 0,
-    overlap_hours:messages.overlapHours ?? 48,
-    latest_message_ts:latestMessageTs || 0,
-    latest_message_date_iso:latestMessage?.date_iso || null,
-    latest_message_time:latestMessage?.time || null,
     requests_skipped:requestsSkipped,
+    demand_messages:demandMessages,
     multi_items_created:multiItemsCreated,
     properties_detected:properties.length,
     location_pendings:properties.flatMap(p=>p.location_pending||[]),

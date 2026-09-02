@@ -1,0 +1,10 @@
+import {readFile} from 'node:fs/promises';
+const sql=await readFile(new URL('../db/migrations/002_phase_0b_identity_media_own.sql',import.meta.url),'utf8');
+const db=await readFile(new URL('../db.js',import.meta.url),'utf8');
+const required=['source_attachments','media_assets','property_media','property_identity_links','property_redirects','review_queue','own_listing_details'];
+const missing=required.filter(table=>!new RegExp(`CREATE TABLE\\s+${table}\\b`,'i').test(sql));
+if(missing.length)throw new Error(`Phase 0B incompleta: ${missing.join(', ')}`);
+if(!/UNIQUE INDEX media_assets_workspace_sha_uq/i.test(sql))throw new Error('Falta deduplicación exacta por workspace + SHA-256.');
+if(!/CHECK\(property_a_id::text<property_b_id::text\)/i.test(sql))throw new Error('Falta orden canónico de identity links.');
+if(!/DB_VERSION = (?:7|8|9|10|11)/.test(db)||!/BACKUP_STORES[\s\S]*OWN_LISTING_STORE/.test(db))throw new Error('Migración IndexedDB/backup 0B incompleta.');
+console.log(`Phase 0B schema válido: ${required.length} tablas aditivas; IndexedDB compatible.`);

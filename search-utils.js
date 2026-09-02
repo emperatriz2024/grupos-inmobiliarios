@@ -1,6 +1,6 @@
-import { isDemandRequest } from './intent-utils.js?v=0414';
-import { extractLocationTerms, normLoc } from './location-utils.js?v=0414';
-import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=0414';
+import { isDemandRequest } from './intent-utils.js?v=0530';
+import { extractLocationTerms, normLoc } from './location-utils.js?v=0530';
+import { parseFlexibleDate, propertyTimestamp } from './date-utils.js?v=0530';
 
 const ACCENTS = {á:'a',é:'e',í:'i',ó:'o',ú:'u',ü:'u',ñ:'n'};
 
@@ -42,6 +42,7 @@ export function formatMoney(v) {
 export function whatsappNumber(phone='') {
   let d = String(phone).replace(/\D/g,'');
   if (!d) return '';
+  if(d.startsWith('00'))d=d.slice(2);
   if (d.startsWith('0')) d = '58' + d.slice(1);
   else if (!d.startsWith('58') && d.length === 10) d = '58' + d;
   return d;

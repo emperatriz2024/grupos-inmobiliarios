@@ -1,0 +1,40 @@
+# Local secrets and environment configuration
+.env
+.env.*
+!.env.example
+
+# Dependencies, caches and build/test output
+node_modules/
+.cache/
+cache/
+coverage/
+dist/
+build/
+.netlify/
+tmp/
+temp/
+*.tmp
+*.dmp
+*.log
+
+# Local databases and runtime state
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Generated local ZIP validation fixtures (tests generate their own in memory)
+tests/fixtures/_chat.txt
+tests/fixtures/*.zip
+
+# WhatsApp secondary bridge: local session, Chromium profile and durable runtime
+.wwebjs_auth/
+.wwebjs_cache/
+bridge/whatsapp-secondary/.wwebjs_auth/
+bridge/whatsapp-secondary/.wwebjs_cache/
+bridge/whatsapp-secondary/runtime/
+bridge/whatsapp-secondary/outbox/
+bridge/whatsapp-secondary/session/
+bridge/whatsapp-secondary/chromium/
+bridge/whatsapp-secondary/state/
+bridge/whatsapp-secondary/*.local.json

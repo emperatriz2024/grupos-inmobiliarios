@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0414" />
+  <link rel="stylesheet" href="./styles.css?v=0731" />
 </head>
 <body>
   <main class="shell">
@@ -20,11 +20,11 @@
         <div class="eyebrow">EMPERATRIZ · HERRAMIENTA PRIVADA</div>
         <h1>Grupos <span>Inmobiliarios</span></h1>
       </div>
-      <div class="version">v0.4.14 PRO</div>
+      <div id="appVersionLabel" class="version"></div>
     </header>
 
     <section class="stats">
-      <div><strong id="propertyCount">0</strong><span>propiedades</span></div>
+      <div><strong id="propertyCount">0</strong><span>inmuebles únicos</span></div>
       <div><strong id="favoriteCount">0</strong><span>guardadas</span></div>
       <div><strong id="importCount">0</strong><span>grupos</span></div>
     </section>
@@ -129,7 +129,65 @@
       <button id="loadMore" class="ghost loadMore" hidden>Mostrar más</button>
     </section>
 
+    <section id="viewBuyers" class="view">
+      <div class="buyersHero">
+        <div>
+          <div class="eyebrow buyersEyebrow">RADAR COMERCIAL</div>
+          <h2>Mis Compradores</h2>
+          <p>Guarda lo que busca cada cliente. El modo estricto separa coincidencias reales de alternativas y datos por verificar.</p>
+        </div>
+        <button id="newBuyerBtn" class="primary buyerNewBtn" type="button">＋ Nuevo comprador</button>
+      </div>
+
+      <section class="buyerStats">
+        <div><strong id="buyersActiveCount">0</strong><span>activos</span></div>
+        <div><strong id="buyersHotCount">0</strong><span>urgentes</span></div>
+        <div><strong id="buyersMatchesCount">0</strong><span>matches</span></div>
+      </section>
+
+      <div class="buyerToolbar">
+        <label class="buyerSearch"><span>⌕</span><input id="buyerSearchInput" placeholder="Buscar comprador..." autocomplete="off"></label>
+        <select id="buyerStatusFilter">
+          <option value="">Todos</option>
+          <option value="active">Activos</option>
+          <option value="paused">Pausados</option>
+          <option value="closed">Cerrados</option>
+        </select>
+      </div>
+
+      <section id="buyersList"></section>
+      <div id="buyersEmpty" class="empty" hidden>
+        Todavía no has creado compradores. Toca <b>Nuevo comprador</b> para comenzar el matching.
+      </div>
+      <section id="demandCommercialPanel" class="card" hidden>
+        <div class="sectionTitle"><span>◎</span><div><h2>Demandas y oportunidades</h2><p>Motor compartido CLIENT / MARKET · explicaciones auditables</p></div></div>
+        <div id="demandCommercialSummary" class="buyerStats"></div>
+        <details open><summary>Clientes y demandas</summary><div id="clientDemandList"></div></details>
+        <details><summary>Solicitudes del mercado</summary><div id="marketDemandList"></div></details>
+        <details open><summary>Oportunidades</summary><div id="opportunityList"></div></details>
+      </section>
+    </section>
+
     <section id="viewImport" class="view">
+      <section class="card secondaryWhatsAppCard">
+        <div class="sectionTitle">
+          <span>◉</span>
+          <div><h2>WhatsApp secundario</h2><p>Canal de solo lectura · cola remota TEST · Radar Core V0.6</p></div>
+        </div>
+        <div class="secondaryStatus"><span id="secondaryStatusDot"></span><strong id="secondaryStatusText">No configurado</strong><small id="secondaryLastSync">Sin sincronizaciones</small></div>
+        <div class="secondaryStats">
+          <div><strong id="secondaryReceived">0</strong><span>recibidos</span></div>
+          <div><strong id="secondaryPending">0</strong><span>pendientes</span></div>
+          <div><strong id="secondaryProcessed">0</strong><span>procesados</span></div>
+          <div><strong id="secondaryGroups">0</strong><span>grupos</span></div>
+          <div><strong id="secondaryProperties">0</strong><span>propiedades</span></div>
+          <div><strong id="secondaryErrors">0</strong><span>errores</span></div>
+        </div>
+        <div class="secondaryActions"><button id="configureSecondary" class="ghost" type="button">Configurar acceso TEST</button><button id="syncSecondaryNow" class="primary" type="button">Sincronizar ahora</button><button id="secondaryDiagnostics" class="miniGhost" type="button">Ver diagnóstico</button></div>
+        <pre id="secondaryDiagnosticBox" class="secondaryDiagnosticBox" hidden></pre>
+        <small class="secondarySecurityNote">La credencial de lectura se conserva solo durante esta sesión del navegador y nunca se incluye en Git ni en respaldos.</small>
+      </section>
+
       <section class="card dropboxCard">
         <div class="sectionTitle">
           <span>☁</span>
@@ -177,6 +235,193 @@
         </div>
       </section>
 
+      <section class="card radarCoreCard">
+        <div class="sectionTitle"><span>◎</span><div><h2>Radar Core</h2><p>Consolidación multi-fuente: un inmueble real puede tener muchas publicaciones.</p></div></div>
+        <div class="radarCoreStats">
+          <div class="radarMetric primaryMetric"><strong id="radarMasterCount">0</strong><span>inmuebles maestros</span><small>inventario único</small></div>
+          <div class="radarMetric"><strong id="radarSourceCount">0</strong><span>publicaciones fuente</span><small>apariciones detectadas</small></div>
+          <div class="radarMetric"><strong id="radarBuyerCount">0</strong><span>compradores</span><small>perfiles activos y pausados</small></div>
+          <div class="radarMetric"><strong id="radarMatchCount">0</strong><span>matches</span><small>coincidencias calculadas</small></div>
+        </div>
+        <div class="radarInsight">
+          <div><span>Promedio de apariciones por inmueble</span><strong><b id="radarAvgAppearances">0,0</b>×</strong></div>
+          <small id="radarGroupingNote">Sin publicaciones vinculadas todavía.</small>
+        </div>
+        <small class="smartLocationNote">Radar cruza compradores con inmuebles maestros y ya puede incorporar fuentes externas asistidas.</small>
+      </section>
+
+      <section class="card externalSourcesCard">
+        <div class="sectionTitle">
+          <span>⌁</span>
+          <div><h2>Fuentes externas</h2><p>Instagram · Marketplace · portales. Pega enlace + descripción y Radar busca duplicados antes de guardar.</p></div>
+        </div>
+
+        <div class="externalStats">
+          <div><strong id="externalTotalCount">0</strong><span>capturas</span></div>
+          <div><strong id="externalInstagramCount">0</strong><span>Instagram</span></div>
+          <div><strong id="externalMarketplaceCount">0</strong><span>Marketplace</span></div>
+          <div><strong id="externalPortalCount">0</strong><span>portales</span></div>
+        </div>
+
+        <div class="externalForm">
+          <div class="externalGrid">
+            <label>Fuente
+              <select id="externalSourceType">
+                <option value="instagram">Instagram</option>
+                <option value="marketplace">Facebook Marketplace</option>
+                <option value="mercadolibre">MercadoLibre</option>
+                <option value="remax">RE/MAX</option>
+                <option value="rentahouse">Rent-A-House</option>
+                <option value="skygroup">Sky Group</option>
+                <option value="portal">Otro portal</option>
+                <option value="otro">Otro</option>
+              </select>
+            </label>
+            <label>Fecha de publicación
+              <input id="externalPublishedDate" type="date">
+            </label>
+          </div>
+
+          <label>Enlace de la publicación
+            <input id="externalUrl" type="url" inputmode="url" placeholder="https://...">
+          </label>
+          <div class="externalUrlActions">
+            <button id="analyzeExternalUrl" class="ghost" type="button">Analizar URL</button>
+            <button id="clearExternalSource" class="miniGhost" type="button">Limpiar / Nueva publicación</button>
+          </div>
+          <small id="externalUrlStatus" class="externalUrlStatus" aria-live="polite"></small>
+
+          <label>Título del anuncio
+            <input id="externalTitle" placeholder="Ej. Casa en venta Monteserrino, San Diego Carabobo">
+          </label>
+
+          <div class="externalGrid externalPriceGrid">
+            <label>Precio publicado
+              <input id="externalListedPrice" inputmode="decimal" placeholder="Ej. 90.000">
+            </label>
+            <label>Moneda real / interpretación
+              <select id="externalPriceCurrency">
+                <option value="UNVERIFIED">No confirmada</option>
+                <option value="USD">USD</option>
+                <option value="VES">Bolívares (VES)</option>
+                <option value="OTHER">Otra</option>
+              </select>
+            </label>
+          </div>
+          <small class="externalPriceHint">Marketplace puede mostrar una etiqueta de moneda de plataforma que no necesariamente coincide con la moneda negociada. Radar solo usa el precio como filtro fuerte de duplicados cuando confirmas USD.</small>
+
+          <div class="externalGrid">
+            <label>Publicador / vendedor mostrado
+              <input id="externalAgentName" placeholder="Ej. Daniela Toloza">
+            </label>
+            <label>Teléfono del publicador si aparece
+              <input id="externalAgentPhone" inputmode="tel" placeholder="0412-...">
+            </label>
+          </div>
+
+          <label>Descripción / texto de la publicación
+            <textarea id="externalText" rows="7" placeholder="Pega aquí el copy completo de Instagram, Marketplace o el portal..."></textarea>
+          </label>
+
+          <button id="analyzeExternalSource" class="primary" type="button">Analizar publicación</button>
+        </div>
+
+        <div id="externalAnalysis" class="externalAnalysis" hidden>
+          <div class="externalAnalysisHead">
+            <div><span>ANÁLISIS</span><strong id="externalAnalysisTitle">Propiedad detectada</strong></div>
+            <span id="externalAgeBadge"></span>
+          </div>
+
+          <div id="externalFacts" class="externalFacts"></div>
+          <div class="externalEvidenceBlock">
+            <div class="externalEvidenceTitle">
+              <strong>Datos extraídos del texto</strong>
+              <small>Verifica la evidencia antes de guardar o vincular.</small>
+            </div>
+            <div id="externalEvidence" class="externalEvidence"></div>
+          </div>
+
+          <div class="externalDecision">
+            <strong id="externalDecisionLabel">—</strong>
+            <small id="externalDecisionReason"></small>
+          </div>
+
+          <div id="externalCandidateBox" class="externalCandidateBox" hidden>
+            <span>Posible inmueble maestro</span>
+            <strong id="externalCandidateName">—</strong>
+            <small id="externalCandidateMeta"></small>
+          </div>
+
+          <div id="externalPublisherBox" class="externalPublisherBox" hidden>
+            <span>Publicador / vendedor mostrado</span>
+            <strong id="externalPublisherName">—</strong>
+            <small id="externalPublisherMeta">Dato de la publicación externa; no implica que sea el captador original.</small>
+          </div>
+
+          <div id="externalCaptorBox" class="externalCaptorBox" hidden>
+            <span>Captador probable conocido</span>
+            <strong id="externalCaptorName">—</strong>
+            <small id="externalCaptorMeta"></small>
+            <a id="externalCaptorWhatsapp" class="ghost" target="_blank" rel="noopener noreferrer" hidden>Consultar disponibilidad por WhatsApp</a>
+          </div>
+
+          <div class="externalSaveActions">
+            <button id="saveExternalLinked" class="primary" type="button">Guardar y vincular</button>
+            <button id="saveExternalNew" class="ghost" type="button">Guardar como inmueble nuevo</button>
+          </div>
+          <small class="externalDisclaimer">“Captador probable” es una inferencia por antigüedad conocida, recurrencia y coincidencias entre fuentes; no certifica quién posee la captación.</small>
+        </div>
+
+        <div class="externalRecentHead"><strong>Capturas recientes</strong><button id="refreshExternalSources" class="miniGhost" type="button">Actualizar</button></div>
+        <div id="externalRecentList"></div>
+
+        <div class="freshnessPanel">
+          <div class="freshnessHead">
+            <div><span>VIGENCIA INTELIGENTE</span><strong>Propiedades externas</strong></div>
+            <button id="recheckExternalFreshness" class="miniGhost" type="button">Recalcular</button>
+          </div>
+          <p class="freshnessIntro">Radar prioriza publicaciones externas de hasta 20 días. Una confirmación manual mantiene la propiedad como vigente durante 7 días.</p>
+          <div class="freshnessStats">
+            <div><strong id="freshVerified">0</strong><span>confirmadas</span></div>
+            <div><strong id="freshRecent">0</strong><span>recientes</span></div>
+            <div><strong id="freshAction">0</strong><span>por revisar</span></div>
+            <div><strong id="freshExpired">0</strong><span>vencidas</span></div>
+          </div>
+          <div class="freshnessFilters">
+            <button type="button" data-fresh-filter="action" class="active">Revisar</button>
+            <button type="button" data-fresh-filter="all">Todas</button>
+            <button type="button" data-fresh-filter="verified">Confirmadas</button>
+            <button type="button" data-fresh-filter="expired">Vencidas</button>
+          </div>
+          <div id="externalFreshnessList"></div>
+        </div>
+      </section>
+
+      <section class="card backupCard">
+        <div class="sectionTitle"><span>☁</span><div><h2>Respaldo del Radar</h2><p>Protege tu inventario local y recupéralo sin volver a procesar todos los chats.</p></div></div>
+        <div class="backupStateGrid">
+          <div><strong id="backupLastLabel">Sin respaldo</strong><span>último respaldo</span></div>
+          <div><strong id="backupScopeLabel">Base completa</strong><span>inmuebles · fuentes · contactos · favoritos</span></div>
+        </div>
+        <div class="backupActions">
+          <button id="downloadBackup" class="ghost" type="button">1. Preparar respaldo</button>
+          <button id="restoreLocalBackup" class="ghost" type="button">↥ Restaurar archivo</button>
+          <button id="backupDropboxNow" class="primary" type="button">☁ Guardar en Dropbox</button>
+          <button id="restoreDropboxBackup" class="ghost" type="button">↻ Restaurar desde Dropbox</button>
+        </div>
+        <div id="backupReadyBox" class="backupReadyBox" hidden>
+          <div class="backupReadyFile">
+            <div><b id="backupReadyName">Respaldo preparado</b><small id="backupReadySize"></small></div>
+          </div>
+          <button id="saveBackupFile" class="primary" type="button">2. Guardar en Archivos</button>
+          <a id="backupDirectLink" class="ghost backupDirectLink" href="#" download hidden>Descarga directa</a>
+          <small class="backupIOSHint">En iPhone se abrirá el menú de compartir. Elige <b>Guardar en Archivos</b> y selecciona iCloud Drive o “En mi iPhone”.</small>
+        </div>
+        <input id="backupFileInput" type="file" accept=".json,application/json" hidden />
+        <label class="backupAuto"><input id="autoBackupDropbox" type="checkbox"> <span>Respaldo automático en Dropbox después de importaciones, compradores y fuentes externas</span></label>
+        <div id="backupStatus" class="backupStatus">El respaldo no incluye contraseñas ni tokens de Dropbox.</div>
+      </section>
+
       <section class="card contactsCard">
         <div class="sectionTitle"><span>👥</span><div><h2>Directorio de captadores</h2><p>Se construye automáticamente desde CONTACTOS_PROCESADOS.</p></div></div>
         <div class="contactFlow"><span>CONTACTOS_PROCESADOS</span><b>→</b><span>Directorio local</span><b>→</b><span>WhatsApp automático</span></div>
@@ -212,7 +457,7 @@
       </details>
 
       <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.4.9 · 60 días</span></div>
+        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.1.2 · 60 días</span></div>
         <progress id="progress"></progress>
         <small>Los chats se procesan en este dispositivo.</small>
       </section>
@@ -222,7 +467,7 @@
         <div class="sectionTitle"><span>↻</span><div><h2>Importaciones recientes</h2><p>Historial guardado localmente.</p></div></div>
         <div id="recent"></div>
       </section>
-      <div class="dangerZone"><button id="resetBtn" class="ghost">Vaciar toda la base local</button></div>
+      <div class="dangerZone"><button id="resetBtn" class="ghost" disabled title="Deshabilitado en V0.6 Professional Audit">Borrado de base deshabilitado</button></div>
     </section>
 
     <section id="viewSaved" class="view">
@@ -230,6 +475,134 @@
       <section id="savedResults"></section>
       <div id="savedEmpty" class="empty" hidden>No has guardado propiedades todavía.</div>
     </section>
+
+    <dialog id="buyerDialog" class="buyerDialog">
+      <form id="buyerForm" method="dialog" class="buyerForm">
+        <div class="dialogHead buyerDialogHead">
+          <div><span>PERFIL DE BÚSQUEDA</span><h2 id="buyerDialogTitle">Nuevo comprador</h2></div>
+          <button id="closeBuyerDialog" type="button">×</button>
+        </div>
+        <div class="buyerFormBody">
+          <input id="buyerId" type="hidden">
+
+          <section class="buyerFormSection">
+            <h3>Cliente</h3>
+            <div class="buyerFormGrid">
+              <label class="fullSpan">Nombre *
+                <input id="buyerName" required placeholder="Ej. María González">
+              </label>
+              <label>WhatsApp
+                <input id="buyerPhone" inputmode="tel" placeholder="0412-0000000">
+              </label>
+              <label>Urgencia
+                <select id="buyerUrgency">
+                  <option value="alta">Alta</option>
+                  <option value="media" selected>Media</option>
+                  <option value="baja">Baja</option>
+                </select>
+              </label>
+              <label>Estado
+                <select id="buyerStatus">
+                  <option value="active">Activo</option>
+                  <option value="paused">Pausado</option>
+                  <option value="closed">Cerrado</option>
+                </select>
+              </label>
+              <label>Operación
+                <select id="buyerOperation">
+                  <option value="">Compra o alquiler</option>
+                  <option value="Venta">Compra</option>
+                  <option value="Alquiler">Alquiler</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Tipo de inmueble</h3>
+            <div id="buyerTypeChecks" class="buyerCheckGrid"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Ubicación</h3>
+            <p class="buyerHelp">Puedes seleccionar varios municipios y varias zonas. Si eliges zonas, Radar les dará prioridad exacta.</p>
+            <div id="buyerMunicipalityChecks" class="buyerChoiceList compactChoiceList"></div>
+            <div class="buyerZoneSearchWrap"><input id="buyerZoneSearch" placeholder="Filtrar zonas..."></div>
+            <div id="buyerZoneChecks" class="buyerChoiceList zoneChoiceList"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Presupuesto y espacios</h3>
+            <div class="buyerFormGrid">
+              <label>Precio mínimo
+                <input id="buyerMinPrice" type="number" inputmode="numeric" placeholder="0">
+              </label>
+              <label>Precio máximo
+                <input id="buyerMaxPrice" type="number" inputmode="numeric" placeholder="80000">
+              </label>
+              <label>Tolerancia sobre el tope
+                <select id="buyerBudgetTolerance">
+                  <option value="0" selected>Estricto · 0%</option>
+                  <option value="5">Permitir +5%</option>
+                  <option value="10">Permitir +10%</option>
+                </select>
+              </label>
+              <label>Habitaciones mín.
+                <select id="buyerMinBedrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+              </label>
+              <label>Baños mín.
+                <select id="buyerMinBathrooms"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+              </label>
+              <label>Puestos mín.
+                <select id="buyerMinParking"><option value="">Cualquiera</option><option>1</option><option>2</option><option>3</option><option>4</option></select>
+              </label>
+              <label>m² mínimo
+                <input id="buyerMinArea" type="number" inputmode="numeric" placeholder="0">
+              </label>
+              <label>m² máximo
+                <input id="buyerMaxArea" type="number" inputmode="numeric" placeholder="500">
+              </label>
+            </div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Características obligatorias</h3>
+            <p class="buyerHelp">Si no están confirmadas en una publicación, Radar baja el puntaje pero no elimina automáticamente el inmueble.</p>
+            <div id="buyerRequiredFeatures" class="buyerCheckGrid"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Características deseables</h3>
+            <div id="buyerDesiredFeatures" class="buyerCheckGrid"></div>
+          </section>
+
+          <section class="buyerFormSection">
+            <h3>Notas</h3>
+            <textarea id="buyerNotes" rows="4" placeholder="Ej. Cliente con liquidez inmediata, visita después de las 4 p. m..."></textarea>
+          </section>
+
+          <div class="buyerFormActions">
+            <button id="deleteBuyerBtn" type="button" class="dangerBuyerBtn" hidden>Eliminar comprador</button>
+            <button id="saveBuyerBtn" type="submit" class="primary">Guardar y calcular matches</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="buyerMatchesDialog" class="buyerMatchesDialog">
+      <div class="dialogHead">
+        <div><span>MATCHING AUTOMÁTICO</span><h2 id="buyerMatchesTitle">Coincidencias</h2></div>
+        <button id="closeBuyerMatchesDialog" type="button">×</button>
+      </div>
+      <div class="buyerMatchesSummary" id="buyerMatchesSummary"></div>
+      <div class="buyerMatchFilters">
+        <button class="matchFilterBtn active" data-kind="all">Todos</button>
+        <button class="matchFilterBtn" data-kind="exact">Compatibles</button>
+        <button class="matchFilterBtn" data-kind="verify">Por verificar</button>
+        <button class="matchFilterBtn" data-kind="alternative">Alternativas</button>
+      </div>
+      <div id="buyerMatchesList" class="buyerMatchesList"></div>
+    </dialog>
 
     <dialog id="multiSelectorDialog" class="multiSelectorDialog">
       <div class="selectorSheet">
@@ -256,10 +629,11 @@
 
   <nav class="bottomNav">
     <button data-view="viewSearch" class="active"><span>⌕</span>Buscar</button>
+    <button data-view="viewBuyers"><span>◎</span>Compradores</button>
     <button data-view="viewImport"><span>＋</span>Importar</button>
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0414"></script>
+  <script type="module" src="./app.js?v=0731"></script>
 </body>
 </html>

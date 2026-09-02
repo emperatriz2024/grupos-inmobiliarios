@@ -1,19 +1,23 @@
-ACTUALIZACIÓN ACUMULATIVA v0.4.14 PRO — PROCESAMIENTO RÁPIDO
+RADAR INMOBILIARIO v0.5.3 — VIGENCIA INTELIGENTE (DEV)
+=======================================================
 
-1. Sube TODOS los archivos al mismo repositorio GitHub: grupos-inmobiliarios.
-2. Rama: main. Carpeta: raíz /.
-3. Commit changes.
-4. Espera a que GitHub Pages publique.
-5. Abre la URL en Safari y recarga una vez.
-6. Cierra y vuelve a abrir la PWA.
-7. Verifica que diga v0.4.14 PRO.
+1. Subir SOLO a radar-v050-dev.
+2. NO tocar main/principal.
+3. Reemplazar archivos homónimos y agregar freshness-utils.js.
+4. Verificar arriba: v0.5.3 CORE.
+5. NO borrar ni restaurar la base.
 
-NO vacíes la base.
-NO reconfigures Dropbox.
-NO vuelvas a importar contactos.
+QUÉ BUSCAR:
+Importar > Fuentes externas > Vigencia Inteligente.
 
-NUEVO FLUJO
-- Éxito: CHAT_PENDIENTES queda sin ese ZIP.
-- CHAT_PROCESADOS reemplaza la copia anterior del mismo grupo.
-- Fallo: el ZIP permanece en CHAT_PENDIENTES para reintentar.
-- Reprocesamientos del mismo grupo serán progresivamente más rápidos gracias al modo incremental.
+PRUEBA:
+- Una publicación de 0–7 días = Recién publicada.
+- 8–15 días = Vigente probable.
+- 16–20 días = Verificar vigencia.
+- >20 días = Vencida por antigüedad.
+- Confirmar vigente = queda confirmada por 7 días.
+- No disponible = deja de entrar al matching si no existe otra fuente vigente del mismo inmueble.
+
+IMPORTANTE:
+La regla WhatsApp continúa en 60 días.
+No guardar todavía la prueba de Monteserrino si deseas terminar primero la auditoría de metadata/deduplicación.
