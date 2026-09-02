@@ -1,6 +1,6 @@
 
 import {
-  mergeProperties, patchPropertyPriceAudits, addImport, findImportByFileHash, getStats, getRecentImports,
+  mergeProperties, patchPropertyPriceAudits, findImportCheckpointByFileHash, saveImportCheckpoint, getStats, getRecentImports,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds,
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, recordLocationPendings,
@@ -9,7 +9,8 @@ import {
   getBuyers, getBuyer, saveBuyer, deleteBuyer, replaceBuyerMatches, getMatchesForBuyer, getAllMatches,
   exportDatabaseSnapshot, restoreDatabaseSnapshot, backupSnapshotSummary,
   setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments,
-  saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching
+  saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching,
+  syncClientTwin,getClientTwins,getClientPropertyStates,setClientPropertyState,saveClientFollowUp,getTwinEvents,getBrokerTwinAgenda,createBrokerDraft
 } from './db.js?v=0731';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
@@ -37,7 +38,9 @@ import { SecondaryWhatsAppSource } from './ingestion/source-ingestion.js';
 import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
+import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
 import { APP_LABEL, APP_VERSION } from './version.js';
+import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
 const $ = (q) => document.querySelector(q);
 let selectedFile = null;
@@ -74,6 +77,7 @@ const SECONDARY_ENDPOINT_KEY='radar_secondary_endpoint_v061';
 const SECONDARY_TOKEN_KEY='radar_secondary_token_v061_session';
 const SECONDARY_CURSOR_KEY='radar_secondary_cursor_v061';
 const SECONDARY_STATS_KEY='radar_secondary_stats_v061';
+const INGESTION_BATCH_KEY='radar_operational_ingestion_batch_v1';
 let secondarySyncing=false;
 
 function rememberSearchPosition(cardId='') {
@@ -558,6 +562,7 @@ function fillBuyerForm(buyer=null){
   $('#buyerMinPrice').value=b.min_price||'';
   $('#buyerMaxPrice').value=b.max_price||'';
   $('#buyerBudgetTolerance').value=String(b.budget_tolerance??0);
+  $('#buyerAlternativesAuthorized').checked=b.alternatives_authorized!==false;
   $('#buyerMinBedrooms').value=b.min_bedrooms||'';
   $('#buyerMinBathrooms').value=b.min_bathrooms||'';
   $('#buyerMinParking').value=b.min_parking||'';
@@ -583,7 +588,7 @@ function collectBuyerForm(){
     property_types:buyerSelected('buyerTypeChecks'),
     municipality_ids:buyerSelected('buyerMunicipalityChecks'),
     zone_ids:buyerSelected('buyerZoneChecks'),
-    min_price:buyerNumber('buyerMinPrice'),max_price:buyerNumber('buyerMaxPrice'),budget_tolerance:Number($('#buyerBudgetTolerance').value||0),
+    min_price:buyerNumber('buyerMinPrice'),max_price:buyerNumber('buyerMaxPrice'),budget_tolerance:Number($('#buyerBudgetTolerance').value||0),alternatives_authorized:$('#buyerAlternativesAuthorized').checked,
     min_bedrooms:buyerNumber('buyerMinBedrooms'),min_bathrooms:buyerNumber('buyerMinBathrooms'),min_parking:buyerNumber('buyerMinParking'),
     min_area:buyerNumber('buyerMinArea'),max_area:buyerNumber('buyerMaxArea'),
     required_features:required,desired_features:desired,notes:$('#buyerNotes').value.trim()
@@ -636,6 +641,7 @@ function buyerCardHTML(buyer,matches){
     ${buyer.notes?`<div class="buyerNotesPreview">${buyerEsc(buyer.notes.slice(0,180))}${buyer.notes.length>180?'…':''}</div>`:''}
     <div class="buyerCardActions">
       <button class="buyerMatchesBtn primary" data-id="${buyerEsc(buyer.id)}">Ver coincidencias</button>
+      <button class="buyerTwinBtn ghost" data-id="${buyerEsc(buyer.id)}">Client Twin</button>
       <button class="buyerEditBtn ghost" data-id="${buyerEsc(buyer.id)}">Editar</button>
       ${whatsapp?`<a class="buyerWhatsappBtn ghost" href="${buyerEsc(whatsapp)}">WhatsApp</a>`:''}
     </div>
@@ -643,13 +649,20 @@ function buyerCardHTML(buyer,matches){
 }
 async function refreshBuyersData(){
   buyers=await getBuyers();allBuyerMatches=await getAllMatches();
+  await Promise.all(buyers.map(b=>syncClientTwin(b)));
   const active=buyers.filter(b=>b.status==='active').length;
   const hot=buyers.filter(b=>b.status==='active'&&b.urgency==='alta').length;
   if($('#buyersActiveCount'))$('#buyersActiveCount').textContent=active.toLocaleString('es-VE');
   if($('#buyersHotCount'))$('#buyersHotCount').textContent=hot.toLocaleString('es-VE');
   if($('#buyersMatchesCount'))$('#buyersMatchesCount').textContent=allBuyerMatches.length.toLocaleString('es-VE');
   renderBuyersList();
+  await renderBrokerTwin();
   if(demandEngineEnabled)await refreshDemandCommercialPanel();
+}
+async function renderBrokerTwin(){
+  const box=$('#brokerTwinList');if(!box)return;const agenda=await getBrokerTwinAgenda();$('#brokerTwinCount').textContent=String(agenda.length);
+  box.innerHTML=agenda.slice(0,20).map(item=>`<article class="brokerAction"><div><b>${buyerEsc(item.title)}</b><p>${buyerEsc(item.why)}</p></div><button class="brokerOpenBuyer ghost" data-buyer="${buyerEsc(item.buyer_id)}">Abrir</button></article>`).join('')||'<div class="empty">Sin acciones comerciales pendientes.</div>';
+  box.querySelectorAll('.brokerOpenBuyer').forEach(btn=>btn.onclick=()=>openClientTwin(btn.dataset.buyer));
 }
 function resolveDemandTerritory(text=''){
   const haystack=normLoc(text),rows=[...(locationCatalog.zones||[]),...(locationCatalog.municipalities||[])].map(row=>({id:row.id,name:row.nombre||row.name||''})).filter(row=>row.name&&haystack.includes(normLoc(row.name))).sort((a,b)=>b.name.length-a.name.length);
@@ -675,6 +688,14 @@ function renderBuyersList(){
   box.innerHTML=rows.map(b=>buyerCardHTML(b,allBuyerMatches.filter(m=>m.buyer_id===b.id))).join('');
   box.querySelectorAll('.buyerMatchesBtn').forEach(btn=>btn.onclick=()=>openBuyerMatches(btn.dataset.id));
   box.querySelectorAll('.buyerEditBtn').forEach(btn=>btn.onclick=async()=>openBuyerDialog(await getBuyer(btn.dataset.id)));
+  box.querySelectorAll('.buyerTwinBtn').forEach(btn=>btn.onclick=()=>openClientTwin(btn.dataset.id));
+}
+async function openClientTwin(buyerId){
+  const [buyer,twins,states,events,masters]=await Promise.all([getBuyer(buyerId),getClientTwins(),getClientPropertyStates(buyerId),getTwinEvents(buyerId),getMasterProperties()]);if(!buyer)return;
+  const twin=twins.find(x=>x.buyer_id===buyerId)||await syncClientTwin(buyer),masterMap=new Map(masters.map(x=>[x.id,x]));$('#clientTwinBuyerId').value=buyerId;$('#clientTwinTitle').textContent=buyer.name;$('#clientTwinIntent').value=twin.intent||'BUSCANDO';$('#clientTwinNextAction').value=twin.next_action||'';$('#clientTwinNextAt').value=twin.next_action_at?String(twin.next_action_at).slice(0,16):'';
+  $('#clientTwinRequirements').innerHTML=`<b>Obligatorios</b><p>${buyerEsc([...(twin.mandatory.property_types||[]),twin.mandatory.max_price?`Hasta $${Number(twin.mandatory.max_price).toLocaleString('es-VE')}`:null].filter(Boolean).join(' · ')||'Sin requisitos definidos')}</p><b>Preferencias</b><p>${buyerEsc((twin.preferences.features||[]).join(' · ')||'Sin preferencias')}</p>`;
+  $('#clientTwinPropertyHistory').innerHTML=states.map(s=>`<article><b>${buyerEsc(masterMap.get(s.property_id)?.residence||masterMap.get(s.property_id)?.property_type||'Propiedad')}</b><span>${buyerEsc(s.status)}</span>${s.reason?`<p>${buyerEsc(s.reason)}</p>`:''}</article>`).join('')||'<div class="empty">Sin propiedades revisadas todavía.</div>';
+  $('#clientTwinTimeline').innerHTML=events.slice(0,12).map(e=>`<li><b>${buyerEsc(e.event_type.replaceAll('_',' '))}</b><small>${buyerEsc(new Date(e.occurred_at).toLocaleString('es-VE'))}</small></li>`).join('');const selected=states.filter(s=>s.status==='SELECTED').map(s=>s.property_id);$('#clientTwinDraft').disabled=!selected.length;$('#clientTwinDraft').dataset.properties=selected.join(',');$('#clientTwinDialog').showModal();
 }
 async function openBuyerDialog(buyer=null){
   fillBuyerForm(buyer);$('#buyerDialog').showModal();
@@ -703,10 +724,11 @@ function masterMatchCard(master,match){
 async function renderBuyerMatches(){
   const list=$('#buyerMatchesList');if(!list||!currentMatchBuyerId)return;
   const buyer=buyers.find(b=>b.id===currentMatchBuyerId)||await getBuyer(currentMatchBuyerId);
-  const all=await getMatchesForBuyer(currentMatchBuyerId),matches=all.filter(match=>buyerMatchFilter==='all'||buyerMatchCategory(match)===buyerMatchFilter).sort((a,b)=>buyerMatchRank(a)-buyerMatchRank(b)||Number(b.score||0)-Number(a.score||0));
-  const masters=await getMasterProperties(),map=new Map(masters.map(m=>[m.id,m]));
+  const allRaw=await getMatchesForBuyer(currentMatchBuyerId),states=await getClientPropertyStates(currentMatchBuyerId),stateMap=new Map(states.map(x=>[x.property_id,x]));
+  const masters=await getMasterProperties(),map=new Map(masters.map(m=>[m.id,m])),all=allRaw.filter(match=>{const state=stateMap.get(match.master_id),master=map.get(match.master_id);if(buyer?.alternatives_authorized===false&&buyerMatchCategory(match)==='alternative')return false;return !state||state.status!=='DISCARDED'||(master?.updated_at&&String(master.updated_at)>String(state.updated_at));}),matches=all.filter(match=>buyerMatchFilter==='all'||buyerMatchCategory(match)===buyerMatchFilter).sort((a,b)=>buyerMatchRank(a)-buyerMatchRank(b)||Number(b.score||0)-Number(a.score||0));
   const rows=matches.map(m=>({m,master:map.get(m.master_id)})).filter(x=>x.master);
   list.innerHTML=rows.length?rows.map(x=>masterMatchCard(x.master,x.m)).join(''):'<div class="empty">No hay coincidencias con este umbral.</div>';
+  list.querySelectorAll('.buyerMatchCard').forEach(card=>{const id=card.dataset.master,actions=document.createElement('div');actions.className='twinPropertyActions';actions.innerHTML='<button data-state="REVIEWED" class="ghost">Revisada</button><button data-state="SELECTED" class="ghost">Seleccionar</button><button data-state="DISCARDED" class="ghost">Descartar</button>';actions.querySelectorAll('button').forEach(btn=>btn.onclick=async()=>{const status=btn.dataset.state,reason=status==='DISCARDED'?prompt('Motivo del descarte:','No cumple la necesidad actual'):null;if(status==='DISCARDED'&&reason===null)return;await setClientPropertyState({buyer_id:currentMatchBuyerId,property_id:id,status,reason});await renderBuyerMatches();await renderBrokerTwin();});card.querySelector('.matchMain')?.append(actions);});
   list.querySelectorAll('.viewMatchedProperty').forEach(btn=>btn.onclick=()=>{
     const master=map.get(btn.dataset.master);if(!master)return;
     const ids=new Set(master.legacy_ids||[]);
@@ -727,6 +749,9 @@ async function openBuyerMatches(buyerId){
 $('#newBuyerBtn')?.addEventListener('click',()=>openBuyerDialog());
 $('#closeBuyerDialog')?.addEventListener('click',()=>$('#buyerDialog').close());
 $('#closeBuyerMatchesDialog')?.addEventListener('click',()=>$('#buyerMatchesDialog').close());
+$('#closeClientTwinDialog')?.addEventListener('click',()=>$('#clientTwinDialog').close());
+$('#clientTwinFollowForm')?.addEventListener('submit',async e=>{e.preventDefault();const id=$('#clientTwinBuyerId').value;await saveClientFollowUp(id,{intent:$('#clientTwinIntent').value,next_action:$('#clientTwinNextAction').value.trim(),next_action_at:$('#clientTwinNextAt').value?new Date($('#clientTwinNextAt').value).toISOString():null});await openClientTwin(id);await renderBrokerTwin();});
+$('#clientTwinDraft')?.addEventListener('click',async()=>{const id=$('#clientTwinBuyerId').value,properties=($('#clientTwinDraft').dataset.properties||'').split(',').filter(Boolean),draft=await createBrokerDraft(id,properties);$('#clientTwinDraftText').value=draft.message;});
 $('#buyerZoneSearch')?.addEventListener('input',()=>renderBuyerZones(buyerSelected('buyerZoneChecks')));
 $('#buyerSearchInput')?.addEventListener('input',renderBuyersList);
 $('#buyerStatusFilter')?.addEventListener('change',renderBuyersList);
@@ -740,6 +765,7 @@ $('#buyerForm')?.addEventListener('submit',async e=>{
   try{
     const currentId=$('#buyerId').value||null,existing=currentId?await getBuyer(currentId):null;
     const row=await saveBuyer({...existing,...collectBuyerForm()});
+    await syncClientTwin(row);
     if(demandEngineEnabled){await mirrorLegacyBuyersToDemands();await runDemandOpportunityMatching({trigger_type:'CLIENT_DEMAND_CHANGED',trigger_entity_id:`demand_client_${row.id}`});}
     $('#saveBuyerBtn').disabled=true;$('#saveBuyerBtn').textContent='Calculando coincidencias…';
     await recalculateBuyerMatches(row);
@@ -1106,31 +1132,40 @@ function processZipWithWorker(file, group, progressCb) {
   });
 }
 
-async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb) {
-  const saved = await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
-  if(demandEngineEnabled&&m.result.demand_messages?.length){const demands=processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory});await saveDemandRecords(demands);await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...new Set(demands.map(row=>row.id))]});}
-  const summary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
-    messages:m.result.messages,
-    messages_total:m.result.messages_total ?? m.result.messages,
-    skipped_age:m.result.messages_skipped_age ?? 0,
-    max_age_days:m.result.max_age_days ?? 60,
-    cutoff_date:m.result.cutoff_date ?? null,
-    detected:m.result.properties_detected,unique:m.result.unique.length,
-    messages_detected:m.result.messages,messages_imported:m.result.messages,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'completed',started_at:startedAt,finished_at:new Date().toISOString()};
-  await addImport(summary);
-  await learnContactsFromProperties(m.result.unique);
-  await recordLocationPendings(m.result.location_pendings||[]);
-  return summary;
+const IMPORT_PHASE_RANK=Object.freeze({PROPERTIES_SAVED:1,DEMANDS_SAVED:2,COMPLETED:3});
+
+async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb,{deferMatching=false,checkpoint=null}={}) {
+  let phase=String(checkpoint?.status||'').toUpperCase(),saved={added:Number(checkpoint?.added||0),updated:Number(checkpoint?.updated||0)};
+  const baseSummary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
+    messages:m.result.messages,messages_total:m.result.messages_total??m.result.messages,skipped_age:m.result.messages_skipped_age??0,max_age_days:m.result.max_age_days??60,cutoff_date:m.result.cutoff_date??null,detected:m.result.properties_detected,unique:m.result.unique.length,messages_detected:m.result.messages,messages_imported:m.result.messages,started_at:checkpoint?.started_at||startedAt};
+  if((IMPORT_PHASE_RANK[phase]||0)<IMPORT_PHASE_RANK.PROPERTIES_SAVED){
+    saved=await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
+    await learnContactsFromProperties(m.result.unique);await recordLocationPendings(m.result.location_pendings||[]);
+    checkpoint=await saveImportCheckpoint(fileHash,{...baseSummary,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'PROPERTIES_SAVED'});phase='PROPERTIES_SAVED';
+  }
+  const demands=demandEngineEnabled&&m.result.demand_messages?.length?processZipDemandMessages(m.result.demand_messages,{resolveTerritory:resolveDemandTerritory}):[];
+  let demandIds=[...new Set(checkpoint?.demand_ids||demands.map(row=>row.id))];
+  if((IMPORT_PHASE_RANK[phase]||0)<IMPORT_PHASE_RANK.DEMANDS_SAVED){
+    const demandSave=await saveDemandRecords(demands,{onProgress:(done,total)=>progressCb?.({phase:'demand',done,total})});
+    demandIds=[...new Set([...demandIds,...demandSave.demandIds])];
+    checkpoint=await saveImportCheckpoint(fileHash,{...baseSummary,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'DEMANDS_SAVED',demand_ids:demandIds,demands_written:demandSave.demandsWritten,sources_written:demandSave.sourcesWritten});phase='DEMANDS_SAVED';
+  }
+  progressCb?.({phase:'finalize',done:m.result.unique.length,total:m.result.unique.length});
+  const summary=await saveImportCheckpoint(fileHash,{...baseSummary,added:saved.added,updated:saved.updated,duplicates_detected:saved.updated,errors_count:0,status:'COMPLETED',demand_ids:demandIds,finished_at:new Date().toISOString()});
+  const propertyIds=[...new Set(m.result.unique.map(row=>row.id).filter(Boolean))];
+  if(demandEngineEnabled&&demandIds.length&&!deferMatching)await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:demandIds});
+  return {summary,demandIds,propertyIds};
 }
 
-async function importOneZip(file, group, progressCb) {
+async function importOneZip(file, group, progressCb,{deferMatching=false}={}) {
   const startedAt=new Date().toISOString();
   const bytes=await file.arrayBuffer(),hashBytes=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
-  const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),existing=await findImportByFileHash(fileHash);
-  if(existing)return {m:null,summary:{...existing,already_processed:true,status:'already_processed'}};
+  const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),checkpoint=await findImportCheckpointByFileHash(fileHash),phase=String(checkpoint?.status||'').toUpperCase();
+  if(phase==='COMPLETED')return {m:null,summary:{...checkpoint,already_processed:true,status:'already_processed'},demandIds:checkpoint.demand_ids||[],propertyIds:[]};
+  if(phase==='DEMANDS_SAVED'){const summary=await saveImportCheckpoint(fileHash,{...checkpoint,status:'COMPLETED',finished_at:new Date().toISOString()});return {m:null,summary,demandIds:summary.demand_ids||[],propertyIds:[]};}
   const m = await processZipWithWorker(file,group,progressCb);
-  const summary = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb);
-  return {m,summary};
+  const saved = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb,{deferMatching,checkpoint});
+  return {m,...saved};
 }
 
 const fileInput = $('#zipInput');
@@ -1156,6 +1191,7 @@ $('#importBtn').addEventListener('click', async () => {
       else if(p.phase==='process') setStatus('Detectando propiedades…',48);
       else if(p.phase==='process_progress') setStatus(`Detectando propiedades… ${Number(p.done||0).toLocaleString('es-VE')} / ${Number(p.total||0).toLocaleString('es-VE')}`,48+Math.round((Number(p.done||0)/Math.max(Number(p.total||0),1))*10));
       else if(p.phase==='save') setStatus(`Guardando base local… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,60+Math.round((p.done/Math.max(p.total,1))*35));
+      else if(p.phase==='demand') setStatus(`Demandas… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,96);
     });
     const alreadyProcessed=Boolean(summary.already_processed);
     const importTitle=alreadyProcessed?'ZIP ya procesado anteriormente':'Importación completada';
@@ -1569,6 +1605,7 @@ $('#reindexProcessed').onclick=async()=>{
         await importOneZip(file,groupFromName(entry.name),(p)=>{
           if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando ${entry.name}`;
           if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Actualizando índice · ${p.done}/${p.total}`;
+          if(p.phase==='demand') $('#dropboxProgressDetail').textContent=`DEMANDAS · ${p.done}/${p.total}`;
         });
         ok++;
       }catch(e){failed++;console.error('reindex',entry.name,e);}
@@ -1586,46 +1623,31 @@ $('#reindexProcessed').onclick=async()=>{
   }
 };
 
-$('#processPending').onclick=async()=>{
-  if(!pendingDropboxFiles.length){await refreshDropboxPending(); if(!pendingDropboxFiles.length) return;}
-  const s=getDropboxSettings();
-  $('#processPending').disabled=true; $('#refreshDropbox').disabled=true;
-  $('#dropboxProgress').hidden=false; $('#dropboxProgressBar').max=pendingDropboxFiles.length;
-  let ok=0, failed=0;
-  const queue=[...pendingDropboxFiles];
-  for(let i=0;i<queue.length;i++){
-    const entry=queue[i];
-    $('#dropboxProgressBar').value=i;
-    $('#dropboxProgressTitle').textContent='Procesando chats pendientes';
-    $('#dropboxProgressCount').textContent=`${i+1}/${queue.length}`;
-    $('#dropboxProgressDetail').textContent=`Descargando ${entry.name}`;
-    try{
-      const blob=await downloadDropboxFile(entry.path_lower||entry.path_display);
-      const file=new File([blob],entry.name,{type:'application/zip'});
-      const group=groupFromName(entry.name);
-      const {summary}=await importOneZip(file,group,(p)=>{
-        if(p.phase==='process') $('#dropboxProgressDetail').textContent=`Analizando últimos 60 días · ${entry.name}`;
-        if(p.phase==='save') $('#dropboxProgressDetail').textContent=`Guardando ${entry.name} · ${p.done}/${p.total}`;
-      });
-      $('#dropboxProgressDetail').textContent=`Moviendo ${entry.name} a ${s.processedPath}`;
-      await moveDropboxFile(entry.path_lower||entry.path_display,s.processedPath,entry.name);
-      ok++;
-      await loadData();
-    }catch(e){
-      failed++;
-      console.error(entry.name,e);
-      $('#dropboxProgressDetail').textContent=`Error en ${entry.name}: ${e.message}`;
-      await new Promise(r=>setTimeout(r,1200));
+async function applyWorkerResults(state){
+  const touchedDemandIds=new Set();
+  for(const job of state.jobs.filter(row=>row.status==='COMPLETED'&&!row.duplicate_of)){
+    for(let index=0;index<Number(job.result_chunks||0);index++){
+      const key=`radar_ingestion_applied_${job.id}_${index}`;if(localStorage.getItem(key))continue;
+      const chunk=await getIngestionResultChunk(job.id,index);await mergeProperties(chunk.properties||[]);await learnContactsFromProperties(chunk.properties||[]);await recordLocationPendings(chunk.location_pendings||[]);
+      const demands=demandEngineEnabled&&chunk.demand_messages?.length?processZipDemandMessages(chunk.demand_messages,{resolveTerritory:resolveDemandTerritory}):[],saved=await saveDemandRecords(demands);saved.demandIds.forEach(id=>touchedDemandIds.add(id));localStorage.setItem(key,'1');await new Promise(resolve=>setTimeout(resolve,0));
     }
+    if(job.file_hash)await saveImportCheckpoint(job.file_hash,{file_hash:job.file_hash,file_name:job.name,status:'COMPLETED',added:Number(job.result_summary?.unique||0),worker_job_id:job.id,finished_at:job.finished_at});
   }
-  $('#dropboxProgressBar').value=queue.length;
-  $('#dropboxProgressTitle').textContent=failed?'Proceso terminado con avisos':'Todos los pendientes fueron procesados';
-  $('#dropboxProgressCount').textContent=`${ok} OK${failed?` · ${failed} error`:''}`;
-  $('#dropboxProgressDetail').textContent=failed?'Los archivos con error permanecen en Chat pendiente.':'Los ZIP procesados fueron movidos a Procesado.';
-  $('#processPending').disabled=false; $('#refreshDropbox').disabled=false;
-  await refreshDropboxPending();
-  await maybeAutoBackup();
-};
+  if(demandEngineEnabled&&touchedDemandIds.size)await runDemandOpportunityMatching({trigger_type:'DEMAND_CHANGED',trigger_entity_id:[...touchedDemandIds]});await loadData();
+}
+
+async function monitorIngestionBatch(batchId){
+  $('#processPending').disabled=true;$('#refreshDropbox').disabled=true;$('#dropboxProgress').hidden=false;
+  for(;;){
+    const state=await getIngestionBatch(batchId),active=state.jobs.find(row=>!['COMPLETED','FAILED'].includes(row.status));
+    $('#dropboxProgressTitle').textContent=`Worker · build ${String(state.build_sha||'').slice(0,12)}`;$('#dropboxProgressBar').max=Math.max(state.total,1);$('#dropboxProgressBar').value=state.completed+state.failed;$('#dropboxProgressCount').textContent=`${state.completed+state.failed}/${state.total}`;
+    $('#dropboxProgressDetail').textContent=active?`${active.checkpoint} · ${active.name}`:state.failed?`${state.completed} OK · ${state.failed} con error`:'Procesamiento server-side completado';
+    if(state.status!=='RUNNING'){await applyWorkerResults(state);localStorage.removeItem(INGESTION_BATCH_KEY);break;}await new Promise(resolve=>setTimeout(resolve,2000));
+  }
+  $('#processPending').disabled=false;$('#refreshDropbox').disabled=false;await refreshDropboxPending();await maybeAutoBackup();
+}
+
+$('#processPending').onclick=async()=>{try{const started=await startIngestionJob();localStorage.setItem(INGESTION_BATCH_KEY,started.batch_id);await monitorIngestionBatch(started.batch_id);}catch(error){$('#dropboxProgress').hidden=false;$('#dropboxProgressTitle').textContent='Worker no disponible';$('#dropboxProgressDetail').textContent=error.message;$('#processPending').disabled=false;$('#refreshDropbox').disabled=false;}};
 
 async function initDropbox() {
   renderDropboxState();
@@ -1691,8 +1713,8 @@ $('#syncSecondaryNow')?.addEventListener('click',()=>syncSecondaryWhatsApp({sile
 $('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,endpointConfigured:Boolean(secondaryConfig().endpoint),tokenConfigured:Boolean(secondaryConfig().token),store:'radar-secondary-whatsapp-v061-test'},null,2);});
 
 async function initApp(){
-  const versionLabel=$('#appVersionLabel');if(versionLabel)versionLabel.textContent=APP_LABEL;
-  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  const versionLabel=$('#appVersionLabel');if(versionLabel){versionLabel.textContent=APP_LABEL;getWorkerInfo().then(info=>{versionLabel.textContent=`${APP_LABEL} · ${String(info.build_sha||'').slice(0,12)}`;}).catch(()=>{});}
+  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();const resumableBatch=localStorage.getItem(INGESTION_BATCH_KEY);if(resumableBatch)await monitorIngestionBatch(resumableBatch);renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
 setInterval(()=>{if(document.visibilityState==='visible')syncSecondaryWhatsApp({silent:true});},5*60*1000);

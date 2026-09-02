@@ -6,9 +6,10 @@ import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLoca
 import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
 import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchPrefilteredCandidates,OpportunityEngine} from './core/radar/demand-engine.js';
 import {reconcileReadiness} from './core/radar/readiness-engine.js';
+import {buildClientTwin,evolveClientPropertyState,buildBrokerAgenda,prepareBrokerDraft} from './core/radar/client-broker-twin.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -44,6 +45,10 @@ const READINESS_STORE='readiness_assessments';
 const ENRICHMENT_TASK_STORE='enrichment_tasks';
 const PROPERTY_PACKAGE_STORE='property_packages';
 const PACKAGE_MEDIA_STORE='package_media';
+const CLIENT_TWIN_STORE='client_twins';
+const CLIENT_PROPERTY_STATE_STORE='client_property_states';
+const COMMERCIAL_ACTION_STORE='commercial_actions';
+const TWIN_EVENT_STORE='twin_events';
 
 
 function openDB() {
@@ -167,6 +172,24 @@ function openDB() {
         const readiness=req.transaction.objectStore(READINESS_STORE);if(readiness.indexNames.contains('opportunity_id'))readiness.deleteIndex('opportunity_id');readiness.createIndex('opportunity_id','opportunity_id',{unique:false});if(!readiness.indexNames.contains('current_key'))readiness.createIndex('current_key','current_key',{unique:true});
         const packageMedia=req.transaction.objectStore(PACKAGE_MEDIA_STORE);if(!packageMedia.indexNames.contains('status'))packageMedia.createIndex('status','status',{unique:false});
       }
+      if(!db.objectStoreNames.contains(CLIENT_TWIN_STORE)){
+        const s=db.createObjectStore(CLIENT_TWIN_STORE,{keyPath:'id'});s.createIndex('buyer_id','buyer_id',{unique:true});s.createIndex('status','status',{unique:false});s.createIndex('next_action_at','next_action_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(CLIENT_PROPERTY_STATE_STORE)){
+        const s=db.createObjectStore(CLIENT_PROPERTY_STATE_STORE,{keyPath:'id'});s.createIndex('buyer_id','buyer_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('status','status',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(COMMERCIAL_ACTION_STORE)){
+        const s=db.createObjectStore(COMMERCIAL_ACTION_STORE,{keyPath:'id'});s.createIndex('buyer_id','buyer_id',{unique:false});s.createIndex('status','status',{unique:false});s.createIndex('due_at','due_at',{unique:false});
+      }
+      if(!db.objectStoreNames.contains(TWIN_EVENT_STORE)){
+        const s=db.createObjectStore(TWIN_EVENT_STORE,{keyPath:'id'});s.createIndex('buyer_id','buyer_id',{unique:false});s.createIndex('event_type','event_type',{unique:false});s.createIndex('occurred_at','occurred_at',{unique:false});
+      }
+      const importStore=req.transaction.objectStore(IMPORT_STORE);
+      if(!importStore.indexNames.contains('file_hash'))importStore.createIndex('file_hash','file_hash',{unique:false});
+      if(!importStore.indexNames.contains('status'))importStore.createIndex('status','status',{unique:false});
+      const demandStore=req.transaction.objectStore(DEMAND_STORE);
+      if(!demandStore.indexNames.contains('market_identity'))demandStore.createIndex('market_identity',['workspace_id','origin','requester_observed','criteria_fingerprint'],{unique:false});
+      if(!demandStore.indexNames.contains('requester_identity'))demandStore.createIndex('requester_identity',['workspace_id','requester_observed'],{unique:false});
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -283,11 +306,20 @@ export async function addImport(summary) {
   return id;
 }
 
+export async function findImportCheckpointByFileHash(fileHash){
+  if(!fileHash)return null;const db=await openDB();
+  try{const rows=await reqP(db.transaction(IMPORT_STORE,'readonly').objectStore(IMPORT_STORE).index('file_hash').getAll(fileHash));return rows.sort((a,b)=>Number(b.id||0)-Number(a.id||0))[0]||null;}
+  finally{db.close();}
+}
+
+export async function saveImportCheckpoint(fileHash,patch={}){
+  if(!fileHash)throw new Error('file_hash_required');const db=await openDB(),now=new Date().toISOString();
+  try{return await new Promise((resolve,reject)=>{const tx=db.transaction(IMPORT_STORE,'readwrite'),store=tx.objectStore(IMPORT_STORE),request=store.index('file_hash').getAll(fileHash);let saved=null;request.onsuccess=()=>{const current=(request.result||[]).sort((a,b)=>Number(b.id||0)-Number(a.id||0))[0]||null,row={...(current||{}),...patch,file_hash:fileHash,imported_at:current?.imported_at||patch.imported_at||now,checkpoint_updated_at:now};const put=current?store.put(row):store.add(row);put.onsuccess=()=>{saved={...row,id:current?.id||put.result};};};tx.oncomplete=()=>resolve(saved);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
+  finally{db.close();}
+}
+
 export async function findImportByFileHash(fileHash) {
-  if(!fileHash)return null;
-  const db=await openDB(),tx=db.transaction(IMPORT_STORE,'readonly'),store=tx.objectStore(IMPORT_STORE);
-  const found=await new Promise((resolve,reject)=>{const req=store.openCursor(null,'prev');req.onerror=()=>reject(req.error);req.onsuccess=()=>{const cursor=req.result;if(!cursor)return resolve(null);if(cursor.value?.file_hash===fileHash)return resolve(cursor.value);cursor.continue();};});
-  db.close();return found;
+  const row=await findImportCheckpointByFileHash(fileHash),status=String(row?.status||'').toLowerCase();return row&&['completed','complete','already_processed'].includes(status)&&!Number(row?.errors_count||0)?row:null;
 }
 
 export async function getStats() {
@@ -1026,11 +1058,47 @@ export async function getAllMatches(){
   const db=await openDB(),rows=await reqP(db.transaction(MATCH_STORE,'readonly').objectStore(MATCH_STORE).getAll());db.close();return rows;
 }
 
+// ---------- Client Twin / Broker Twin (Phase 0E) ---------------------------
+export async function syncClientTwin(buyer,now=Date.now()){
+  const db=await openDB(),store=db.transaction(CLIENT_TWIN_STORE,'readonly').objectStore(CLIENT_TWIN_STORE),previous=await reqP(store.index('buyer_id').get(buyer.id)),row=buildClientTwin(buyer,previous,now),at=new Date(now).toISOString(),shape=x=>JSON.stringify({name:x?.name,status:x?.status,urgency:x?.urgency,intent:x?.intent,mandatory:x?.mandatory,preferences:x?.preferences,alternatives:x?.alternatives,next_action:x?.next_action,next_action_at:x?.next_action_at,last_contact_at:x?.last_contact_at});
+  if(previous&&shape(previous)===shape(row)){db.close();return previous;}
+  await new Promise((resolve,reject)=>{const tx=db.transaction([CLIENT_TWIN_STORE,TWIN_EVENT_STORE],'readwrite');tx.objectStore(CLIENT_TWIN_STORE).put(row);tx.objectStore(TWIN_EVENT_STORE).put({id:`twin_event_${buyer.id}_${at}`,buyer_id:buyer.id,event_type:previous?'CLIENT_TWIN_UPDATED':'CLIENT_TWIN_CREATED',payload_json:{twin_id:row.id},occurred_at:at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return row;
+}
+export async function getClientTwins(){const db=await openDB(),rows=await reqP(db.transaction(CLIENT_TWIN_STORE,'readonly').objectStore(CLIENT_TWIN_STORE).getAll());db.close();return rows;}
+export async function getClientPropertyStates(buyerId=null){const db=await openDB(),store=db.transaction(CLIENT_PROPERTY_STATE_STORE,'readonly').objectStore(CLIENT_PROPERTY_STATE_STORE),rows=buyerId?await allByIndex(store,'buyer_id',buyerId):await reqP(store.getAll());db.close();return rows;}
+export async function setClientPropertyState(input,now=Date.now()){
+  const db=await openDB(),id=`client_property_${input.buyer_id}_${input.property_id}`,previous=await reqP(db.transaction(CLIENT_PROPERTY_STATE_STORE,'readonly').objectStore(CLIENT_PROPERTY_STATE_STORE).get(id)),row=evolveClientPropertyState(previous,input,now),at=new Date(now).toISOString();
+  await new Promise((resolve,reject)=>{const tx=db.transaction([CLIENT_PROPERTY_STATE_STORE,TWIN_EVENT_STORE],'readwrite');tx.objectStore(CLIENT_PROPERTY_STATE_STORE).put(row);tx.objectStore(TWIN_EVENT_STORE).put({id:`twin_event_${id}_${row.status}_${at}`,buyer_id:row.buyer_id,property_id:row.property_id,event_type:`PROPERTY_${row.status}`,payload_json:{reason:row.reason},occurred_at:at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});db.close();return row;
+}
+export async function saveClientFollowUp(buyerId,{intent,next_action,next_action_at,last_contact_at}={},now=Date.now()){
+  const buyer=await getBuyer(buyerId);if(!buyer)throw new Error('Comprador no encontrado.');const updated=await saveBuyer({...buyer,intent:intent||buyer.intent,next_action:next_action??buyer.next_action,next_action_at:next_action_at??buyer.next_action_at,last_contact_at:last_contact_at??buyer.last_contact_at});return syncClientTwin(updated,now);
+}
+export async function getTwinEvents(buyerId=null){const db=await openDB(),store=db.transaction(TWIN_EVENT_STORE,'readonly').objectStore(TWIN_EVENT_STORE),rows=buyerId?await allByIndex(store,'buyer_id',buyerId):await reqP(store.getAll());db.close();return rows.sort((a,b)=>String(b.occurred_at).localeCompare(String(a.occurred_at)));}
+export async function getBrokerTwinAgenda(now=Date.now()){
+  const [twins,matches,propertyStates,readiness,properties]=await Promise.all([getClientTwins(),getAllMatches(),getClientPropertyStates(),getReadinessAssessments({currentOnly:true}),getMasterProperties()]);return buildBrokerAgenda({twins,matches,propertyStates,readiness,properties,now});
+}
+export async function createBrokerDraft(buyerId,propertyIds=[]){const [twins,masters]=await Promise.all([getClientTwins(),getMasterProperties()]),properties=masters.filter(x=>propertyIds.includes(x.id)),twin=twins.find(x=>x.buyer_id===buyerId),draft=prepareBrokerDraft({twin,properties});const now=new Date().toISOString(),row={...draft,id:`commercial_action_${radarHash(`${buyerId}|${[...propertyIds].sort().join('|')}`)}`,type:'MESSAGE_DRAFT',status:'DRAFT',created_at:now,updated_at:now};const db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(COMMERCIAL_ACTION_STORE,'readwrite');tx.objectStore(COMMERCIAL_ACTION_STORE).put(row);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();return row;}
+export async function getCommercialActions(){const db=await openDB(),rows=await reqP(db.transaction(COMMERCIAL_ACTION_STORE,'readonly').objectStore(COMMERCIAL_ACTION_STORE).getAll());db.close();return rows;}
+
 // ---------- Demand → Match → Opportunity (Phase 0C) -------------------------
-export async function saveDemandRecords(records=[]){
-  if(!records.length)return 0;const db=await openDB(),now=new Date().toISOString(),existingDemands=await reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll()),existingSources=await reqP(db.transaction(DEMAND_SOURCE_STORE,'readonly').objectStore(DEMAND_SOURCE_STORE).getAll()),consolidated=consolidateMarketDemands(records,existingDemands,existingSources);
-  await new Promise((resolve,reject)=>{const tx=db.transaction([DEMAND_STORE,DEMAND_SOURCE_STORE],'readwrite'),store=tx.objectStore(DEMAND_STORE),sources=tx.objectStore(DEMAND_SOURCE_STORE);for(const record of consolidated.demands)store.put({...record,origin:record.origin||'MANUAL',status:record.status||'ACTIVE',created_at:record.created_at||now,updated_at:record.updated_at||now});for(const source of consolidated.sources)sources.put(source);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
-  db.close();return records.length;
+export async function saveDemandRecords(records=[],{onProgress,chunkSize=100}={}){
+  if(!records.length){onProgress?.(0,0);return {processed:0,demandsWritten:0,sourcesWritten:0,demandIds:[]};}
+  const db=await openDB(),now=new Date().toISOString(),existingDemandMap=new Map(),existingSourceMap=new Map();
+  try{
+    const readTx=db.transaction([DEMAND_STORE,DEMAND_SOURCE_STORE],'readonly'),demandStore=readTx.objectStore(DEMAND_STORE),sourceStore=readTx.objectStore(DEMAND_SOURCE_STORE),reads=[];
+    const identities=new Map(),requesters=new Map(),demandIds=new Set(),sourceIds=new Set(),sourceRefs=new Set();
+    for(const row of records){if(row?.id)demandIds.add(row.id);const requester=String(row?.requester_observed||'').trim(),criteria=row?.criteria_fingerprint;if(row?.origin==='MARKET'&&requester&&criteria){const workspace=row.workspace_id||'local';identities.set(`${workspace}|${requester}|${criteria}`,[workspace,'MARKET',requester,criteria]);requesters.set(`${workspace}|${requester}`,[workspace,requester]);}if(row?.source?.id)sourceIds.add(row.source.id);if(row?.source?.source_reference)sourceRefs.add(row.source.source_reference);}
+    for(const id of demandIds)reads.push(reqP(demandStore.get(id)).then(row=>{if(row)existingDemandMap.set(row.id,row);}));
+    for(const key of identities.values())reads.push(reqP(demandStore.index('market_identity').get(key)).then(row=>{if(row)existingDemandMap.set(row.id,row);}));
+    for(const key of requesters.values())reads.push(reqP(demandStore.index('requester_identity').getAll(key)).then(rows=>rows.forEach(row=>existingDemandMap.set(row.id,row))));
+    for(const id of sourceIds)reads.push(reqP(sourceStore.get(id)).then(row=>{if(row)existingSourceMap.set(row.id,row);}));
+    for(const reference of sourceRefs)reads.push(reqP(sourceStore.index('source_reference').getAll(reference)).then(rows=>rows.forEach(row=>existingSourceMap.set(row.id,row))));
+    await Promise.all(reads);
+    const consolidated=consolidateMarketDemands(records,[...existingDemandMap.values()],[...existingSourceMap.values()]),writes=[...consolidated.changedDemands.map(row=>({kind:'demand',row})),...consolidated.changedSources.map(row=>({kind:'source',row}))],size=Math.max(1,Number(chunkSize)||100);
+    for(let start=0;start<writes.length;start+=size){const batch=writes.slice(start,start+size);await new Promise((resolve,reject)=>{const tx=db.transaction([DEMAND_STORE,DEMAND_SOURCE_STORE],'readwrite'),demands=tx.objectStore(DEMAND_STORE),sources=tx.objectStore(DEMAND_SOURCE_STORE);for(const item of batch){if(item.kind==='demand')demands.put({...item.row,origin:item.row.origin||'MANUAL',status:item.row.status||'ACTIVE',created_at:item.row.created_at||now,updated_at:item.row.updated_at||now});else sources.put(item.row);}tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});onProgress?.(Math.min(writes.length,start+size),writes.length);await new Promise(resolve=>setTimeout(resolve,0));}
+    if(!writes.length)onProgress?.(0,0);
+    return {processed:records.length,demandsWritten:consolidated.changedDemands.length,sourcesWritten:consolidated.changedSources.length,demandIds:[...new Set(consolidated.changedDemands.map(row=>row.id))],stats:consolidated.stats};
+  }finally{db.close();}
 }
 export async function getClients(){const db=await openDB(),rows=await reqP(db.transaction(CLIENT_STORE,'readonly').objectStore(CLIENT_STORE).getAll());db.close();return rows;}
 export async function getDemands({origin=null,status=null}={}){const db=await openDB(),rows=await reqP(db.transaction(DEMAND_STORE,'readonly').objectStore(DEMAND_STORE).getAll());db.close();return rows.filter(row=>(!origin||row.origin===origin)&&(!status||row.status===status));}
@@ -1118,6 +1186,7 @@ const BACKUP_STORES=[
   ,CLIENT_STORE,DEMAND_STORE,MATCH_RUN_STORE,MATCH_CANDIDATE_STORE,OPPORTUNITY_STORE,
   OPPORTUNITY_SCORE_STORE,OPPORTUNITY_EVENT_STORE,DEMAND_SOURCE_STORE,
   READINESS_STORE,ENRICHMENT_TASK_STORE,PROPERTY_PACKAGE_STORE,PACKAGE_MEDIA_STORE
+  ,CLIENT_TWIN_STORE,CLIENT_PROPERTY_STATE_STORE,COMMERCIAL_ACTION_STORE,TWIN_EVENT_STORE
 ];
 export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 

@@ -6,7 +6,7 @@ const ASSETS=[
   './zip-reader.js'+V,'./search-utils.js'+V,'./date-utils.js'+V,'./contact-utils.js'+V,
   './location-utils.js'+V,'./location-catalog.js'+V,'./intent-utils.js'+V,'./dedupe-utils.js'+V,
   './dropbox.js'+V,'./buyer-utils.js'+V,'./external-source-utils.js'+V,'./freshness-utils.js'+V,
-  './version.js','./diagnostics.js','./core/property-policy.js','./external/adapters.js','./ingestion/source-ingestion.js','./ingestion/secondary-processing.js','./ingestion/demand-processing.js','./core/radar/demand-engine.js','./core/radar/territory.js','./core/radar/config.js','./secondary-whatsapp/contract.js',
+  './version.js','./diagnostics.js','./core/property-policy.js','./core/operational-zip-batch.js','./external/adapters.js','./ingestion/source-ingestion.js','./ingestion/secondary-processing.js','./ingestion/demand-processing.js','./ingestion/worker-client.js','./core/radar/demand-engine.js','./core/radar/territory.js','./core/radar/config.js','./secondary-whatsapp/contract.js',
   './manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'
 ];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
@@ -15,7 +15,7 @@ self.addEventListener('activate',event=>event.waitUntil((async()=>{
   await Promise.all(keys.filter(key=>key.startsWith(CACHE_PREFIX)&&key!==CACHE).map(key=>caches.delete(key)));
   await self.clients.claim();
   const clients=await self.clients.matchAll({type:'window'});
-  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.7.3-test'}));
+  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.7.4-test'}));
 })()));
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||new URL(event.request.url).origin!==self.location.origin)return;

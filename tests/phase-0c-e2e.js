@@ -2,7 +2,7 @@ import {mirrorLegacyBuyersToDemands,saveDemandRecords,runDemandOpportunityMatchi
 import {parseDemandRequest} from '../core/radar/demand-engine.js';
 import {APP_LABEL} from '../version.js';
 
-const result=document.querySelector('#result'),STATE='phase-0c-e2e-state',RUN='phase-0c-e2e-run',DB='grupos-inmobiliarios',VERSION=11;
+const result=document.querySelector('#result'),STATE='phase-0c-e2e-state',RUN='phase-0c-e2e-run',DB='grupos-inmobiliarios',VERSION=12;
 const runKey=sessionStorage.getItem(RUN)||`${Date.now()}-${Math.random().toString(36).slice(2)}`;sessionStorage.setItem(RUN,runKey);
 const ids={buyer:`TEST-0C-BUYER-${runKey}`,paused:`TEST-0C-PAUSED-${runKey}`,p1:`TEST-0C-P1-${runKey}`,p2:`TEST-0C-P2-${runKey}`,p3:`TEST-0C-P3-${runKey}`,p4:`TEST-0C-P4-${runKey}`};
 const requestAt=Date.now(),request=parseDemandRequest({text:'Solicito Casa San Diego hasta $60.000',messageId:`TEST-0C-REQUEST-${runKey}`,author_id:`TEST-REQUESTER-${runKey}`,group_id:`TEST-GROUP-${runKey}`,received_at:new Date(requestAt).toISOString(),source_channel:'secondary_number'},{origin:'MARKET'});
@@ -12,7 +12,7 @@ const done=tx=>new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=(
 const open=()=>new Promise((resolve,reject)=>{const req=indexedDB.open(DB,VERSION);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
 async function put(store,row){const db=await open(),tx=db.transaction(store,'readwrite');tx.objectStore(store).put(row);await done(tx);db.close();}
 async function seed(){
-  await getClients();const db=await open();assert(db.version===11,'IndexedDB no abrió V11');for(const name of ['clients','demands','demand_sources','match_runs','match_candidates','opportunities','opportunity_scores','opportunity_events'])assert(db.objectStoreNames.contains(name),`Falta ${name}`);
+  await getClients();const db=await open();assert(db.version===12,'IndexedDB no abrió V12');for(const name of ['clients','demands','demand_sources','match_runs','match_candidates','opportunities','opportunity_scores','opportunity_events'])assert(db.objectStoreNames.contains(name),`Falta ${name}`);
   const now='2026-08-28T12:00:00.000Z',tx=db.transaction(['buyers','master_properties'],'readwrite');
   tx.objectStore('buyers').put({id:ids.buyer,name:'Cliente TEST Casa San Diego',status:'active',operation:'Venta',property_types:['Casa'],municipality_ids:['san-diego'],max_price:60000,budget_tolerance:0,created_at:now,updated_at:now});
   tx.objectStore('buyers').put({id:ids.paused,name:'Cliente pausado',status:'paused',operation:'Venta',property_types:['Casa'],max_price:60000,created_at:now,updated_at:now});
@@ -38,7 +38,7 @@ async function run(){
   }
   const demands=await getDemands(),opportunities=await getOpportunities(),events=await getOpportunityEvents(),clientDemand=demands.find(x=>x.legacy_buyer_id===ids.buyer),p1=opportunities.filter(x=>x.property_id===ids.p1),p2=opportunities.filter(x=>x.property_id===ids.p2);
   assert(p1.every(x=>x.status==='INVALIDATED'),'ARCHIVED no invalidó oportunidades P1');assert(p2.filter(x=>x.demand_id===clientDemand.id||x.demand_id===request.id).every(x=>x.status==='ACTIVE'),'Price drop no reabrió P2');assert(events.some(x=>x.event_type==='OPPORTUNITY_INVALIDATED')&&events.some(x=>x.event_type==='OPPORTUNITY_REOPENED'),'Historial no conservó invalidación/reapertura');
-  sessionStorage.removeItem(STATE);sessionStorage.removeItem(RUN);result.textContent=JSON.stringify({status:'PASS',indexedDBVersion:11,backupSchema:3,clientMigration:'PASS',pausedBuyer:'PASS',marketLifecycle:'PASS',repostProvenance:'PASS',marketRouting:'PASS',opportunityInvalidation:'PASS',opportunityReopen:'PASS',eventHistory:'PASS',versionLabel:APP_LABEL},null,2);
+  sessionStorage.removeItem(STATE);sessionStorage.removeItem(RUN);result.textContent=JSON.stringify({status:'PASS',indexedDBVersion:12,backupSchema:3,clientMigration:'PASS',pausedBuyer:'PASS',marketLifecycle:'PASS',repostProvenance:'PASS',marketRouting:'PASS',opportunityInvalidation:'PASS',opportunityReopen:'PASS',eventHistory:'PASS',versionLabel:APP_LABEL},null,2);
 }
 async function getMaster(id){const db=await open(),row=await reqP(db.transaction('master_properties','readonly').objectStore('master_properties').get(id));db.close();return row;}
 run().catch(error=>{sessionStorage.removeItem(STATE);sessionStorage.removeItem(RUN);result.textContent=`FAIL\n${error.stack||error.message}`;document.body.dataset.status='FAIL';});
