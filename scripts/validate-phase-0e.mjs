@@ -1,4 +1,4 @@
 import fs from 'node:fs';import assert from 'node:assert/strict';
 const read=f=>fs.readFileSync(new URL(`../${f}`,import.meta.url),'utf8'),db=read('db.js'),app=read('app.js'),html=read('index.html'),sql=read('db/migrations/007_phase_0e_client_broker_twin.sql');
 for(const table of ['client_twins','client_property_states','commercial_actions','twin_events']){assert.match(sql,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));assert.match(db,new RegExp(table));}
-assert.doesNotMatch(sql,/DROP\s+(TABLE|COLUMN)|TRUNCATE/i);assert.match(db,/const DB_VERSION = 12/);assert.match(app,/renderBrokerTwin/);assert.match(app,/setClientPropertyState/);assert.match(html,/id="clientTwinDialog"/);assert.match(html,/id="brokerTwinPanel"/);console.log('Phase 0E Client Twin + Broker Twin contract: PASS');
+assert.doesNotMatch(sql,/DROP\s+(TABLE|COLUMN)|TRUNCATE/i);assert.match(db,/const DB_VERSION = 13/);assert.match(app,/renderBrokerTwin/);assert.match(app,/setClientPropertyState/);assert.match(html,/id="clientTwinDialog"/);assert.match(html,/id="brokerTwinPanel"/);console.log('Phase 0E Client Twin + Broker Twin contract: PASS');
