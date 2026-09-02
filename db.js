@@ -8,9 +8,10 @@ import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchP
 import {reconcileReadiness} from './core/radar/readiness-engine.js';
 import {buildClientTwin,evolveClientPropertyState,buildBrokerAgenda,prepareBrokerDraft} from './core/radar/client-broker-twin.js';
 import {buildPropertyTwin,evolvePipeline,controlTower} from './core/radar/revenue-operations.js';
+import {buildOwnerTwin,mergeOwners,evolveCapture,demandSignals,ownerTower} from './core/radar/owner-capture-demand.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 13;
+const DB_VERSION = 14;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -53,6 +54,7 @@ const TWIN_EVENT_STORE='twin_events';
 const PROPERTY_TWIN_STORE='property_twins';
 const PIPELINE_STORE='commercial_pipeline';
 const PIPELINE_EVENT_STORE='pipeline_events';
+const OWNER_TWIN_STORE='owner_twins',OWNER_EVENT_STORE='owner_events',CAPTURE_STORE='capture_pipeline',CAPTURE_EVENT_STORE='capture_events',DEMAND_SIGNAL_STORE='demand_signals';
 
 
 function openDB() {
@@ -191,6 +193,11 @@ function openDB() {
       if(!db.objectStoreNames.contains(PROPERTY_TWIN_STORE)){const s=db.createObjectStore(PROPERTY_TWIN_STORE,{keyPath:'id'});s.createIndex('property_id','property_id',{unique:true});s.createIndex('next_action_at','next_action_at',{unique:false});}
       if(!db.objectStoreNames.contains(PIPELINE_STORE)){const s=db.createObjectStore(PIPELINE_STORE,{keyPath:'id'});s.createIndex('buyer_id','buyer_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('stage','stage',{unique:false});s.createIndex('next_action_at','next_action_at',{unique:false});}
       if(!db.objectStoreNames.contains(PIPELINE_EVENT_STORE)){const s=db.createObjectStore(PIPELINE_EVENT_STORE,{keyPath:'id'});s.createIndex('pipeline_id','pipeline_id',{unique:false});s.createIndex('occurred_at','occurred_at',{unique:false});}
+      if(!db.objectStoreNames.contains(OWNER_TWIN_STORE)){const s=db.createObjectStore(OWNER_TWIN_STORE,{keyPath:'id'});s.createIndex('dedupe_key','dedupe_key',{unique:true});}
+      if(!db.objectStoreNames.contains(OWNER_EVENT_STORE)){const s=db.createObjectStore(OWNER_EVENT_STORE,{keyPath:'id'});s.createIndex('owner_id','owner_id',{unique:false});}
+      if(!db.objectStoreNames.contains(CAPTURE_STORE)){const s=db.createObjectStore(CAPTURE_STORE,{keyPath:'id'});s.createIndex('owner_id','owner_id',{unique:false});s.createIndex('stage','stage',{unique:false});s.createIndex('due_at','due_at',{unique:false});}
+      if(!db.objectStoreNames.contains(CAPTURE_EVENT_STORE)){const s=db.createObjectStore(CAPTURE_EVENT_STORE,{keyPath:'id'});s.createIndex('capture_id','capture_id',{unique:false});}
+      if(!db.objectStoreNames.contains(DEMAND_SIGNAL_STORE)){const s=db.createObjectStore(DEMAND_SIGNAL_STORE,{keyPath:'id'});s.createIndex('strength','strength',{unique:false});}
       const importStore=req.transaction.objectStore(IMPORT_STORE);
       if(!importStore.indexNames.contains('file_hash'))importStore.createIndex('file_hash','file_hash',{unique:false});
       if(!importStore.indexNames.contains('status'))importStore.createIndex('status','status',{unique:false});
@@ -1097,6 +1104,14 @@ export async function getPipelines(){const db=await openDB(),rows=await reqP(db.
 export async function savePipeline(input,now=Date.now()){const id=`pipeline_${input.buyer_id}_${input.property_id||'general'}`,db=await openDB(),old=await reqP(db.transaction(PIPELINE_STORE,'readonly').objectStore(PIPELINE_STORE).get(id)),row=evolvePipeline(old,input,now),at=new Date(now).toISOString();await new Promise((resolve,reject)=>{const tx=db.transaction([PIPELINE_STORE,PIPELINE_EVENT_STORE],'readwrite');tx.objectStore(PIPELINE_STORE).put(row);tx.objectStore(PIPELINE_EVENT_STORE).put({id:`pipeline_event_${id}_${row.stage}_${at}`,pipeline_id:id,buyer_id:row.buyer_id,property_id:row.property_id,event_type:`STAGE_${row.stage}`,payload_json:{owner:row.owner,loss_reason:row.loss_reason},occurred_at:at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();return row;}
 export async function getPipelineEvents(){const db=await openDB(),rows=await reqP(db.transaction(PIPELINE_EVENT_STORE,'readonly').objectStore(PIPELINE_EVENT_STORE).getAll());db.close();return rows;}
 export async function getControlTower(now=Date.now()){const [pipelines,propertyTwins,clientTwins,brokerAgenda]=await Promise.all([getPipelines(),rebuildPropertyTwins(now),getClientTwins(),getBrokerTwinAgenda(now)]);return controlTower({pipelines,propertyTwins,clientTwins,brokerAgenda,now});}
+export async function getOwnerTwins(){const db=await openDB(),r=await reqP(db.transaction(OWNER_TWIN_STORE,'readonly').objectStore(OWNER_TWIN_STORE).getAll());db.close();return r;}
+export async function saveOwnerTwin(input,now=Date.now()){const db=await openDB(),s=db.transaction(OWNER_TWIN_STORE,'readonly').objectStore(OWNER_TWIN_STORE),probe=buildOwnerTwin(input,null,now),old=await reqP(s.index('dedupe_key').get(probe.dedupe_key)),row=old?mergeOwners(old,probe,now):probe,at=new Date(now).toISOString();await new Promise((resolve,reject)=>{const tx=db.transaction([OWNER_TWIN_STORE,OWNER_EVENT_STORE],'readwrite');tx.objectStore(OWNER_TWIN_STORE).put(row);tx.objectStore(OWNER_EVENT_STORE).put({id:`owner_event_${row.id}_${at}`,owner_id:row.id,event_type:old?'OWNER_UPDATED':'OWNER_CREATED',payload_json:{property_ids:row.property_ids},occurred_at:at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();return row;}
+export async function getOwnerEvents(ownerId=null){const db=await openDB(),s=db.transaction(OWNER_EVENT_STORE,'readonly').objectStore(OWNER_EVENT_STORE),r=ownerId?await allByIndex(s,'owner_id',ownerId):await reqP(s.getAll());db.close();return r.sort((a,b)=>String(b.occurred_at).localeCompare(String(a.occurred_at)));}
+export async function getCaptures(){const db=await openDB(),r=await reqP(db.transaction(CAPTURE_STORE,'readonly').objectStore(CAPTURE_STORE).getAll());db.close();return r;}
+export async function saveCapture(input,now=Date.now()){const id=`capture_${input.owner_id}_${input.property_id}`,db=await openDB(),old=await reqP(db.transaction(CAPTURE_STORE,'readonly').objectStore(CAPTURE_STORE).get(id)),row=evolveCapture(old,input,now),at=new Date(now).toISOString(),changed=!old||old.stage!==row.stage||old.next_action!==row.next_action||old.due_at!==row.due_at||old.notes!==row.notes;await new Promise((resolve,reject)=>{const names=changed?[CAPTURE_STORE,CAPTURE_EVENT_STORE]:[CAPTURE_STORE],tx=db.transaction(names,'readwrite');tx.objectStore(CAPTURE_STORE).put(row);if(changed)tx.objectStore(CAPTURE_EVENT_STORE).put({id:`capture_event_${id}_${row.stage}_${at}`,capture_id:id,event_type:`STAGE_${row.stage}`,payload_json:{notes:row.notes,loss_reason:row.loss_reason},occurred_at:at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();return row;}
+export async function getCaptureEvents(captureId=null){const db=await openDB(),s=db.transaction(CAPTURE_EVENT_STORE,'readonly').objectStore(CAPTURE_EVENT_STORE),r=captureId?await allByIndex(s,'capture_id',captureId):await reqP(s.getAll());db.close();return r.sort((a,b)=>String(b.occurred_at).localeCompare(String(a.occurred_at)));}
+export async function refreshDemandSignals(){const [buyers,matches,properties]=await Promise.all([getBuyers(),getAllMatches(),getMasterProperties()]),rows=demandSignals({buyers,matches,properties}),db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(DEMAND_SIGNAL_STORE,'readwrite'),s=tx.objectStore(DEMAND_SIGNAL_STORE);s.clear();rows.forEach(x=>s.put({...x,updated_at:new Date().toISOString()}));tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();return rows;}
+export async function getOwnerControlTower(now=Date.now()){const [owners,captures,signals]=await Promise.all([getOwnerTwins(),getCaptures(),refreshDemandSignals()]);return ownerTower({owners,captures,signals,now});}
 
 // ---------- Demand → Match → Opportunity (Phase 0C) -------------------------
 export async function saveDemandRecords(records=[],{onProgress,chunkSize=100}={}){
@@ -1206,6 +1221,7 @@ const BACKUP_STORES=[
   READINESS_STORE,ENRICHMENT_TASK_STORE,PROPERTY_PACKAGE_STORE,PACKAGE_MEDIA_STORE
   ,CLIENT_TWIN_STORE,CLIENT_PROPERTY_STATE_STORE,COMMERCIAL_ACTION_STORE,TWIN_EVENT_STORE
   ,PROPERTY_TWIN_STORE,PIPELINE_STORE,PIPELINE_EVENT_STORE
+  ,OWNER_TWIN_STORE,OWNER_EVENT_STORE,CAPTURE_STORE,CAPTURE_EVENT_STORE,DEMAND_SIGNAL_STORE
 ];
 export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 

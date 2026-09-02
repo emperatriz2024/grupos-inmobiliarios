@@ -1,6 +1,6 @@
 const CACHE_PREFIX='grupos-inmobiliarios-';
-const CACHE=`${CACHE_PREFIX}v0731-ready-hardening`;
-const V='?v=0731';
+const CACHE=`${CACHE_PREFIX}v0760-owner-capture-demand`;
+const V='?v=0760';
 const ASSETS=[
   './','./index.html','./styles.css'+V,'./app.js'+V,'./db.js'+V,'./worker.js'+V,'./engine.js'+V,
   './zip-reader.js'+V,'./search-utils.js'+V,'./date-utils.js'+V,'./contact-utils.js'+V,
