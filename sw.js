@@ -1,6 +1,6 @@
 const CACHE_PREFIX='grupos-inmobiliarios-';
-const CACHE=`${CACHE_PREFIX}v0770-revenue-os-complete`;
-const V='?v=0770';
+const CACHE=`${CACHE_PREFIX}v0771-architecture-audit`;
+const V='?v=0771';
 const ASSETS=[
   './','./index.html','./styles.css'+V,'./app.js'+V,'./db.js'+V,'./worker.js'+V,'./engine.js'+V,
   './zip-reader.js'+V,'./search-utils.js'+V,'./date-utils.js'+V,'./contact-utils.js'+V,
@@ -15,7 +15,7 @@ self.addEventListener('activate',event=>event.waitUntil((async()=>{
   await Promise.all(keys.filter(key=>key.startsWith(CACHE_PREFIX)&&key!==CACHE).map(key=>caches.delete(key)));
   await self.clients.claim();
   const clients=await self.clients.matchAll({type:'window'});
-  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.7.4-test'}));
+  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.7.7-test'}));
 })()));
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||new URL(event.request.url).origin!==self.location.origin)return;

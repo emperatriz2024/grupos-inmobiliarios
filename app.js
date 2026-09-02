@@ -1144,7 +1144,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(file, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0600',{type:'module'});
+    const worker = new Worker('./worker.js?v=0771',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1755,5 +1755,5 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0731').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0771').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }
