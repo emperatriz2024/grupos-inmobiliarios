@@ -11,8 +11,9 @@ import {
   setMasterOwnership, getOwnListingDetails, saveOwnListingDetails, recordSourceAttachments,
   saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching,
   syncClientTwin,getClientTwins,getClientPropertyStates,setClientPropertyState,saveClientFollowUp,getTwinEvents,getBrokerTwinAgenda,createBrokerDraft,
-  rebuildPropertyTwins,savePropertyTwinAction,savePipeline,getControlTower
-} from './db.js?v=0731';
+  rebuildPropertyTwins,savePropertyTwinAction,savePipeline,getControlTower,
+  getOwnerTwins,saveOwnerTwin,getCaptures,saveCapture,getOwnerControlTower
+} from './db.js?v=0760';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
@@ -659,6 +660,7 @@ async function refreshBuyersData(){
   renderBuyersList();
   await renderBrokerTwin();
   await renderControlTower();
+  await renderOwnerOperations();
   if(demandEngineEnabled)await refreshDemandCommercialPanel();
 }
 async function renderBrokerTwin(){
@@ -666,7 +668,13 @@ async function renderBrokerTwin(){
   box.innerHTML=agenda.slice(0,20).map(item=>`<article class="brokerAction"><div><b>${buyerEsc(item.title)}</b><p>${buyerEsc(item.why)}</p></div><button class="brokerOpenBuyer ghost" data-buyer="${buyerEsc(item.buyer_id)}">Abrir</button></article>`).join('')||'<div class="empty">Sin acciones comerciales pendientes.</div>';
   box.querySelectorAll('.brokerOpenBuyer').forEach(btn=>btn.onclick=()=>openClientTwin(btn.dataset.buyer));
 }
-async function renderControlTower(){const box=$('#controlTowerList');if(!box)return;const rows=await getControlTower();$('#controlTowerCount').textContent=String(rows.length);box.innerHTML=rows.slice(0,30).map(x=>`<article class="brokerAction"><div><b>${buyerEsc(x.title)}</b><p>${buyerEsc(x.why)}</p></div><span>${x.priority}</span></article>`).join('')||'<div class="empty">No hay acciones pendientes para hoy.</div>';}
+async function renderControlTower(){const box=$('#controlTowerList');if(!box)return;const [clientRows,ownerRows]=await Promise.all([getControlTower(),getOwnerControlTower()]),rows=[...clientRows,...ownerRows].sort((a,b)=>b.priority-a.priority);$('#controlTowerCount').textContent=String(rows.length);box.innerHTML=rows.slice(0,30).map(x=>`<article class="brokerAction"><div><b>${buyerEsc(x.title)}</b><p>${buyerEsc(x.why)}</p></div><span>${x.priority}</span></article>`).join('')||'<div class="empty">No hay acciones pendientes para hoy.</div>';}
+
+async function renderOwnerOperations(){const box=$('#ownerOperationsList');if(!box)return;const [owners,captures,actions]=await Promise.all([getOwnerTwins(),getCaptures(),getOwnerControlTower()]);$('#ownerOperationsCount').textContent=String(actions.length);box.innerHTML=[...actions.slice(0,8).map(x=>`<article class="brokerAction"><div><b>${buyerEsc(x.title)}</b><p>${buyerEsc(x.why)}</p></div><span>${x.priority}</span></article>`),...owners.map(o=>`<article class="brokerAction"><div><b>${buyerEsc(o.confirmed?.name||'Propietario pendiente')}</b><p>${o.property_ids.length} propiedad(es) · ${buyerEsc(captures.find(c=>c.owner_id===o.id)?.stage||'Sin captacion')}</p></div><span>${buyerEsc(o.contact?.consent||'UNKNOWN')}</span></article>`)].join('')||'<div class="empty">No hay propietarios registrados.</div>';}
+
+$('#newOwnerBtn')?.addEventListener('click',()=>{$('#ownerCaptureForm').reset();$('#ownerResponsible').value='Emperatriz';$('#ownerCaptureDialog').showModal();});
+$('#closeOwnerCaptureDialog')?.addEventListener('click',()=>$('#ownerCaptureDialog').close());
+$('#ownerCaptureForm')?.addEventListener('submit',async e=>{e.preventDefault();const propertyId=$('#ownerPropertyId').value.trim(),owner=await saveOwnerTwin({name:$('#ownerName').value.trim(),phone:$('#ownerPhone').value.trim(),email:$('#ownerEmail').value.trim(),relationship:$('#ownerRelationship').value,motivation:$('#ownerMotivation').value.trim(),urgency:$('#ownerUrgency').value,expected_price:Number($('#ownerExpectedPrice').value)||null,recommended_price:Number($('#ownerRecommendedPrice').value)||null,negotiation_flexibility:$('#ownerFlexibility').value.trim(),consent_status:$('#ownerConsent').value,contact_restrictions:$('#ownerRestrictions').value.split(',').map(x=>x.trim()).filter(Boolean),documents_available:$('#ownerDocumentsAvailable').value.split(',').map(x=>x.trim()).filter(Boolean),documents_pending:$('#ownerDocumentsPending').value.split(',').map(x=>x.trim()).filter(Boolean),property_ids:propertyId?[propertyId]:[],next_action:$('#ownerNextAction').value.trim(),next_action_at:$('#ownerDueAt').value?new Date($('#ownerDueAt').value).toISOString():null,last_interaction_at:new Date().toISOString()});if(propertyId)await saveCapture({owner_id:owner.id,property_id:propertyId,stage:$('#ownerCaptureStage').value,owner:$('#ownerResponsible').value.trim()||'Emperatriz',next_action:$('#ownerNextAction').value.trim(),due_at:$('#ownerDueAt').value?new Date($('#ownerDueAt').value).toISOString():null,notes:$('#ownerNotes').value.trim(),loss_reason:$('#ownerLossReason').value.trim()});$('#ownerCaptureDialog').close();await renderOwnerOperations();await renderControlTower();});
 function resolveDemandTerritory(text=''){
   const haystack=normLoc(text),rows=[...(locationCatalog.zones||[]),...(locationCatalog.municipalities||[])].map(row=>({id:row.id,name:row.nombre||row.name||''})).filter(row=>row.name&&haystack.includes(normLoc(row.name))).sort((a,b)=>b.name.length-a.name.length);
   return rows[0]?{id:rows[0].id,query:rows[0].name}:null;
