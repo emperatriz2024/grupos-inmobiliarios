@@ -12,8 +12,9 @@ import {
   saveDemandRecords, getClients, getDemands, getOpportunities, getOpportunityScores, mirrorLegacyBuyersToDemands, runDemandOpportunityMatching,
   syncClientTwin,getClientTwins,getClientPropertyStates,setClientPropertyState,saveClientFollowUp,getTwinEvents,getBrokerTwinAgenda,createBrokerDraft,
   rebuildPropertyTwins,savePropertyTwinAction,savePipeline,getControlTower,
-  getOwnerTwins,saveOwnerTwin,getCaptures,saveCapture,getOwnerControlTower
-} from './db.js?v=0760';
+  getOwnerTwins,saveOwnerTwin,getCaptures,saveCapture,getOwnerControlTower,
+  getVisits,saveVisit,getDeals,saveDeal,getDealControlTower
+} from './db.js?v=0770';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
@@ -42,6 +43,7 @@ import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
 import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
 import { APP_LABEL, APP_VERSION } from './version.js';
+import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
 const $ = (q) => document.querySelector(q);
@@ -661,6 +663,7 @@ async function refreshBuyersData(){
   await renderBrokerTwin();
   await renderControlTower();
   await renderOwnerOperations();
+  await renderRevenueAnalytics();
   if(demandEngineEnabled)await refreshDemandCommercialPanel();
 }
 async function renderBrokerTwin(){
@@ -668,13 +671,17 @@ async function renderBrokerTwin(){
   box.innerHTML=agenda.slice(0,20).map(item=>`<article class="brokerAction"><div><b>${buyerEsc(item.title)}</b><p>${buyerEsc(item.why)}</p></div><button class="brokerOpenBuyer ghost" data-buyer="${buyerEsc(item.buyer_id)}">Abrir</button></article>`).join('')||'<div class="empty">Sin acciones comerciales pendientes.</div>';
   box.querySelectorAll('.brokerOpenBuyer').forEach(btn=>btn.onclick=()=>openClientTwin(btn.dataset.buyer));
 }
-async function renderControlTower(){const box=$('#controlTowerList');if(!box)return;const [clientRows,ownerRows]=await Promise.all([getControlTower(),getOwnerControlTower()]),rows=[...clientRows,...ownerRows].sort((a,b)=>b.priority-a.priority);$('#controlTowerCount').textContent=String(rows.length);box.innerHTML=rows.slice(0,30).map(x=>`<article class="brokerAction"><div><b>${buyerEsc(x.title)}</b><p>${buyerEsc(x.why)}</p></div><span>${x.priority}</span></article>`).join('')||'<div class="empty">No hay acciones pendientes para hoy.</div>';}
+async function renderControlTower(){const box=$('#controlTowerList');if(!box)return;const [clientRows,ownerRows,dealRows]=await Promise.all([getControlTower(),getOwnerControlTower(),getDealControlTower()]),rows=[...clientRows,...ownerRows,...dealRows].sort((a,b)=>b.priority-a.priority);$('#controlTowerCount').textContent=String(rows.length);box.innerHTML=rows.slice(0,30).map(x=>`<article class="brokerAction"><div><b>${buyerEsc(x.title)}</b><p>${buyerEsc(x.why)}</p></div><span>${x.priority}</span></article>`).join('')||'<div class="empty">No hay acciones pendientes para hoy.</div>';}
 
 async function renderOwnerOperations(){const box=$('#ownerOperationsList');if(!box)return;const [owners,captures,actions]=await Promise.all([getOwnerTwins(),getCaptures(),getOwnerControlTower()]);$('#ownerOperationsCount').textContent=String(actions.length);box.innerHTML=[...actions.slice(0,8).map(x=>`<article class="brokerAction"><div><b>${buyerEsc(x.title)}</b><p>${buyerEsc(x.why)}</p></div><span>${x.priority}</span></article>`),...owners.map(o=>`<article class="brokerAction"><div><b>${buyerEsc(o.confirmed?.name||'Propietario pendiente')}</b><p>${o.property_ids.length} propiedad(es) · ${buyerEsc(captures.find(c=>c.owner_id===o.id)?.stage||'Sin captacion')}</p></div><span>${buyerEsc(o.contact?.consent||'UNKNOWN')}</span></article>`)].join('')||'<div class="empty">No hay propietarios registrados.</div>';}
 
 $('#newOwnerBtn')?.addEventListener('click',()=>{$('#ownerCaptureForm').reset();$('#ownerResponsible').value='Emperatriz';$('#ownerCaptureDialog').showModal();});
 $('#closeOwnerCaptureDialog')?.addEventListener('click',()=>$('#ownerCaptureDialog').close());
 $('#ownerCaptureForm')?.addEventListener('submit',async e=>{e.preventDefault();const propertyId=$('#ownerPropertyId').value.trim(),owner=await saveOwnerTwin({name:$('#ownerName').value.trim(),phone:$('#ownerPhone').value.trim(),email:$('#ownerEmail').value.trim(),relationship:$('#ownerRelationship').value,motivation:$('#ownerMotivation').value.trim(),urgency:$('#ownerUrgency').value,expected_price:Number($('#ownerExpectedPrice').value)||null,recommended_price:Number($('#ownerRecommendedPrice').value)||null,negotiation_flexibility:$('#ownerFlexibility').value.trim(),consent_status:$('#ownerConsent').value,contact_restrictions:$('#ownerRestrictions').value.split(',').map(x=>x.trim()).filter(Boolean),documents_available:$('#ownerDocumentsAvailable').value.split(',').map(x=>x.trim()).filter(Boolean),documents_pending:$('#ownerDocumentsPending').value.split(',').map(x=>x.trim()).filter(Boolean),property_ids:propertyId?[propertyId]:[],next_action:$('#ownerNextAction').value.trim(),next_action_at:$('#ownerDueAt').value?new Date($('#ownerDueAt').value).toISOString():null,last_interaction_at:new Date().toISOString()});if(propertyId)await saveCapture({owner_id:owner.id,property_id:propertyId,stage:$('#ownerCaptureStage').value,owner:$('#ownerResponsible').value.trim()||'Emperatriz',next_action:$('#ownerNextAction').value.trim(),due_at:$('#ownerDueAt').value?new Date($('#ownerDueAt').value).toISOString():null,notes:$('#ownerNotes').value.trim(),loss_reason:$('#ownerLossReason').value.trim()});$('#ownerCaptureDialog').close();await renderOwnerOperations();await renderControlTower();});
+$('#openVisitDeal')?.addEventListener('click',()=>{$('#visitDealForm').reset();$('#visitDealDialog').showModal();});
+$('#closeVisitDeal')?.addEventListener('click',()=>$('#visitDealDialog').close());
+$('#visitDealForm')?.addEventListener('submit',async e=>{e.preventDefault();const buyer_id=$('#vdBuyer').value.trim(),property_id=$('#vdProperty').value.trim(),next_action=$('#vdNextAction').value.trim(),next_action_at=$('#vdNextAt').value?new Date($('#vdNextAt').value).toISOString():null;await saveVisit({buyer_id,property_id,stage:$('#vdVisitStage').value,slot_at:new Date($('#vdSlot').value).toISOString(),outcome:$('#vdOutcome').value.trim(),next_action,next_action_at});await saveDeal({buyer_id,property_id,stage:$('#vdDealStage').value,offer_amount:Number($('#vdOffer').value)||null,counter_amount:Number($('#vdCounter').value)||null,documents_pending:$('#vdDocuments').value.split(',').map(x=>x.trim()).filter(Boolean),next_action,next_action_at,loss_reason:$('#vdLoss').value.trim()});$('#visitDealDialog').close();await renderControlTower();});
+async function renderRevenueAnalytics(){const box=$('#revenueAnalytics');if(!box)return;const [visits,deals]=await Promise.all([getVisits(),getDeals()]),m=commercialMetrics({visits,deals});box.innerHTML=`<div><strong>${m.visits_scheduled}</strong><span>visitas pendientes</span></div><div><strong>${m.visits_completed}</strong><span>realizadas</span></div><div><strong>${m.negotiations_active}</strong><span>negociaciones</span></div><div><strong>${m.closed_won}</strong><span>cierres ganados</span></div>`;}
 function resolveDemandTerritory(text=''){
   const haystack=normLoc(text),rows=[...(locationCatalog.zones||[]),...(locationCatalog.municipalities||[])].map(row=>({id:row.id,name:row.nombre||row.name||''})).filter(row=>row.name&&haystack.includes(normLoc(row.name))).sort((a,b)=>b.name.length-a.name.length);
   return rows[0]?{id:rows[0].id,query:rows[0].name}:null;

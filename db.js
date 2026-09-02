@@ -9,9 +9,10 @@ import {reconcileReadiness} from './core/radar/readiness-engine.js';
 import {buildClientTwin,evolveClientPropertyState,buildBrokerAgenda,prepareBrokerDraft} from './core/radar/client-broker-twin.js';
 import {buildPropertyTwin,evolvePipeline,controlTower} from './core/radar/revenue-operations.js';
 import {buildOwnerTwin,mergeOwners,evolveCapture,demandSignals,ownerTower} from './core/radar/owner-capture-demand.js';
+import {evolveVisit,evolveDeal,dealTower} from './core/radar/visits-deal-room.js';
 
 const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 14;
+const DB_VERSION = 15;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
@@ -55,6 +56,7 @@ const PROPERTY_TWIN_STORE='property_twins';
 const PIPELINE_STORE='commercial_pipeline';
 const PIPELINE_EVENT_STORE='pipeline_events';
 const OWNER_TWIN_STORE='owner_twins',OWNER_EVENT_STORE='owner_events',CAPTURE_STORE='capture_pipeline',CAPTURE_EVENT_STORE='capture_events',DEMAND_SIGNAL_STORE='demand_signals';
+const VISIT_STORE='visits',VISIT_EVENT_STORE='visit_events',DEAL_STORE='deals',DEAL_EVENT_STORE='deal_events';
 
 
 function openDB() {
@@ -198,6 +200,10 @@ function openDB() {
       if(!db.objectStoreNames.contains(CAPTURE_STORE)){const s=db.createObjectStore(CAPTURE_STORE,{keyPath:'id'});s.createIndex('owner_id','owner_id',{unique:false});s.createIndex('stage','stage',{unique:false});s.createIndex('due_at','due_at',{unique:false});}
       if(!db.objectStoreNames.contains(CAPTURE_EVENT_STORE)){const s=db.createObjectStore(CAPTURE_EVENT_STORE,{keyPath:'id'});s.createIndex('capture_id','capture_id',{unique:false});}
       if(!db.objectStoreNames.contains(DEMAND_SIGNAL_STORE)){const s=db.createObjectStore(DEMAND_SIGNAL_STORE,{keyPath:'id'});s.createIndex('strength','strength',{unique:false});}
+      if(!db.objectStoreNames.contains(VISIT_STORE)){const s=db.createObjectStore(VISIT_STORE,{keyPath:'id'});s.createIndex('buyer_id','buyer_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('stage','stage',{unique:false});s.createIndex('slot_at','slot_at',{unique:false});}
+      if(!db.objectStoreNames.contains(VISIT_EVENT_STORE)){const s=db.createObjectStore(VISIT_EVENT_STORE,{keyPath:'id'});s.createIndex('visit_id','visit_id',{unique:false});}
+      if(!db.objectStoreNames.contains(DEAL_STORE)){const s=db.createObjectStore(DEAL_STORE,{keyPath:'id'});s.createIndex('buyer_id','buyer_id',{unique:false});s.createIndex('property_id','property_id',{unique:false});s.createIndex('stage','stage',{unique:false});s.createIndex('next_action_at','next_action_at',{unique:false});}
+      if(!db.objectStoreNames.contains(DEAL_EVENT_STORE)){const s=db.createObjectStore(DEAL_EVENT_STORE,{keyPath:'id'});s.createIndex('deal_id','deal_id',{unique:false});}
       const importStore=req.transaction.objectStore(IMPORT_STORE);
       if(!importStore.indexNames.contains('file_hash'))importStore.createIndex('file_hash','file_hash',{unique:false});
       if(!importStore.indexNames.contains('status'))importStore.createIndex('status','status',{unique:false});
@@ -1112,6 +1118,13 @@ export async function saveCapture(input,now=Date.now()){const id=`capture_${inpu
 export async function getCaptureEvents(captureId=null){const db=await openDB(),s=db.transaction(CAPTURE_EVENT_STORE,'readonly').objectStore(CAPTURE_EVENT_STORE),r=captureId?await allByIndex(s,'capture_id',captureId):await reqP(s.getAll());db.close();return r.sort((a,b)=>String(b.occurred_at).localeCompare(String(a.occurred_at)));}
 export async function refreshDemandSignals(){const [buyers,matches,properties]=await Promise.all([getBuyers(),getAllMatches(),getMasterProperties()]),rows=demandSignals({buyers,matches,properties}),db=await openDB();await new Promise((resolve,reject)=>{const tx=db.transaction(DEMAND_SIGNAL_STORE,'readwrite'),s=tx.objectStore(DEMAND_SIGNAL_STORE);s.clear();rows.forEach(x=>s.put({...x,updated_at:new Date().toISOString()}));tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();return rows;}
 export async function getOwnerControlTower(now=Date.now()){const [owners,captures,signals]=await Promise.all([getOwnerTwins(),getCaptures(),refreshDemandSignals()]);return ownerTower({owners,captures,signals,now});}
+export async function getVisits(){const db=await openDB(),r=await reqP(db.transaction(VISIT_STORE,'readonly').objectStore(VISIT_STORE).getAll());db.close();return r;}
+export async function saveVisit(input,now=Date.now()){const probe=evolveVisit(null,input,now),db=await openDB(),old=await reqP(db.transaction(VISIT_STORE,'readonly').objectStore(VISIT_STORE).get(probe.id)),row=evolveVisit(old,input,now),changed=!old||JSON.stringify({...old,updated_at:null})!==JSON.stringify({...row,updated_at:null});await new Promise((resolve,reject)=>{const tx=db.transaction(changed?[VISIT_STORE,VISIT_EVENT_STORE]:[VISIT_STORE],'readwrite');tx.objectStore(VISIT_STORE).put(changed?row:old);if(changed)tx.objectStore(VISIT_EVENT_STORE).put({id:`visit_event_${row.id}_${row.stage}_${row.updated_at}`,visit_id:row.id,event_type:`STAGE_${row.stage}`,payload_json:{outcome:row.outcome},occurred_at:row.updated_at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();return changed?row:old;}
+export async function getVisitEvents(){const db=await openDB(),r=await reqP(db.transaction(VISIT_EVENT_STORE,'readonly').objectStore(VISIT_EVENT_STORE).getAll());db.close();return r;}
+export async function getDeals(){const db=await openDB(),r=await reqP(db.transaction(DEAL_STORE,'readonly').objectStore(DEAL_STORE).getAll());db.close();return r;}
+export async function saveDeal(input,now=Date.now()){const id=`deal_${input.buyer_id}_${input.property_id}`,db=await openDB(),old=await reqP(db.transaction(DEAL_STORE,'readonly').objectStore(DEAL_STORE).get(id)),row=evolveDeal(old,input,now),changed=!old||JSON.stringify({...old,updated_at:null})!==JSON.stringify({...row,updated_at:null});await new Promise((resolve,reject)=>{const tx=db.transaction(changed?[DEAL_STORE,DEAL_EVENT_STORE]:[DEAL_STORE],'readwrite');tx.objectStore(DEAL_STORE).put(changed?row:old);if(changed)tx.objectStore(DEAL_EVENT_STORE).put({id:`deal_event_${row.id}_${row.stage}_${row.updated_at}`,deal_id:row.id,event_type:`STAGE_${row.stage}`,payload_json:{offer_amount:row.offer_amount,counter_amount:row.counter_amount,loss_reason:row.loss_reason},occurred_at:row.updated_at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();return changed?row:old;}
+export async function getDealEvents(){const db=await openDB(),r=await reqP(db.transaction(DEAL_EVENT_STORE,'readonly').objectStore(DEAL_EVENT_STORE).getAll());db.close();return r;}
+export async function getDealControlTower(now=Date.now()){const [visits,deals]=await Promise.all([getVisits(),getDeals()]);return dealTower({visits,deals,now});}
 
 // ---------- Demand → Match → Opportunity (Phase 0C) -------------------------
 export async function saveDemandRecords(records=[],{onProgress,chunkSize=100}={}){
@@ -1222,6 +1235,7 @@ const BACKUP_STORES=[
   ,CLIENT_TWIN_STORE,CLIENT_PROPERTY_STATE_STORE,COMMERCIAL_ACTION_STORE,TWIN_EVENT_STORE
   ,PROPERTY_TWIN_STORE,PIPELINE_STORE,PIPELINE_EVENT_STORE
   ,OWNER_TWIN_STORE,OWNER_EVENT_STORE,CAPTURE_STORE,CAPTURE_EVENT_STORE,DEMAND_SIGNAL_STORE
+  ,VISIT_STORE,VISIT_EVENT_STORE,DEAL_STORE,DEAL_EVENT_STORE
 ];
 export const BACKUP_STORE_NAMES=Object.freeze([...BACKUP_STORES]);
 

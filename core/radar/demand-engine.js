@@ -78,7 +78,8 @@ export function consolidateMarketDemands(records=[],existingDemands=[],existingS
 export function legacyBuyerToClientDemand(buyer={}){
   const id=buyer.id||`buyer_${stableHash(`${buyer.name||''}|${buyer.phone||''}`)}`;
   const status=buyer.status==='closed'?'CLOSED':buyer.status==='paused'?'PAUSED':'ACTIVE';
-  const client={id:`client_${id}`,workspace_id:buyer.workspace_id||'local',legacy_buyer_id:id,name:buyer.name||'Comprador',phone:buyer.phone||'',status,created_at:buyer.created_at||new Date().toISOString(),updated_at:buyer.updated_at||new Date().toISOString()};
+  const stableAt=buyer.created_at||buyer.updated_at||'1970-01-01T00:00:00.000Z';
+  const client={id:`client_${id}`,workspace_id:buyer.workspace_id||'local',legacy_buyer_id:id,name:buyer.name||'Comprador',phone:buyer.phone||'',status,created_at:buyer.created_at||stableAt,updated_at:buyer.updated_at||stableAt};
   const propertyTypes=(buyer.property_types||[]).filter(Boolean),demand={id:`demand_client_${id}`,workspace_id:client.workspace_id,client_id:client.id,legacy_buyer_id:id,origin:'CLIENT',status,operation:buyer.operation||null,property_types:propertyTypes.length?propertyTypes:buyer.property_type?[buyer.property_type]:[],municipality_ids:buyer.municipality_ids||[],territory_ids:buyer.territory_ids||buyer.zone_ids||[],min_price:buyer.min_price||null,max_price:buyer.max_price||null,budget_tolerance:Number(buyer.budget_tolerance||0),min_bedrooms:buyer.min_bedrooms||null,min_bathrooms:buyer.min_bathrooms||null,min_parking:buyer.min_parking||null,min_area:buyer.min_area||null,max_area:buyer.max_area||null,required_features:[...(buyer.required_features||[])],desired_features:[...(buyer.desired_features||[])],created_at:buyer.created_at||client.created_at,updated_at:buyer.updated_at||client.updated_at};
   return {client,demand};
 }
