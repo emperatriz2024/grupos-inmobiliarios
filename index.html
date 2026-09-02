@@ -159,6 +159,7 @@
         <div class="sectionTitle"><span>⚡</span><div><h2>Broker Twin</h2><p>Próximas acciones comerciales explicables · nada se envía automáticamente</p></div><strong id="brokerTwinCount">0</strong></div>
         <div id="brokerTwinList"></div>
       </section>
+      <section id="controlTowerPanel" class="card brokerTwinPanel"><div class="sectionTitle"><span>◉</span><div><h2>Qué hago hoy</h2><p>Control Tower · acciones reales ordenadas por prioridad</p></div><strong id="controlTowerCount">0</strong></div><div id="controlTowerList"></div></section>
 
       <section id="buyersList"></section>
       <div id="buyersEmpty" class="empty" hidden>
@@ -618,9 +619,11 @@
         <form id="clientTwinFollowForm" class="card"><h3>Seguimiento</h3><label>Intención<select id="clientTwinIntent"><option value="BUSCANDO">Buscando</option><option value="DECIDIENDO">Decidiendo</option><option value="PAUSADO">Pausado</option><option value="CERRADO">Cerrado</option></select></label><label>Próxima acción<input id="clientTwinNextAction" placeholder="Ej. llamar y confirmar presupuesto"></label><label>Fecha<input id="clientTwinNextAt" type="datetime-local"></label><button class="primary" type="submit">Guardar seguimiento</button></form>
         <section class="card"><h3>Propiedades revisadas</h3><div id="clientTwinPropertyHistory"></div></section>
         <section class="card"><h3>Preparar mensaje</h3><button id="clientTwinDraft" class="ghost" type="button">Preparar con seleccionadas</button><textarea id="clientTwinDraftText" rows="5" readonly placeholder="Selecciona propiedades desde Coincidencias. El borrador nunca se envía solo."></textarea></section>
+        <form id="clientPipelineForm" class="card"><h3>Pipeline comercial</h3><label>Etapa<select id="clientPipelineStage"><option value="NEW">Nuevo</option><option value="TO_CONTACT">Por contactar</option><option value="CONTACTED">Contactado</option><option value="QUALIFIED">Calificado</option><option value="PROPERTIES_SENT">Propiedades enviadas</option><option value="VISIT_PENDING">Visita pendiente</option><option value="VISIT_DONE">Visita realizada</option><option value="NEGOTIATION">Negociación</option><option value="DOCUMENTATION">Documentación</option><option value="WON">Cierre ganado</option><option value="LOST">Cierre perdido</option><option value="FUTURE_FOLLOW_UP">Seguimiento futuro</option></select></label><label>Responsable<input id="clientPipelineOwner" value="Emperatriz"></label><label>Motivo de pérdida<input id="clientPipelineLossReason" placeholder="Obligatorio al perder"></label><button class="primary" type="submit">Actualizar oportunidad</button></form>
         <section class="card"><h3>Historial</h3><ol id="clientTwinTimeline"></ol></section>
       </div>
     </dialog>
+    <dialog id="propertyTwinDialog" class="buyerMatchesDialog"><div class="dialogHead"><div><span>PROPERTY TWIN</span><h2 id="propertyTwinTitle">Propiedad</h2></div><button id="closePropertyTwinDialog" type="button">×</button></div><form id="propertyTwinForm" class="clientTwinGrid"><input id="propertyTwinId" type="hidden"><section id="propertyTwinBody" class="card"></section><section class="card"><h3>Próxima acción</h3><label>Acción<input id="propertyTwinNextAction"></label><label>Fecha<input id="propertyTwinNextAt" type="datetime-local"></label><button class="primary" type="submit">Guardar acción</button></section></form></dialog>
 
     <dialog id="multiSelectorDialog" class="multiSelectorDialog">
       <div class="selectorSheet">
