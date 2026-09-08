@@ -23,12 +23,12 @@ export class ExternalWebSource extends SourceIngestion{
   constructor(channel='external_web'){super({sourceType:SOURCE_TYPES.EXTERNAL_WEB,sourceChannel:channel});}
 }
 export class SecondaryWhatsAppSource extends SourceIngestion{
-  constructor({endpoint='',token='',fetchImpl=(...args)=>globalThis.fetch(...args)}={}){super({sourceType:SOURCE_TYPES.WHATSAPP_SECONDARY,sourceChannel:'secondary_number',configured:Boolean(endpoint&&token)});this.endpoint=endpoint;this.token=token;this.fetchImpl=fetchImpl;}
-  capability(){return {...super.capability(),reason:this.configured?null:'Configura manualmente URL y token de lectura para esta sesión del navegador.'};}
+  constructor({endpoint='',token='',fetchImpl=(...args)=>globalThis.fetch(...args)}={}){super({sourceType:SOURCE_TYPES.WHATSAPP_SECONDARY,sourceChannel:'secondary_number',configured:Boolean(endpoint)});this.endpoint=endpoint;this.token=token;this.fetchImpl=fetchImpl;}
+  capability(){return {...super.capability(),reason:this.configured?null:'Collector no disponible.'};}
   async ingest({cursor='',limit=50}={}){
     if(!this.configured)throw new Error('WhatsApp secundario no está configurado.');
     const url=new URL(this.endpoint,globalThis.location?.href||'http://localhost/');url.searchParams.set('limit',String(Math.min(100,limit)));if(cursor)url.searchParams.set('cursor',cursor);
-    const response=await this.fetchImpl(url,{method:'GET',headers:{accept:'application/json',authorization:`Bearer ${this.token}`},cache:'no-store',credentials:'omit'});
+    const headers={accept:'application/json'};if(this.token)headers.authorization=`Bearer ${this.token}`;const response=await this.fetchImpl(url,{method:'GET',headers,cache:'no-store',credentials:this.token?'omit':'same-origin'});
     if(!response.ok)throw new Error(response.status===401?'Credencial de lectura inválida.':`Sincronización secundaria HTTP ${response.status}.`);
     const data=await response.json();if(!Array.isArray(data.events))throw new Error('Respuesta secundaria inválida.');return {events:data.events,nextCursor:data.nextCursor||cursor,hasMore:Boolean(data.hasMore)};
   }

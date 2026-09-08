@@ -77,8 +77,6 @@ const SEARCH_STATE_KEY='gi_search_state_v042';
 const BACKUP_AUTO_KEY='gi_backup_auto_dropbox_v0502';
 const BACKUP_LAST_KEY='gi_backup_last_v0502';
 const BACKUP_DROPBOX_PATH='/RADAR_RESPALDOS/radar-backup-latest.json';
-const SECONDARY_ENDPOINT_KEY='radar_secondary_endpoint_v061';
-const SECONDARY_TOKEN_KEY='radar_secondary_token_v061_session';
 const SECONDARY_CURSOR_KEY='radar_secondary_cursor_v061';
 const SECONDARY_STATS_KEY='radar_secondary_stats_v061';
 const INGESTION_BATCH_KEY='radar_operational_ingestion_batch_v1';
@@ -1698,24 +1696,17 @@ async function initDropbox() {
 
 function secondaryStats(){try{return {...{received:0,pending:0,processed:0,groups:0,properties:0,errors:0,lastSync:null,lastError:null},...JSON.parse(localStorage.getItem(SECONDARY_STATS_KEY)||'{}')};}catch{return {received:0,pending:0,processed:0,groups:0,properties:0,errors:0};}}
 function saveSecondaryStats(stats){localStorage.setItem(SECONDARY_STATS_KEY,JSON.stringify(stats));renderSecondaryState(stats);}
-function secondaryConfig(){return {endpoint:localStorage.getItem(SECONDARY_ENDPOINT_KEY)||'',token:sessionStorage.getItem(SECONDARY_TOKEN_KEY)||''};}
+function secondaryConfig(){return {endpoint:`${location.origin}/.netlify/functions/secondary-whatsapp-radar-feed`};}
 function renderSecondaryState(stats=secondaryStats()){
-  const configured=Boolean(secondaryConfig().endpoint&&secondaryConfig().token),dot=$('#secondaryStatusDot');
-  if(dot)dot.className=stats.lastError?'error':configured?'connected':'';
-  if($('#secondaryStatusText'))$('#secondaryStatusText').textContent=stats.lastError?'Desconectado':configured?'Conectado':'No configurado';
+  const dot=$('#secondaryStatusDot');if(dot)dot.className=stats.lastError?'error':stats.collectorState==='READY'?'connected':'';
+  if($('#secondaryStatusText'))$('#secondaryStatusText').textContent=stats.lastError?'Desconectado':stats.collectorState==='READY'?'Collector activo':stats.collectorState==='WAITING_QR'?'Esperando QR':'Comprobando collector';
   if($('#secondaryLastSync'))$('#secondaryLastSync').textContent=stats.lastSync?`Última sincronización: ${new Date(stats.lastSync).toLocaleString('es-VE')}`:'Sin sincronizaciones';
   const values={secondaryReceived:stats.received,secondaryPending:stats.pending,secondaryProcessed:stats.processed,secondaryGroups:stats.groups,secondaryProperties:stats.properties,secondaryErrors:stats.errors};
   for(const [id,value] of Object.entries(values))if($('#'+id))$('#'+id).textContent=Number(value||0).toLocaleString('es-VE');
 }
-function configureSecondaryAccess(){
-  const current=localStorage.getItem(SECONDARY_ENDPOINT_KEY)||`${location.origin}/.netlify/functions/secondary-whatsapp-sync`;
-  const endpoint=prompt('URL HTTPS del endpoint TEST secondary-whatsapp-sync:',current);if(endpoint===null)return;
-  let parsed;try{parsed=new URL(endpoint,location.href);if(parsed.protocol!=='https:'&&parsed.hostname!=='localhost')throw new Error();}catch{return alert('La URL debe usar HTTPS (o localhost para pruebas).');}
-  const token=prompt('Token de lectura TEST. Se guardará solo durante esta sesión del navegador:','');if(!token)return alert('No se guardó ninguna credencial.');
-  localStorage.setItem(SECONDARY_ENDPOINT_KEY,parsed.toString());sessionStorage.setItem(SECONDARY_TOKEN_KEY,token);const stats=secondaryStats();stats.lastError=null;saveSecondaryStats(stats);
-}
+async function refreshCollectorStatus({showQr=false}={}){const panel=$('#secondaryQrPanel'),image=$('#secondaryQr');try{const response=await fetch(`${location.origin}/.netlify/functions/secondary-whatsapp-collector-status`,{cache:'no-store',credentials:'same-origin'});if(!response.ok)throw new Error(`Collector HTTP ${response.status}`);const status=await response.json(),stats=secondaryStats();stats.collectorState=status.state;stats.groups=Math.max(stats.groups,Number(status.groups||0));stats.lastError=status.last_error||null;saveSecondaryStats(stats);if(panel)panel.hidden=!(status.qr_available&&(showQr||status.state==='WAITING_QR'));if(image&&status.qr_data_url)image.src=status.qr_data_url;return status;}catch(error){const stats=secondaryStats();stats.lastError=error.message;saveSecondaryStats(stats);if(panel)panel.hidden=true;return null;}}
 async function syncSecondaryWhatsApp({silent=false}={}){
-  if(secondarySyncing)return;const config=secondaryConfig();renderSecondaryState();if(!config.endpoint||!config.token){if(!silent)alert('Configura primero el acceso TEST.');return;}
+  if(secondarySyncing)return;const config=secondaryConfig();renderSecondaryState();
   secondarySyncing=true;const button=$('#syncSecondaryNow');if(button)button.disabled=true;let stats=secondaryStats(),cursor=localStorage.getItem(SECONDARY_CURSOR_KEY)||'',pages=0;
   try{
     let hasMore=true;
@@ -1732,16 +1723,16 @@ async function syncSecondaryWhatsApp({silent=false}={}){
   }catch(error){stats.errors++;stats.lastError=error.message;saveSecondaryStats(stats);diagnosticLog('whatsapp_secondary','sync',error.message);if(!silent)alert(`WhatsApp secundario: ${error.message}`);}
   finally{secondarySyncing=false;if(button)button.disabled=false;}
 }
-$('#configureSecondary')?.addEventListener('click',configureSecondaryAccess);
+$('#linkSecondary')?.addEventListener('click',()=>refreshCollectorStatus({showQr:true}));
 $('#syncSecondaryNow')?.addEventListener('click',()=>syncSecondaryWhatsApp({silent:false}));
-$('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,endpointConfigured:Boolean(secondaryConfig().endpoint),tokenConfigured:Boolean(secondaryConfig().token),store:'radar-secondary-whatsapp-v061-test'},null,2);});
+$('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,mode:'production-cloud',tokensRequiredByUser:false,zipFallback:true},null,2);});
 
 async function initApp(){
   const versionLabel=$('#appVersionLabel');if(versionLabel){versionLabel.textContent=APP_LABEL;getWorkerInfo().then(info=>{versionLabel.textContent=`${APP_LABEL} · ${String(info.build_sha||'').slice(0,12)}`;}).catch(()=>{});}
-  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();const resumableBatch=localStorage.getItem(INGESTION_BATCH_KEY);if(resumableBatch)await monitorIngestionBatch(resumableBatch);renderBackupState();renderSecondaryState();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();const resumableBatch=localStorage.getItem(INGESTION_BATCH_KEY);if(resumableBatch)await monitorIngestionBatch(resumableBatch);renderBackupState();renderSecondaryState();await refreshCollectorStatus();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
 }
 initApp();
-setInterval(()=>{if(document.visibilityState==='visible')syncSecondaryWhatsApp({silent:true});},5*60*1000);
+setInterval(()=>{if(document.visibilityState==='visible'){refreshCollectorStatus();syncSecondaryWhatsApp({silent:true});}},5*60*1000);
 
 window.addEventListener('pagehide',()=>rememberSearchPosition());
 window.addEventListener('pageshow',e=>{ if(e.persisted) restoreSearchPosition(); });

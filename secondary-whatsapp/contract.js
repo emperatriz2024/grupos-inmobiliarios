@@ -1,6 +1,6 @@
 export const SECONDARY_SOURCE_TYPE='whatsapp_secondary';
 export const SECONDARY_SOURCE_CHANNEL='secondary_number';
-export const TEST_STORE_NAME='radar-secondary-whatsapp-v061-test';
+export const PRODUCTION_STORE_NAME='radar-whatsapp-intelligence-production';
 export const MAX_BATCH_EVENTS=100;
 export const MAX_BODY_BYTES=512_000;
 export const RAW_RETENTION_DAYS=14;
@@ -31,7 +31,9 @@ export function validateSecondaryEvent(input={}){
     authorDisplayName:text(input.authorDisplayName,300),...identity,timestamp,receivedAt,
     messageType:MESSAGE_TYPES.has(input.messageType)?input.messageType:'unknown',text:text(input.text??input.body,20_000),
     caption:text(input.caption,20_000),hasMedia:Boolean(input.hasMedia),mediaType:text(input.mediaType,100)||null,
-    quotedMessageId:text(input.quotedMessageId,240)||null,sourceType:SECONDARY_SOURCE_TYPE,sourceChannel:SECONDARY_SOURCE_CHANNEL
+    quotedMessageId:text(input.quotedMessageId,240)||null,sourceType:SECONDARY_SOURCE_TYPE,sourceChannel:SECONDARY_SOURCE_CHANNEL,
+    media:input.media&&/^[a-f0-9]{64}$/.test(String(input.media.sha256||''))?{sha256:String(input.media.sha256),mimeType:text(input.media.mimeType,120)||null,filename:text(input.media.filename,240)||null,sizeBytes:Number(input.media.sizeBytes)||null,chunkTotal:Number(input.media.chunkTotal)||null,storageLocator:`original/${String(input.media.sha256)}/manifest`,thumbnailLocator:input.media.thumbnail?`thumbnail/${String(input.media.sha256)}`:null}:null,
+    intelligence:input.intelligence&&typeof input.intelligence==='object'?input.intelligence:null
   };
   if(!event.text&&!event.caption&&!event.hasMedia)return {ok:false,error:'empty_event'};
   return {ok:true,event};

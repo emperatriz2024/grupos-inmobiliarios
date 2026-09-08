@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: radar-whatsapp-intelligence-collector
+    runtime: docker
+    rootDir: bridge/whatsapp-secondary
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: whatsapp-session
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: RADAR_COLLECTOR_M2M_TOKEN
+        generateValue: true
+      - key: RADAR_BRIDGE_INGEST_TOKEN
+        sync: false
+      - key: RADAR_BRIDGE_INGEST_URL
+        sync: false
+      - key: RADAR_MEDIA_INGEST_URL
+        sync: false
+      - key: RADAR_INTELLIGENCE_URL
+        sync: false

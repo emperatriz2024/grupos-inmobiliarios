@@ -6,7 +6,7 @@ import {DurableOutbox} from '../bridge/whatsapp-secondary/outbox.js';
 import {BatchUploader} from '../bridge/whatsapp-secondary/uploader.js';
 import {MemoryGroupState} from '../bridge/whatsapp-secondary/group-state.js';
 import {SecondaryBridge,BRIDGE_STATES} from '../bridge/whatsapp-secondary/bridge.js';
-import {createNetlifyEventQueue,MemoryEventQueue,NETLIFY_TEST_STORE_NAME,netlifyBlobsDependencyAvailable} from '../secondary-whatsapp/queue.js';
+import {createNetlifyEventQueue,MemoryEventQueue,NETLIFY_PRODUCTION_STORE_NAME,netlifyBlobsDependencyAvailable} from '../secondary-whatsapp/queue.js';
 import {normalizePhoneIdentity,validateSecondaryEvent} from '../secondary-whatsapp/contract.js';
 import ingestFunction,{createIngestHandler} from '../netlify/functions/secondary-whatsapp-ingest.js';
 import syncFunction,{createSyncHandler} from '../netlify/functions/secondary-whatsapp-sync.js';
@@ -118,9 +118,9 @@ test('retención TEST elimina raw vencido y conserva reciente',async()=>{
   const queue=new MemoryEventQueue();await queue.put(raw('old',{receivedAt:'2026-07-01T00:00:00Z'}));await queue.put(raw('recent',{receivedAt:now}));const result=await queue.purgeExpired({now:Date.parse(now),rawDays:14});assert.equal(result.rawRemoved,1);assert.deepEqual((await queue.list()).events.map(x=>x.messageId),['recent']);
 });
 
-test('Netlify queue usa getStore directo, store TEST strong y soporta put/list/idempotencia',async()=>{
+test('Netlify queue usa getStore directo, store de producción strong y soporta put/list/idempotencia',async()=>{
   assert.equal(netlifyBlobsDependencyAvailable(),true);const store=fakeBlobStore();let options;
-  const queue=await createNetlifyEventQueue({}, {storeFactory:value=>{options=value;return store;},logger:()=>{}});assert.deepEqual(options,{name:NETLIFY_TEST_STORE_NAME,consistency:'strong'});assert.equal(NETLIFY_TEST_STORE_NAME,'radar-secondary-whatsapp-v061-test');
+  const queue=await createNetlifyEventQueue({}, {storeFactory:value=>{options=value;return store;},logger:()=>{}});assert.deepEqual(options,{name:NETLIFY_PRODUCTION_STORE_NAME,consistency:'strong'});assert.equal(NETLIFY_PRODUCTION_STORE_NAME,'radar-whatsapp-intelligence-production');
   assert.equal((await queue.put(raw('netlify-put'))).duplicate,false);assert.equal((await queue.put(raw('netlify-put'))).duplicate,true);const page=await queue.list({limit:10});assert.deepEqual(page.events.map(x=>x.messageId),['netlify-put']);assert.ok(page.nextCursor.startsWith('event-'));
 });
 

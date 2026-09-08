@@ -1,0 +1,27 @@
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import {DurableOutbox} from './outbox.js';
+import {BatchUploader} from './uploader.js';
+import {SecondaryBridge} from './bridge.js';
+import {DurableGroupState} from './group-state.js';
+import {CollectorState,COLLECTOR_STATES} from './collector-state.js';
+import {downloadMessageMedia} from './media-collector.js';
+
+const required=name=>{const value=process.env[name];if(!value)throw new Error(`${name}_required`);return value;};
+const collectorToken=required('RADAR_COLLECTOR_M2M_TOKEN'),ingestToken=required('RADAR_BRIDGE_INGEST_TOKEN'),ingestUrl=required('RADAR_BRIDGE_INGEST_URL'),mediaUrl=required('RADAR_MEDIA_INGEST_URL'),intelligenceUrl=required('RADAR_INTELLIGENCE_URL');
+const runtimeRoot=process.env.RADAR_COLLECTOR_DATA_DIR||path.join(process.env.LOCALAPPDATA||os.homedir(),'RadarInmobiliario','whatsapp-intelligence-production'),port=Number(process.env.PORT||8787);
+const [{default:QRCode},{default:sharp},whatsappModule]=await Promise.all([import('qrcode'),import('sharp'),import('whatsapp-web.js')]);
+const {Client,LocalAuth}=whatsappModule.default||whatsappModule,state=new CollectorState(),outbox=new DurableOutbox(path.join(runtimeRoot,'outbox','events.json')),groupState=new DurableGroupState(path.join(runtimeRoot,'state','groups.json'));
+const uploader=new BatchUploader({outbox,endpoint:ingestUrl,token:ingestToken});
+const client=new Client({authStrategy:new LocalAuth({clientId:'radar-whatsapp-intelligence-production',dataPath:path.join(runtimeRoot,'session')}),puppeteer:{headless:true,executablePath:process.env.PUPPETEER_EXECUTABLE_PATH||undefined,args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']}});
+const makeThumbnail=bytes=>sharp(bytes).rotate().resize({width:640,height:640,fit:'inside',withoutEnlargement:true}).jpeg({quality:78}).toBuffer();
+const uploadMedia=async message=>{const media=await downloadMessageMedia(message,{thumbnailer:makeThumbnail});if(!media)return null;for(let i=0;i<media.chunks.length;i++){const response=await fetch(mediaUrl,{method:'POST',headers:{authorization:`Bearer ${collectorToken}`,'content-type':'application/json'},body:JSON.stringify({sha256:media.sha256,mime_type:media.mimeType,filename:media.filename,size_bytes:media.sizeBytes,message_id:message.id?._serialized,chunk_index:i,chunk_total:media.chunks.length,data_base64:media.chunks[i],thumbnail_base64:i===0?media.thumbnail:null})});if(!response.ok)throw new Error(`media_upload_${response.status}`);}return {sha256:media.sha256,mimeType:media.mimeType,filename:media.filename,sizeBytes:media.sizeBytes,chunkTotal:media.chunks.length,thumbnail:Boolean(media.thumbnail)};};
+const analyze=async event=>{const response=await fetch(intelligenceUrl,{method:'POST',headers:{authorization:`Bearer ${collectorToken}`,'content-type':'application/json'},body:JSON.stringify(event)});if(!response.ok)throw new Error(`intelligence_${response.status}`);return (await response.json()).result||null;};
+const bridge=new SecondaryBridge({client,outbox,uploader,groupState,mediaCollector:uploadMedia,intelligenceCollector:analyze,logger:()=>{}});
+bridge.onQr=async raw=>state.setQr(await QRCode.toDataURL(raw,{width:320,margin:2,errorCorrectionLevel:'M'}));bridge.wire();
+client.on('authenticated',()=>{state.state=COLLECTOR_STATES.AUTHENTICATED;});client.on('ready',async()=>{state.ready();const chats=await client.getChats();state.groups=chats.filter(chat=>chat.isGroup).length;});client.on('disconnected',()=>{state.state=COLLECTOR_STATES.RECONNECTING;});client.on('auth_failure',error=>state.fail(error));
+const authorized=request=>{const header=String(request.headers.authorization||''),value=header.startsWith('Bearer ')?header.slice(7):'';if(value.length!==collectorToken.length)return false;let mismatch=0;for(let i=0;i<value.length;i++)mismatch|=value.charCodeAt(i)^collectorToken.charCodeAt(i);return mismatch===0;};
+const server=http.createServer((request,response)=>{if(request.url==='/health'){response.writeHead(200,{'content-type':'application/json'});return response.end(JSON.stringify({ok:true,state:state.state}));}if(request.url==='/internal/status'&&authorized(request)){response.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});return response.end(JSON.stringify(state.snapshot()));}response.writeHead(authorized(request)?404:401,{'content-type':'application/json'});response.end(JSON.stringify({error:authorized(request)?'not_found':'unauthorized'}));});
+server.listen(port,'0.0.0.0');await client.initialize();
+const shutdown=async()=>{server.close();bridge.stopFlushLoop();await client.destroy();process.exit(0);};process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
