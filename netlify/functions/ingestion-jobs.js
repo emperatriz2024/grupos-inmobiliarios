@@ -10,6 +10,10 @@ export async function handler(event){
   try{
     if(method==='GET'&&query.batch){const state=await batchStatus(query.batch,{store});return state?response(200,state):response(404,{error:'batch_not_found'});}
     if(method==='GET'&&query.job&&query.chunk!=null){const chunk=await resultChunk(query.job,Number(query.chunk),{store});return chunk?response(200,chunk):response(404,{error:'result_not_found'});}
+    if(method==='GET'&&query.health==='dropbox'){
+      const entries=await createServerDropbox().listPending();
+      return response(200,{build_sha:buildSha(),worker:'ready',dropbox:'ready',pending_zip_count:entries.length});
+    }
     if(method==='GET')return response(200,{build_sha:buildSha(),worker:'ready'});
     if(method!=='POST')return response(405,{error:'method_not_allowed'});
     if(!sameDeploymentOrigin(event))return response(403,{error:'origin_not_allowed'});
