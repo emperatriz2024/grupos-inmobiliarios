@@ -21,7 +21,8 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const now='2026-08-20T14:00:00.000Z';
+const now=new Date().toISOString();
+const afterNow=milliseconds=>new Date(Date.parse(now)+milliseconds).toISOString();
 function raw(id='m1',overrides={}){return {messageId:id,groupId:'120@g.us',groupName:'Inmuebles Valencia',authorId:'584141234567@c.us',authorIdentifier:'584141234567@c.us',authorDisplayName:'Ana',timestamp:now,receivedAt:now,messageType:'chat',text:'Apartamento en venta Mañongo\n3 habitaciones 2 baños 2 puestos\nPrecio $75.000',hasMedia:false,...overrides};}
 function waMessage(overrides={}){return {from:'120@g.us',author:'584141234567@c.us',timestamp:Date.parse(now)/1000,type:'chat',body:'Apartamento venta Precio $75.000',hasMedia:false,fromMe:false,id:{_serialized:'m1',remote:'120@g.us'},getChat:async()=>({name:'Grupo Uno'}),getContact:async()=>({pushname:'Ana'}),...overrides};}
 function fakeBlobStore(){const rows=new Map();return {rows,getMetadata:async key=>rows.has(key)?{etag:'test'}:null,setJSON:async(key,value)=>rows.set(key,value),get:async key=>rows.get(key)??null,delete:async key=>rows.delete(key),list:async({prefix='' }={})=>({blobs:[...rows.keys()].filter(key=>key.startsWith(prefix)).map(key=>({key,etag:'test'})),directories:[]})};}
@@ -92,7 +93,7 @@ test('ingest valida método, Content-Type, tamaño, timestamps y oculta fallos i
 
 test('sync exige token y entrega páginas incrementales',async()=>{
   resetRateLimits();
-  const queue=new MemoryEventQueue();await queue.put(raw('a'));await queue.put(raw('b',{timestamp:'2026-08-20T14:01:00Z'}));const handler=createSyncHandler({queueFactory:async()=>queue,env:{RADAR_SECONDARY_SYNC_TOKEN:'read-test'}});
+  const queue=new MemoryEventQueue();await queue.put(raw('a'));await queue.put(raw('b',{timestamp:afterNow(60_000)}));const handler=createSyncHandler({queueFactory:async()=>queue,env:{RADAR_SECONDARY_SYNC_TOKEN:'read-test'}});
   assert.equal((await handler({httpMethod:'GET',headers:{},queryStringParameters:{}})).statusCode,401);
   const one=JSON.parse((await handler({httpMethod:'GET',headers:{authorization:'Bearer read-test'},queryStringParameters:{limit:'1'}})).body);assert.equal(one.events.length,1);assert.equal(one.hasMore,true);
   const two=JSON.parse((await handler({httpMethod:'GET',headers:{authorization:'Bearer read-test'},queryStringParameters:{cursor:one.nextCursor}})).body);assert.equal(two.events[0].messageId,'b');
@@ -179,8 +180,8 @@ test('mensaje no inmobiliario no crea inmueble y publicación válida usa Radar 
 });
 
 test('agrupamiento conservador combina continuidad del mismo autor y no autores distintos',()=>{
-  const title=raw('p1',{text:'APARTAMENTO EN MAÑONGO'}),details=raw('p2',{timestamp:'2026-08-20T14:00:30Z',text:'3 habitaciones, 2 baños, planta'}),price=raw('p3',{timestamp:'2026-08-20T14:01:00Z',text:'Precio $75.000'});assert.equal(processSecondaryEvents([title,details,price]).records.length,1);
-  const other=raw('p4',{timestamp:'2026-08-20T14:00:30Z',authorId:'otro@lid',authorIdentifier:'otro@lid',text:'Precio $90.000'});assert.ok(processSecondaryEvents([title,other]).records.length<=1);
+  const title=raw('p1',{text:'APARTAMENTO EN MAÑONGO'}),details=raw('p2',{timestamp:afterNow(30_000),text:'3 habitaciones, 2 baños, planta'}),price=raw('p3',{timestamp:afterNow(60_000),text:'Precio $75.000'});assert.equal(processSecondaryEvents([title,details,price]).records.length,1);
+  const other=raw('p4',{timestamp:afterNow(30_000),authorId:'otro@lid',authorIdentifier:'otro@lid',text:'Precio $90.000'});assert.ok(processSecondaryEvents([title,other]).records.length<=1);
 });
 
 test('precio estricto y ZIP principal continúan funcionando',()=>{
