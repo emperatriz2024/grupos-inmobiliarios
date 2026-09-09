@@ -4,7 +4,7 @@ export function zipFailure(file,error){return {file:file?.name||'ZIP sin nombre'
 const breathe=()=>new Promise(resolve=>setTimeout(resolve,0));
 
 export async function runManualZipBatch(files=[],{
-  importOneZip,groupFromName=file=>file.name.replace(/\.zip$/i,''),onProgress=()=>{},onlyNames=null
+  importOneZip,groupFromName=name=>name.replace(/\.zip$/i,''),onProgress=()=>{},onlyNames=null
 }={}){
   if(typeof importOneZip!=='function')throw new Error('importOneZip_required');
   const selected=[...files].filter(file=>/\.zip$/i.test(file?.name||'')&&(!onlyNames||onlyNames.has(file.name)));
@@ -13,7 +13,7 @@ export async function runManualZipBatch(files=[],{
   for(let index=0;index<selected.length;index++){
     const file=selected[index],position=index+1;onProgress({stage:'file_start',file,index:position,total:selected.length,summary:{...summary}});
     try{
-      const result=await importOneZip(file,groupFromName(file),progress=>onProgress({stage:'file_progress',file,index:position,total:selected.length,progress,summary:{...summary}}),{deferMatching:true});
+      const result=await importOneZip(file,groupFromName(file.name),progress=>onProgress({stage:'file_progress',file,index:position,total:selected.length,progress,summary:{...summary}}),{deferMatching:true});
       const row=result?.summary||{},skipped=Boolean(row.already_processed||String(row.status).toLowerCase()==='already_processed');
       if(skipped)summary.skipped++;else summary.processed++;
       summary.added+=Number(row.added||0);summary.updated+=Number(row.updated||0);summary.duplicates+=Number(row.duplicates_detected??row.updated??0);
