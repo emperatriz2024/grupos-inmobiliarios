@@ -177,6 +177,33 @@
     </section>
 
     <section id="viewImport" class="view">
+      <section class="card manualImport manualImportPrimary">
+        <div class="sectionTitle">
+          <span>ZIP</span>
+          <div><h2>Importar chats desde iPhone</h2><p>Selecciona todos los ZIP juntos. Radar los procesa uno por uno y conserva el avance.</p></div>
+        </div>
+        <label class="picker" for="zipInput">
+          <b>Seleccionar uno o varios ZIP</b>
+          <small>Archivos · iCloud Drive · compatible con 34 o más archivos</small>
+        </label>
+        <input id="zipInput" type="file" accept=".zip,application/zip" multiple />
+        <div id="fileCard" class="fileCard zipBatchCard" hidden>
+          <div class="zipBadge">ZIP</div>
+          <div><b id="fileName"></b><small id="fileMeta"></small></div>
+        </div>
+        <div id="zipSelectionList" class="zipSelectionList" hidden></div>
+        <button id="importBtn" class="primary" disabled>Procesar ZIP</button>
+        <button id="retryFailedZips" class="ghost" type="button" hidden>Reintentar fallidos</button>
+      </section>
+
+      <section id="statusBox" class="card statusCard" hidden>
+        <div class="row"><b id="statusText">Procesando…</b><span id="batchCounter">0 / 0</span></div>
+        <progress id="progress"></progress>
+        <div id="batchProgressStats" class="batchProgressStats" hidden></div>
+        <small>Procesamiento secuencial en este dispositivo. Puedes volver a seleccionar los mismos ZIP para continuar.</small>
+      </section>
+      <section id="resultBox" class="card resultCard" hidden></section>
+
       <section class="card secondaryWhatsAppCard">
         <div class="sectionTitle">
           <span>◉</span>
@@ -449,28 +476,6 @@
         <div class="smartLocationActions"><button id="openLocationReview" class="primary">Revisar detecciones</button><button id="refreshLocationCatalog" class="ghost">Aplicar catálogo</button></div>
         <small class="smartLocationNote">Las variantes se vinculan como alias. Una zona nueva solo entra al catálogo cuando tú la apruebas.</small>
       </section>
-
-      <details class="card manualImport">
-        <summary>Importación manual desde iPhone</summary>
-        <p class="muted">Úsala como respaldo si necesitas seleccionar un ZIP desde Archivos.</p>
-        <label class="picker" for="zipInput">
-          <b>Seleccionar ZIP</b>
-          <small>Archivos · iCloud Drive</small>
-        </label>
-        <input id="zipInput" type="file" accept=".zip,application/zip" />
-        <div id="fileCard" class="fileCard" hidden>
-          <div class="zipBadge">ZIP</div>
-          <div><b id="fileName"></b><small id="fileMeta"></small></div>
-        </div>
-        <button id="importBtn" class="primary" disabled>Procesar y guardar</button>
-      </details>
-
-      <section id="statusBox" class="card statusCard" hidden>
-        <div class="row"><b id="statusText">Procesando…</b><span>v0.5.1.2 · 60 días</span></div>
-        <progress id="progress"></progress>
-        <small>Los chats se procesan en este dispositivo.</small>
-      </section>
-      <section id="resultBox" class="card resultCard" hidden></section>
 
       <section class="card">
         <div class="sectionTitle"><span>↻</span><div><h2>Importaciones recientes</h2><p>Historial guardado localmente.</p></div></div>

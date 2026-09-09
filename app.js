@@ -46,8 +46,10 @@ import { APP_LABEL, APP_VERSION } from './version.js';
 import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
+import {runManualZipBatch} from './ingestion/manual-zip-batch.js';
 const $ = (q) => document.querySelector(q);
-let selectedFile = null;
+let selectedFiles = [];
+let failedZipNames = new Set();
 const demandEngineEnabled=radarDemandEngineEnabled({RADAR_DEMAND_ENGINE_ENABLED:globalThis.RADAR_DEMAND_ENGINE_ENABLED||localStorage.getItem('RADAR_DEMAND_ENGINE_ENABLED')||''});
 let allProperties = [];
 let favoriteIds = new Set();
@@ -1192,41 +1194,55 @@ async function importOneZip(file, group, progressCb,{deferMatching=false}={}) {
 
 const fileInput = $('#zipInput');
 fileInput.addEventListener('change', () => {
-  selectedFile = fileInput.files?.[0] || null;
-  if (!selectedFile) return;
-  $('#fileName').textContent = selectedFile.name;
-  $('#fileMeta').textContent = `${prettySize(selectedFile.size)} · listo para procesar`;
-  $('#fileCard').hidden = false;
-  $('#importBtn').disabled = false;
+  selectedFiles = [...(fileInput.files || [])].filter(file=>/\.zip$/i.test(file.name));
+  failedZipNames = new Set();
+  const totalSize=selectedFiles.reduce((sum,file)=>sum+Number(file.size||0),0);
+  $('#fileName').textContent = selectedFiles.length===1 ? selectedFiles[0].name : `${selectedFiles.length} ZIP seleccionados`;
+  $('#fileMeta').textContent = selectedFiles.length ? `${prettySize(totalSize)} en total · listos para procesar uno por uno` : 'No se seleccionaron archivos ZIP';
+  $('#fileCard').hidden = !selectedFiles.length;
+  const list=$('#zipSelectionList');
+  list.innerHTML=selectedFiles.map((file,index)=>`<div><span>${index+1}. ${esc(file.name)}</span><small>${prettySize(file.size)}</small></div>`).join('');
+  list.hidden = !selectedFiles.length;
+  $('#importBtn').disabled = !selectedFiles.length;
+  $('#importBtn').textContent = selectedFiles.length ? `Procesar ${selectedFiles.length} ZIP` : 'Procesar ZIP';
+  $('#retryFailedZips').hidden = true;
   $('#resultBox').hidden = true;
 });
 
-$('#importBtn').addEventListener('click', async () => {
-  if (!selectedFile) return;
-  $('#importBtn').disabled = true; fileInput.disabled = true; $('#resultBox').hidden = true;
+async function processSelectedZipBatch(onlyNames=null) {
+  if (!selectedFiles.length) return;
+  $('#importBtn').disabled = true; fileInput.disabled = true; $('#resultBox').hidden = true; $('#retryFailedZips').hidden=true;
   try {
-    const group = groupFromName(selectedFile.name);
-    setStatus('Preparando importación…');
-    const {summary} = await importOneZip(selectedFile,group,(p)=>{
-      if(p.phase==='zip') setStatus('Abriendo ZIP…',12);
-      else if(p.phase==='decode') setStatus(p.bytes?`Leyendo chat… ${prettySize(p.bytes)}`:'Leyendo chat…',28);
-      else if(p.phase==='process') setStatus('Detectando propiedades…',48);
-      else if(p.phase==='process_progress') setStatus(`Detectando propiedades… ${Number(p.done||0).toLocaleString('es-VE')} / ${Number(p.total||0).toLocaleString('es-VE')}`,48+Math.round((Number(p.done||0)/Math.max(Number(p.total||0),1))*10));
-      else if(p.phase==='save') setStatus(`Guardando base local… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,60+Math.round((p.done/Math.max(p.total,1))*35));
-      else if(p.phase==='demand') setStatus(`Demandas… ${p.done.toLocaleString('es-VE')} / ${p.total.toLocaleString('es-VE')}`,96);
-    });
-    const alreadyProcessed=Boolean(summary.already_processed);
-    const importTitle=alreadyProcessed?'ZIP ya procesado anteriormente':'Importación completada';
+    setStatus('Preparando importación por lotes…',0);
+    const result=await runManualZipBatch(selectedFiles,{importOneZip,groupFromName,onlyNames,onProgress:event=>{
+      const stats=event.summary||{};
+      $('#batchCounter').textContent=`${event.index||0} / ${event.total||0}`;
+      const statsBox=$('#batchProgressStats');statsBox.hidden=false;
+      statsBox.textContent=`${stats.processed||0} procesados · ${stats.skipped||0} omitidos · ${stats.failed||0} fallidos · ${stats.pending||0} pendientes`;
+      if(event.stage==='file_start')setStatus(`ZIP ${event.index} de ${event.total}: ${event.file.name}`,Math.round(((event.index-1)/Math.max(event.total,1))*100));
+      if(event.stage==='file_progress'){
+        const p=event.progress||{},base=((event.index-1)/Math.max(event.total,1))*100,span=100/Math.max(event.total,1);
+        const phasePct=p.phase==='zip'?0.1:p.phase==='decode'?0.25:p.phase==='process'?0.45:p.phase==='process_progress'?0.55:p.phase==='save'?0.8:p.phase==='demand'?0.96:0.05;
+        setStatus(`ZIP ${event.index} de ${event.total}: ${event.file.name}`,Math.min(99,Math.round(base+span*phasePct)));
+      }
+    }});
+    failedZipNames=new Set(result.failures.map(row=>row.file));
+    const summary=result.summary,importTitle=summary.failed?'Importación terminada con archivos pendientes':'Importación por lotes completada';
     setStatus(importTitle,100);
     $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>${importTitle}</h3>
-      <div class="summaryGrid"><div><b>${summary.messages.toLocaleString('es-VE')}</b><span>mensajes ≤60 días</span></div>
-      <div><b>${summary.skipped_age.toLocaleString('es-VE')}</b><span>antiguos omitidos</span></div>
-      <div><b>${summary.detected.toLocaleString('es-VE')}</b><span>publicaciones</span></div>
+      <div class="summaryGrid"><div><b>${summary.processed.toLocaleString('es-VE')}</b><span>procesados</span></div>
+      <div><b>${summary.skipped.toLocaleString('es-VE')}</b><span>ya completados</span></div>
+      <div><b>${summary.failed.toLocaleString('es-VE')}</b><span>fallidos</span></div>
       <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>`;
+    $('#retryFailedZips').hidden=!failedZipNames.size;
+    if(failedZipNames.size)$('#retryFailedZips').textContent=`Reintentar ${failedZipNames.size} fallidos`;
     $('#resultBox').hidden=false; await loadData(); await maybeAutoBackup();
   } catch(e) { setStatus(`Error: ${e.message}`,0); }
   finally { $('#importBtn').disabled=false; fileInput.disabled=false; }
-});
+}
+
+$('#importBtn').addEventListener('click',()=>processSelectedZipBatch());
+$('#retryFailedZips').addEventListener('click',()=>processSelectedZipBatch(new Set(failedZipNames)));
 
 async function refreshStatsOnly(uniqueCount=null) {
   const s = await getStats();
