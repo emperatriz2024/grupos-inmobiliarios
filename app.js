@@ -1142,17 +1142,18 @@ $('#recheckExternalFreshness')?.addEventListener('click',async()=>{
 $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 
-function processZipWithWorker(file, group, progressCb) {
+function processZipWithWorker(bytes, fileName, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0771',{type:'module'});
+    const worker = new Worker('./worker.js?v=0773',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
-      if(m.type==='error'){ worker.terminate(); reject(new Error(m.message)); return; }
+      if(m.type==='error'){ worker.terminate(); const error=new Error(m.message);error.name=m.name||'Error';error.radarPhase=m.phase||'unzip';reject(error);return; }
       if(m.type==='done'){ worker.terminate(); resolve(m); }
     };
-    worker.onerror=(e)=>{worker.terminate();reject(new Error(e.message||'Error del procesador'));};
-    worker.postMessage({file,group,locationCatalog});
+    worker.onerror=(e)=>{worker.terminate();const error=new Error(e.message||'Error del procesador');error.name=e.error?.name||'WorkerError';error.radarPhase='unzip';reject(error);};
+    try{worker.postMessage({bytes,fileName,group,locationCatalog},[bytes]);}
+    catch(cause){worker.terminate();const error=new Error(cause?.message||'No se pudo transferir el ZIP al procesador');error.name=cause?.name||'DataCloneError';error.radarPhase='unzip';reject(error);}
   });
 }
 
@@ -1182,14 +1183,18 @@ async function saveProcessedResult(m, group, fileName, fileHash, startedAt, prog
 }
 
 async function importOneZip(file, group, progressCb,{deferMatching=false}={}) {
-  const startedAt=new Date().toISOString();
-  const bytes=await file.arrayBuffer(),hashBytes=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
-  const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),checkpoint=await findImportCheckpointByFileHash(fileHash),phase=String(checkpoint?.status||'').toUpperCase();
-  if(phase==='COMPLETED')return {m:null,summary:{...checkpoint,already_processed:true,status:'already_processed'},demandIds:checkpoint.demand_ids||[],propertyIds:[]};
-  if(phase==='DEMANDS_SAVED'){const summary=await saveImportCheckpoint(fileHash,{...checkpoint,status:'COMPLETED',finished_at:new Date().toISOString()});return {m:null,summary,demandIds:summary.demand_ids||[],propertyIds:[]};}
-  const m = await processZipWithWorker(file,group,progressCb);
-  const saved = await saveProcessedResult(m,group,file.name,fileHash,startedAt,progressCb,{deferMatching,checkpoint});
-  return {m,...saved};
+  const startedAt=new Date().toISOString();let currentPhase='hash';
+  const trackedProgress=progress=>{currentPhase=progress?.phase||currentPhase;progressCb?.(progress);};
+  try{
+    trackedProgress({phase:'hash'});
+    const bytes=await file.arrayBuffer(),hashBytes=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+    const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),checkpoint=await findImportCheckpointByFileHash(fileHash),phase=String(checkpoint?.status||'').toUpperCase();
+    if(phase==='COMPLETED')return {m:null,summary:{...checkpoint,already_processed:true,status:'already_processed'},demandIds:checkpoint.demand_ids||[],propertyIds:[]};
+    if(phase==='DEMANDS_SAVED'){currentPhase='save';const summary=await saveImportCheckpoint(fileHash,{...checkpoint,status:'COMPLETED',finished_at:new Date().toISOString()});return {m:null,summary,demandIds:summary.demand_ids||[],propertyIds:[]};}
+    currentPhase='unzip';const m=await processZipWithWorker(bytes,file.name,group,trackedProgress);
+    currentPhase='save';const saved=await saveProcessedResult(m,group,file.name,fileHash,startedAt,trackedProgress,{deferMatching,checkpoint});
+    return {m,...saved};
+  }catch(error){error.radarPhase=error.radarPhase||currentPhase;throw error;}
 }
 
 const fileInput = $('#zipInput');
@@ -1227,13 +1232,15 @@ async function processSelectedZipBatch(onlyNames=null) {
       }
     }});
     failedZipNames=new Set(result.failures.map(row=>row.file));
-    const summary=result.summary,importTitle=summary.failed?'Importación terminada con archivos pendientes':'Importación por lotes completada';
+    const summary=result.summary,allFailed=summary.failed===summary.selected&&summary.selected>0,importTitle=allFailed?'No se pudo procesar ningún ZIP':summary.failed?'Importación parcial':'Importación por lotes completada';
     setStatus(importTitle,100);
-    $('#resultBox').innerHTML = `<div class="successMark">✓</div><h3>${importTitle}</h3>
+    const icon=allFailed?'!':summary.failed?'◐':'✓',stateClass=allFailed?'errorMark':summary.failed?'partialMark':'successMark';
+    const errors=result.failures.length?`<details class="batchErrors"><summary>Ver errores (${result.failures.length})</summary>${result.failures.map(row=>`<div><b>${esc(row.file)}</b><small>${esc(row.name)} · ${esc(row.phase)} · ${esc(row.message)}</small></div>`).join('')}</details>`:'';
+    $('#resultBox').innerHTML = `<div class="${stateClass}">${icon}</div><h3>${importTitle}</h3>
       <div class="summaryGrid"><div><b>${summary.processed.toLocaleString('es-VE')}</b><span>procesados</span></div>
       <div><b>${summary.skipped.toLocaleString('es-VE')}</b><span>ya completados</span></div>
       <div><b>${summary.failed.toLocaleString('es-VE')}</b><span>fallidos</span></div>
-      <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>`;
+      <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>${errors}`;
     $('#retryFailedZips').hidden=!failedZipNames.size;
     if(failedZipNames.size)$('#retryFailedZips').textContent=`Reintentar ${failedZipNames.size} fallidos`;
     $('#resultBox').hidden=false; await loadData(); await maybeAutoBackup();
@@ -1762,5 +1769,5 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0771').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0773').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }

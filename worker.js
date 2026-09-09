@@ -2,11 +2,13 @@ import { extractWhatsAppChat, decodeChat } from './zip-reader.js?v=0530';
 import { processChatText } from './engine.js?v=0530';
 
 self.onmessage = async (e) => {
-  const { file, group, locationCatalog } = e.data;
+  const { bytes, fileName, group, locationCatalog } = e.data;
+  let phase='unzip';
   try {
     postMessage({ type: 'status', step: 'zip', text: 'Abriendo ZIP…' });
-    const extracted = await extractWhatsAppChat(file);
+    const extracted = await extractWhatsAppChat({name:fileName,arrayBuffer:async()=>bytes});
 
+    phase='parse';
     postMessage({
       type: 'status',
       step: 'decode',
@@ -15,6 +17,7 @@ self.onmessage = async (e) => {
     });
     const text = decodeChat(extracted.bytes);
 
+    phase='process';
     postMessage({
       type: 'status',
       step: 'process',
@@ -33,7 +36,9 @@ self.onmessage = async (e) => {
   } catch (error) {
     postMessage({
       type: 'error',
-      message: error?.message || String(error)
+      name: error?.name || 'Error',
+      message: error?.message || String(error),
+      phase
     });
   }
 };
