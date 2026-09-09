@@ -5,6 +5,7 @@ export default async function(request){
   const headers={'cache-control':'no-store'};
   if(request.method!=='GET')return Response.json({error:'method_not_allowed'},{status:405,headers});
   const env={RADAR_INGESTION_WORKER_TOKEN:process.env.RADAR_DROPBOX_DIAGNOSTIC_TOKEN||process.env.RADAR_INGESTION_WORKER_TOKEN};
+  if(!validWorkerToken({headers:Object.fromEntries(request.headers)},env))return Response.json({error:'unauthorized'},{status:401,headers});
   try{
     const entries=await createServerDropbox().listPending();
     return Response.json({ok:true,operation:'listPending',zipCount:entries.length,totalBytes:entries.reduce((n,row)=>n+Number(row.size||0),0)},{headers});
