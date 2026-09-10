@@ -7,6 +7,6 @@ for(const table of ['readiness_assessments','enrichment_tasks','property_package
 assert.match(db,/const DB_VERSION = (?:10|11|12|13|14|15)/);assert.match(db,/runOpportunityReadiness/);assert.match(db,/READINESS_STORE,ENRICHMENT_TASK_STORE,PROPERTY_PACKAGE_STORE,PACKAGE_MEDIA_STORE/);
 assert.match(engine,/serializePublicProperty/);assert.match(engine,/PUBLIC_MEDIA_RIGHTS/);assert.match(engine,/scope\.opportunityIds/);
 const testRelease=/0\.7\.(?:3|4|5|6|7)-test/.test(version)&&/V0\.7\.(?:3 READY \+ ENRICHMENT|4 CLIENT \+ BROKER TWIN|5 REVENUE OPERATIONS|6 OWNER \+ CAPTACION|7 REVENUE OS COMPLETE) TEST/.test(version);
-const productionRelease=/APP_VERSION='0\.7\.7'/.test(version)&&/APP_LABEL='V0\.7\.7 PRODUCTION'/.test(version);
+const productionRelease=/APP_VERSION='0\.7\.(?:7|8)'/.test(version)&&/APP_LABEL='V0\.7\.(?:7|8) PRODUCTION'/.test(version);
 assert.ok(testRelease||productionRelease);
 console.log('Phase 0D architecture contract: PASS');

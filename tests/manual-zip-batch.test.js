@@ -9,7 +9,7 @@ test('procesa un ZIP y mantiene compatibilidad individual',async()=>{
   const seen=[];
   const result=await runManualZipBatch([zip('uno.zip')],{importOneZip:async file=>{seen.push(file.name);return completed(2);}});
   assert.deepEqual(seen,['uno.zip']);
-  assert.deepEqual(result.summary,{selected:1,processed:1,skipped:0,failed:0,added:2,updated:0,duplicates:0,pending:0});
+  assert.deepEqual(result.summary,{selected:1,processed:1,skipped:0,reindexed:0,review:0,failed:0,added:2,updated:0,duplicates:0,pending:0});
 });
 
 test('procesa múltiples ZIP estrictamente en secuencia',async()=>{

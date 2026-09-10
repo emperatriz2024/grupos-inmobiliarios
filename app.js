@@ -47,8 +47,10 @@ import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
 import {runManualZipBatch} from './ingestion/manual-zip-batch.js';
+import {IMPORT_ENGINE_VERSION,checkpointDisposition,importSanity,mergeSelectedZipFiles} from './ingestion/manual-import-state.js';
 const $ = (q) => document.querySelector(q);
 let selectedFiles = [];
+let zipBatchRunning = false;
 let failedZipNames = new Set();
 const demandEngineEnabled=radarDemandEngineEnabled({RADAR_DEMAND_ENGINE_ENABLED:globalThis.RADAR_DEMAND_ENGINE_ENABLED||localStorage.getItem('RADAR_DEMAND_ENGINE_ENABLED')||''});
 let allProperties = [];
@@ -1144,7 +1146,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(bytes, fileName, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0773',{type:'module'});
+    const worker = new Worker('./worker.js?v=0780',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1161,8 +1163,13 @@ const IMPORT_PHASE_RANK=Object.freeze({PROPERTIES_SAVED:1,DEMANDS_SAVED:2,COMPLE
 
 async function saveProcessedResult(m, group, fileName, fileHash, startedAt, progressCb,{deferMatching=false,checkpoint=null}={}) {
   let phase=String(checkpoint?.status||'').toUpperCase(),saved={added:Number(checkpoint?.added||0),updated:Number(checkpoint?.updated||0)};
+  const sanity=importSanity(m.result);
   const baseSummary={workspace_id:'00000000-0000-7000-8000-000000000001',device_id:null,group,thread_reference:group,file_name:fileName,source_filename:fileName,file_hash:fileHash,chat_file:m.entryName,
-    messages:m.result.messages,messages_total:m.result.messages_total??m.result.messages,skipped_age:m.result.messages_skipped_age??0,max_age_days:m.result.max_age_days??60,cutoff_date:m.result.cutoff_date??null,detected:m.result.properties_detected,unique:m.result.unique.length,messages_detected:m.result.messages,messages_imported:m.result.messages,started_at:checkpoint?.started_at||startedAt};
+    messages:m.result.messages,messages_total:m.result.messages_total??m.result.messages,messages_after_age_filter:sanity.messages_after_age_filter,skipped_age:m.result.messages_skipped_age??0,max_age_days:m.result.max_age_days??60,cutoff_date:m.result.cutoff_date??null,detected:m.result.properties_detected,properties_detected:sanity.properties_detected,unique:m.result.unique.length,requests_skipped:sanity.requests_skipped,parser_diagnostics:sanity.parser_diagnostics,engine_version:IMPORT_ENGINE_VERSION,parser_version:IMPORT_ENGINE_VERSION,messages_detected:m.result.messages,messages_imported:m.result.messages,started_at:checkpoint?.started_at||startedAt};
+  if(sanity.suspicious){
+    const summary=await saveImportCheckpoint(fileHash,{...baseSummary,added:0,updated:0,duplicates_detected:0,errors_count:0,status:'SUSPICIOUS_EMPTY',finished_at:new Date().toISOString()});
+    return {summary,propertyIds:[],demandIds:[]};
+  }
   if((IMPORT_PHASE_RANK[phase]||0)<IMPORT_PHASE_RANK.PROPERTIES_SAVED){
     saved=await mergeProperties(m.result.unique,(done,total)=>progressCb?.({phase:'save',done,total}));
     await learnContactsFromProperties(m.result.unique);await recordLocationPendings(m.result.location_pendings||[]);
@@ -1188,21 +1195,28 @@ async function importOneZip(file, group, progressCb,{deferMatching=false}={}) {
   try{
     trackedProgress({phase:'hash'});
     const bytes=await file.arrayBuffer(),hashBytes=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
-    const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join(''),checkpoint=await findImportCheckpointByFileHash(fileHash),phase=String(checkpoint?.status||'').toUpperCase();
-    if(phase==='COMPLETED')return {m:null,summary:{...checkpoint,already_processed:true,status:'already_processed'},demandIds:checkpoint.demand_ids||[],propertyIds:[]};
+    const fileHash=[...hashBytes].map(value=>value.toString(16).padStart(2,'0')).join('');let checkpoint=await findImportCheckpointByFileHash(fileHash),phase=String(checkpoint?.status||'').toUpperCase();
+    const disposition=checkpointDisposition(checkpoint);
+    if(disposition==='ALREADY_PROCESSED')return {m:null,summary:{...checkpoint,already_processed:true,status:'already_processed'},demandIds:checkpoint.demand_ids||[],propertyIds:[]};
+    const reindexed=disposition==='REINDEX_REQUIRED';
+    if(reindexed){checkpoint=await saveImportCheckpoint(fileHash,{...checkpoint,status:'REINDEX_REQUIRED',engine_version:IMPORT_ENGINE_VERSION,reindex_started_at:new Date().toISOString()});phase='REINDEX_REQUIRED';}
     if(phase==='DEMANDS_SAVED'){currentPhase='save';const summary=await saveImportCheckpoint(fileHash,{...checkpoint,status:'COMPLETED',finished_at:new Date().toISOString()});return {m:null,summary,demandIds:summary.demand_ids||[],propertyIds:[]};}
     currentPhase='unzip';const m=await processZipWithWorker(bytes,file.name,group,trackedProgress);
-    currentPhase='save';const saved=await saveProcessedResult(m,group,file.name,fileHash,startedAt,trackedProgress,{deferMatching,checkpoint});
+    currentPhase='save';const saved=await saveProcessedResult(m,group,file.name,fileHash,startedAt,trackedProgress,{deferMatching,checkpoint:reindexed?null:checkpoint});
+    if(reindexed)saved.summary.reindexed=true;
     return {m,...saved};
   }catch(error){error.radarPhase=error.radarPhase||currentPhase;throw error;}
 }
 
 const fileInput = $('#zipInput');
 fileInput.addEventListener('change', () => {
-  selectedFiles = [...(fileInput.files || [])].filter(file=>/\.zip$/i.test(file.name));
+  if(zipBatchRunning)return;
+  selectedFiles = mergeSelectedZipFiles(selectedFiles,[...(fileInput.files || [])]);
+  fileInput.value='';
   failedZipNames = new Set();
   const totalSize=selectedFiles.reduce((sum,file)=>sum+Number(file.size||0),0);
-  $('#fileName').textContent = selectedFiles.length===1 ? selectedFiles[0].name : `${selectedFiles.length} ZIP seleccionados`;
+  $('#fileName').textContent = `${selectedFiles.length} ZIP ${selectedFiles.length===1?'acumulado':'acumulados'}`;
+  $('#clearZipSelection').hidden=!selectedFiles.length;
   $('#fileMeta').textContent = selectedFiles.length ? `${prettySize(totalSize)} en total · listos para procesar uno por uno` : 'No se seleccionaron archivos ZIP';
   $('#fileCard').hidden = !selectedFiles.length;
   const list=$('#zipSelectionList');
@@ -1215,8 +1229,9 @@ fileInput.addEventListener('change', () => {
 });
 
 async function processSelectedZipBatch(onlyNames=null) {
-  if (!selectedFiles.length) return;
-  $('#importBtn').disabled = true; fileInput.disabled = true; $('#resultBox').hidden = true; $('#retryFailedZips').hidden=true;
+  if (!selectedFiles.length||zipBatchRunning) return;
+  zipBatchRunning=true;
+  $('#importBtn').disabled = true; $('#resultBox').hidden = true; $('#retryFailedZips').hidden=true;
   try {
     setStatus('Preparando importación por lotes…',0);
     const result=await runManualZipBatch(selectedFiles,{importOneZip,groupFromName,onlyNames,onProgress:event=>{
@@ -1232,24 +1247,29 @@ async function processSelectedZipBatch(onlyNames=null) {
       }
     }});
     failedZipNames=new Set(result.failures.map(row=>row.file));
-    const summary=result.summary,allFailed=summary.failed===summary.selected&&summary.selected>0,importTitle=allFailed?'No se pudo procesar ningún ZIP':summary.failed?'Importación parcial':'Importación por lotes completada';
+    const summary=result.summary,allFailed=summary.failed===summary.selected&&summary.selected>0,hasReview=summary.review>0,importTitle=allFailed?'No se pudo procesar ning\u00fan ZIP':summary.failed?'Importaci\u00f3n parcial':hasReview?'Importaci\u00f3n requiere revisi\u00f3n':'Importaci\u00f3n por lotes completada';
     setStatus(importTitle,100);
-    const icon=allFailed?'!':summary.failed?'◐':'✓',stateClass=allFailed?'errorMark':summary.failed?'partialMark':'successMark';
+    const icon=allFailed?'!':summary.failed||hasReview?'&#9680;':'&#10003;',stateClass=allFailed?'errorMark':summary.failed||hasReview?'partialMark':'successMark';
     const errors=result.failures.length?`<details class="batchErrors"><summary>Ver errores (${result.failures.length})</summary>${result.failures.map(row=>`<div><b>${esc(row.file)}</b><small>${esc(row.name)} · ${esc(row.phase)} · ${esc(row.message)}</small></div>`).join('')}</details>`:'';
     $('#resultBox').innerHTML = `<div class="${stateClass}">${icon}</div><h3>${importTitle}</h3>
       <div class="summaryGrid"><div><b>${summary.processed.toLocaleString('es-VE')}</b><span>procesados</span></div>
       <div><b>${summary.skipped.toLocaleString('es-VE')}</b><span>ya completados</span></div>
+      <div><b>${summary.reindexed.toLocaleString('es-VE')}</b><span>reindexados</span></div>
       <div><b>${summary.failed.toLocaleString('es-VE')}</b><span>fallidos</span></div>
-      <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div></div>${errors}`;
+      <div><b>${summary.added.toLocaleString('es-VE')}</b><span>nuevas en base</span></div>
+      <div><b>${summary.updated.toLocaleString('es-VE')}</b><span>actualizadas</span></div>
+      <div><b>${summary.duplicates.toLocaleString('es-VE')}</b><span>duplicados</span></div>
+      <div><b>${summary.review.toLocaleString('es-VE')}</b><span>para revisar</span></div></div>${errors}`;
     $('#retryFailedZips').hidden=!failedZipNames.size;
     if(failedZipNames.size)$('#retryFailedZips').textContent=`Reintentar ${failedZipNames.size} fallidos`;
     $('#resultBox').hidden=false; await loadData(); await maybeAutoBackup();
   } catch(e) { setStatus(`Error: ${e.message}`,0); }
-  finally { $('#importBtn').disabled=false; fileInput.disabled=false; }
+  finally { zipBatchRunning=false; $('#importBtn').disabled=false; }
 }
 
 $('#importBtn').addEventListener('click',()=>processSelectedZipBatch());
 $('#retryFailedZips').addEventListener('click',()=>processSelectedZipBatch(new Set(failedZipNames)));
+$('#clearZipSelection').addEventListener('click',()=>{if(zipBatchRunning)return;selectedFiles=[];failedZipNames.clear();fileInput.value='';$('#fileCard').hidden=true;$('#zipSelectionList').hidden=true;$('#importBtn').disabled=true;$('#importBtn').textContent='Procesar ZIP';$('#clearZipSelection').hidden=true;});
 
 async function refreshStatsOnly(uniqueCount=null) {
   const s = await getStats();
@@ -1769,5 +1789,5 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0773').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0780').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }

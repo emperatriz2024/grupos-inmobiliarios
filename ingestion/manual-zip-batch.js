@@ -1,4 +1,4 @@
-export const emptyZipBatchSummary=total=>({selected:total,processed:0,skipped:0,failed:0,added:0,updated:0,duplicates:0,pending:total});
+export const emptyZipBatchSummary=total=>({selected:total,processed:0,skipped:0,reindexed:0,review:0,failed:0,added:0,updated:0,duplicates:0,pending:total});
 const clean=value=>String(value||'Error desconocido').replace(/(Bearer\s+|token[=:]\s*)[^\s,;]+/gi,'$1[oculto]').replace(/[\r\n\t]+/g,' ').slice(0,240);
 export function zipFailure(file,error){return {file:file?.name||'ZIP sin nombre',name:clean(error?.name||'Error'),message:clean(error?.message||error),phase:clean(error?.radarPhase||'unknown')};}
 const breathe=()=>new Promise(resolve=>setTimeout(resolve,0));
@@ -16,8 +16,11 @@ export async function runManualZipBatch(files=[],{
       const result=await importOneZip(file,groupFromName(file.name),progress=>onProgress({stage:'file_progress',file,index:position,total:selected.length,progress,summary:{...summary}}),{deferMatching:true});
       const row=result?.summary||{},skipped=Boolean(row.already_processed||String(row.status).toLowerCase()==='already_processed');
       if(skipped)summary.skipped++;else summary.processed++;
+      const needsReview=['EMPTY_REVIEW','SUSPICIOUS_EMPTY'].includes(String(row.status).toUpperCase());
+      if(row.reindexed)summary.reindexed++;
+      if(needsReview)summary.review++;
       summary.added+=Number(row.added||0);summary.updated+=Number(row.updated||0);summary.duplicates+=Number(row.duplicates_detected??row.updated??0);
-      results.push({file:file.name,status:skipped?'skipped':'completed',summary:row});
+      results.push({file:file.name,status:skipped?'skipped':needsReview?'review':'completed',summary:row});
     }catch(error){summary.failed++;const failure=zipFailure(file,error);failures.push(failure);results.push({file:file.name,status:'failed',...failure});}
     finally{summary.pending=selected.length-position;onProgress({stage:'file_done',file,index:position,total:selected.length,summary:{...summary}});await breathe();}
   }

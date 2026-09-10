@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0773" />
+  <link rel="stylesheet" href="./styles.css?v=0780" />
 </head>
 <body>
   <main class="shell">
@@ -183,7 +183,7 @@
           <div><h2>Importar chats desde iPhone</h2><p>Selecciona todos los ZIP juntos. Radar los procesa uno por uno y conserva el avance.</p></div>
         </div>
         <label class="picker" for="zipInput">
-          <b>Seleccionar uno o varios ZIP</b>
+          <b>Añadir más ZIP</b>
           <small>Archivos · iCloud Drive · compatible con 34 o más archivos</small>
         </label>
         <input id="zipInput" type="file" accept=".zip,application/zip" multiple />
@@ -193,6 +193,7 @@
         </div>
         <div id="zipSelectionList" class="zipSelectionList" hidden></div>
         <button id="importBtn" class="primary" disabled>Procesar ZIP</button>
+        <button id="clearZipSelection" class="ghost" type="button" hidden>Vaciar selección</button>
         <button id="retryFailedZips" class="ghost" type="button" hidden>Reintentar fallidos</button>
       </section>
 
@@ -666,6 +667,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0773"></script>
+  <script type="module" src="./app.js?v=0780"></script>
 </body>
 </html>
