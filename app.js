@@ -1,3 +1,4 @@
+import {searchPropertiesChunked} from './search-chunks.js?v=0784';
 
 import {
   mergeProperties, patchPropertyPriceAudits, findImportCheckpointByFileHash, saveImportCheckpoint, getStats, getRecentImports, probeLocalDatabase,
@@ -18,7 +19,7 @@ import {
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0783';
+} from './search-utils.js?v=0784';
 import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0783';
 import { isDemandRequest } from './intent-utils.js?v=0783';
 import { consolidateProperties } from './dedupe-utils.js?v=0783';
@@ -42,7 +43,7 @@ import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
 import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
-import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0783';
+import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0784';
 import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
@@ -333,14 +334,26 @@ function getFilters() {
   };
 }
 
-function runSearch(resetVisible=true,{persist=true}={}) {
-  if (resetVisible) visibleCount = 30;
-  const f = getFilters();
-  currentResults = sortProperties(allProperties.filter(p => matchesFilters(p, f)), $('#sortMode').value);
-  $('#resultCount').textContent = currentResults.length.toLocaleString('es-VE');
-  $('#resultHint').textContent = currentResults.length ? 'Base local · orden aplicada' : 'Sin coincidencias';
-  renderResults();
-  if(persist)rememberSearchPosition();
+let searchGeneration=0;
+async function runSearch(resetVisible=true,{persist=true}={}) {
+  const generation=++searchGeneration;
+  const f=getFilters(), mode=$('#sortMode').value;
+  const button=$('#searchBtn');
+  button.textContent='Buscando…'; button.setAttribute('aria-busy','true');
+  try {
+    const results=await searchPropertiesChunked(allProperties,f,mode,{cancelled:()=>generation!==searchGeneration});
+    if(generation!==searchGeneration || results===null)return;
+    if(resetVisible)visibleCount=30;
+    currentResults=results;
+    $('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');
+    $('#resultHint').textContent=currentResults.length?'Base local · orden aplicada':'Sin coincidencias';
+    renderResults();
+    if(persist)rememberSearchPosition();
+  } catch(error) {
+    if(generation===searchGeneration)$('#resultHint').textContent='No se pudo completar la búsqueda. Intenta de nuevo.';
+  } finally {
+    if(generation===searchGeneration){button.textContent='Buscar propiedades';button.removeAttribute('aria-busy');}
+  }
 }
 function renderResults() {
   const box = $('#results');
@@ -351,14 +364,10 @@ function renderResults() {
 }
 $('#loadMore').onclick = () => { visibleCount += 30; renderResults(); rememberSearchPosition(); };
 $('#searchBtn').onclick = () => runSearch();
-$('#q').addEventListener('keydown', e => { if(e.key === 'Enter') { e.preventDefault(); runSearch(); }});
-let filterSearchTimer=null;
-function scheduleFilterSearch(){clearTimeout(filterSearchTimer);filterSearchTimer=setTimeout(()=>runSearch(),180);}
-['residence','minPrice','maxPrice','minArea','maxArea'].forEach(id=>$('#'+id).addEventListener('input',scheduleFilterSearch));
-['operation','bedrooms','bathrooms','parking','maxAge','sortMode'].forEach(id=>$('#'+id).addEventListener('change',()=>runSearch()));
-['planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id=>$('#'+id).addEventListener('change',()=>runSearch()));
+$('#q').addEventListener('keydown',e=>{if(e.key==='Enter')e.preventDefault();});
+['q','residence','minPrice','maxPrice','minArea','maxArea'].forEach(id=>$('#'+id).addEventListener('input',()=>rememberSearchPosition()));
+['operation','bedrooms','bathrooms','parking','maxAge','sortMode','planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id=>$('#'+id).addEventListener('change',()=>rememberSearchPosition()));
 $('#clearFilters').onclick = () => {
-  clearTimeout(filterSearchTimer);
   ['q','operation','residence','minPrice','maxPrice','bedrooms','bathrooms','parking','minArea','maxArea','maxAge'].forEach(id => $('#'+id).value='');
   $('#sortMode').value='recent';
   ['planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id => $('#'+id).checked=false);
@@ -397,7 +406,7 @@ function renderPills(containerId,set,labelFn=x=>x){
       }));
     }
     updateSelectorUI();
-    runSearch();
+    rememberSearchPosition();
   });
 }
 function updateSelectorUI(){
@@ -435,12 +444,22 @@ function openSelector(mode){
   selectorMode=mode;
   selectorDraft=new Set(mode==='types'?selectedPropertyTypes:mode==='municipalities'?selectedMunicipalities:selectedZones);
   $('#selectorTitle').textContent=mode==='types'?'Tipos de inmueble':mode==='municipalities'?'Municipios':'Zonas / sectores';
-  $('#selectorSearchWrap').hidden=mode==='types';$('#selectorSearchInput').value='';renderSelectorOptions();$('#multiSelectorDialog').showModal();
+  $('#selectorSearchWrap').hidden=false;$('#selectorSearchInput').value='';renderSelectorOptions();
+  $('#multiSelectorBackdrop').hidden=false;$('#multiSelectorPanel').hidden=false;
+  document.body.classList.add('selectorSheetOpen');
 }
 $('#openTypeSelector').onclick=()=>openSelector('types');
 $('#openMunicipalitySelector').onclick=()=>openSelector('municipalities');
 $('#openZoneSelector').onclick=()=>openSelector('zones');
-$('#closeMultiSelector').onclick=()=>$('#multiSelectorDialog').close();
+function closeSelector(){
+  $('#multiSelectorPanel').hidden=true;$('#multiSelectorBackdrop').hidden=true;
+  document.body.classList.remove('selectorSheetOpen');
+  const id=selectorMode==='types'?'openTypeSelector':selectorMode==='municipalities'?'openMunicipalitySelector':'openZoneSelector';
+  $('#'+id).focus({preventScroll:true});
+}
+$('#closeMultiSelector').onclick=closeSelector;
+$('#multiSelectorBackdrop').onclick=closeSelector;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#multiSelectorPanel').hidden)closeSelector();});
 $('#selectorSearchInput').oninput=()=>renderSelectorOptions();
 $('#selectorClearBtn').onclick=()=>{selectorDraft.clear();renderSelectorOptions();};
 $('#selectorApplyBtn').onclick=()=>{
@@ -449,7 +468,7 @@ $('#selectorApplyBtn').onclick=()=>{
     selectedMunicipalities=new Set(selectorDraft);
     if(selectedMunicipalities.size)selectedZones=new Set([...selectedZones].filter(zid=>{const z=locationCatalog.zones.find(z=>z.id===zid);return z&&selectedMunicipalities.has(z.municipio_id);}));
   }else selectedZones=new Set(selectorDraft);
-  updateSelectorUI();$('#multiSelectorDialog').close();runSearch();
+  updateSelectorUI();rememberSearchPosition();closeSelector();
 };
 
 async function openDetail(id,{returnToBuyerMatches=null}={}) {
@@ -1363,7 +1382,7 @@ async function loadData({skipLocation=false}={}) {
   await refreshExternalSourcesUI();
   buildZoneCatalog();updateSelectorUI();
   const restored=restoreSearchFormState();
-  if(restored){currentResults=sortProperties(allProperties.filter(p=>matchesFilters(p,getFilters())),$('#sortMode').value);$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Búsqueda restaurada';}
+  if(restored){currentResults=sortProperties(allProperties,'recent');$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Filtros restaurados · pulsa Buscar propiedades';}
   else{currentResults=sortProperties(allProperties,'recent');$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent=`${allProperties.length.toLocaleString('es-VE')} inmuebles únicos`;visibleCount=30;}
   renderResults();if(restored)restoreSearchPosition();if($('#viewSaved').classList.contains('active'))renderSaved();
 }

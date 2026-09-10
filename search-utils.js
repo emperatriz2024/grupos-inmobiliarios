@@ -67,9 +67,9 @@ function editDistance1(a,b){
   if(a===b)return true;if(Math.abs(a.length-b.length)>1)return false;
   let i=0,j=0,d=0;while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue;}if(++d>1)return false;if(a.length>b.length)i++;else if(b.length>a.length)j++;else{i++;j++;}}return d+(i<a.length||j<b.length?1:0)<=1;
 }
-function queryMatches(q,hay){
+function queryMatches(q,hay,index){
   const query=canonSearch(q); if(!query)return true;
-  const target=canonSearch(hay); const words=target.split(' ').filter(Boolean);
+  const target=index.target ??= canonSearch(hay); const words=index.words ??= target.split(' ').filter(Boolean);
   for(const t of query.split(' ').filter(Boolean)){
     if(target.includes(t))continue;
     if(t.length>=5 && words.some(w=>w.length>=4&&editDistance1(t,w)))continue;
@@ -78,20 +78,29 @@ function queryMatches(q,hay){
   return true;
 }
 
+// Ephemeral derived strings only. Never attached to persisted property objects.
+const searchIndex=new WeakMap();
+function indexed(p){
+  const signature=[p.text,p.normalized,p.operation,p.property_type,p.municipality,p.zone,p.zone_detected,p.residence,p.complex_detected,p.sender,p.group,JSON.stringify(p.location_terms||[]),JSON.stringify(p.zone_matches||[])];
+  let entry=searchIndex.get(p);
+  if(!entry || signature.some((v,i)=>v!==entry.signature[i])){entry={signature};searchIndex.set(p,entry);}
+  return entry;
+}
 export function matchesFilters(p, f={}) {
   // REGLA DURA: ninguna tarjeta con fecha válida >45 días puede aparecer.
   // También ocultamos registros sin fecha interpretable para evitar inventario incierto.
   const hardRecency = recencyInfo(p);
   if (!Number.isFinite(hardRecency.days) || hardRecency.days > 60) return false;
-  if (isDemandRequest(p.text || '')) return false;
+  const index=indexed(p);
+  if ((index.demand ??= isDemandRequest(p.text || ''))) return false;
 
-  const hay = norm([
+  const hay = index.hay ??= norm([
     p.operation, p.property_type, p.municipality, p.zone, p.zone_detected, p.residence, p.complex_detected, p.sender, p.group,
     ...(p.location_terms||[]), p.text, p.normalized
   ].filter(Boolean).join(' '));
 
   const q = f.q || '';
-  if (q && !queryMatches(q, hay)) return false;
+  if (q && !queryMatches(q, hay, index)) return false;
 
   if (f.operation && p.operation !== f.operation) return false;
   const types=Array.isArray(f.property_types)?f.property_types.filter(Boolean):[];
@@ -101,7 +110,7 @@ export function matchesFilters(p, f={}) {
   if(municipalityIds.length && p.municipality_id && !municipalityIds.includes(p.municipality_id)) return false;
   if(municipalityIds.length && !p.municipality_id){
     const names=(f.municipality_names||[]).filter(Boolean);
-    const mhay=normLoc([p.municipality,p.zone,p.text].filter(Boolean).join(' '));
+    const mhay=index.municipalityHay ??= normLoc([p.municipality,p.zone,p.text].filter(Boolean).join(' '));
     if(names.length && !names.some(x=>mhay.includes(normLoc(x)))) return false;
   }
 
@@ -110,12 +119,12 @@ export function matchesFilters(p, f={}) {
 
   const zones=Array.isArray(f.zones)?f.zones.filter(Boolean):[];
   if(zones.length){
-    const locationHay=normLoc([p.municipality,p.zone,p.zone_detected,p.residence,p.complex_detected,...(p.location_terms||[]),...(p.zone_matches||[]).map(x=>x.nombre),...extractLocationTerms(p.text||'',p.zone),p.text].filter(Boolean).join(' '));
+    const locationHay=index.locationHay ??= normLoc([p.municipality,p.zone,p.zone_detected,p.residence,p.complex_detected,...(p.location_terms||[]),...(p.zone_matches||[]).map(x=>x.nombre),...extractLocationTerms(p.text||'',p.zone),p.text].filter(Boolean).join(' '));
     if(!zones.some(z=>locationHay.includes(normLoc(z)))) return false;
   }
 
   const residence = norm(f.residence || '');
-  if (residence && !norm(p.residence || '').includes(residence) && !norm(p.text || '').includes(residence)) return false;
+  if (residence && !norm(p.residence || '').includes(residence) && !(index.textHay ??= norm(p.text || '')).includes(residence)) return false;
 
   const minPrice = Number(f.min_price || 0);
   const maxPrice = Number(f.max_price || 0);

@@ -658,3 +658,12 @@
 .startupDiagnostics{grid-column:1/-1;font-size:.7rem;color:#a8b0ba;line-height:1.35;overflow-wrap:anywhere}
 
 .databaseRecovery{margin:.45rem auto 0;max-width:760px;padding:.65rem;border:1px solid #f59e0b;border-radius:.5rem;background:#fff7ed;color:#7c2d12;font-size:.82rem}.databaseRecovery button{margin-left:.5rem}
+
+/* Plain DOM sheet: no native modal top layer on iPhone PWA. */
+.multiSelectorBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:1199}
+.multiSelectorPanel{position:fixed;left:0;right:0;bottom:0;z-index:1200;max-height:80vh;max-height:80dvh;overflow:auto;background:#0d0d0d;color:#eee;border-radius:22px 22px 0 0;padding-bottom:env(safe-area-inset-bottom);overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.multiSelectorPanel[hidden],.multiSelectorBackdrop[hidden]{display:none!important}
+.multiSelectorPanel .selectorSheet{height:auto;max-height:78vh;max-height:78dvh}
+.multiSelectorPanel .selectorOptionsList{min-height:0;overscroll-behavior:contain}
+.multiSelectorPanel .selectorSheetHead,.multiSelectorPanel .selectorSheetFooter,.multiSelectorPanel .selectorSearchWrap{flex-shrink:0}
+body.selectorSheetOpen{overflow:hidden}

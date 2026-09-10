@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0783" />
+  <link rel="stylesheet" href="./styles.css?v=0784" />
 </head>
 <body>
   <main class="shell">
@@ -642,14 +642,15 @@
 
     <dialog id="visitDealDialog" class="buyerDialog"><form id="visitDealForm" class="buyerForm"><div class="dialogHead"><div><span>REVENUE OS</span><h2>Visita y Deal Room</h2></div><button id="closeVisitDeal" type="button">×</button></div><div class="buyerFormBody"><div class="buyerFormGrid"><label>Comprador<input id="vdBuyer" required></label><label>Propiedad<input id="vdProperty" required></label><label>Fecha de visita<input id="vdSlot" type="datetime-local" required></label><label>Estado visita<select id="vdVisitStage"><option value="SCHEDULED">Agendada</option><option value="CONFIRMED">Confirmada</option><option value="COMPLETED">Realizada</option><option value="NO_SHOW">No asistió</option><option value="CANCELLED">Cancelada</option><option value="RESCHEDULE">Reprogramar</option></select></label><label>Resultado<input id="vdOutcome" placeholder="Obligatorio si fue realizada"></label><label>Etapa negociación<select id="vdDealStage"><option value="DRAFT">Preparación</option><option value="PRESENTED">Oferta presentada</option><option value="COUNTEROFFER">Contraoferta</option><option value="ACCEPTED">Aceptada</option><option value="REJECTED">Rechazada</option><option value="DOCUMENTATION">Documentación</option><option value="CLOSING">Cierre en proceso</option><option value="WON">Cierre ganado</option><option value="LOST">Cierre perdido</option></select></label><label>Oferta USD<input id="vdOffer" type="number"></label><label>Contraoferta USD<input id="vdCounter" type="number"></label><label>Documentos pendientes<input id="vdDocuments" placeholder="Separados por coma"></label><label>Próxima acción<input id="vdNextAction"></label><label>Fecha próxima acción<input id="vdNextAt" type="datetime-local"></label><label>Motivo de pérdida<input id="vdLoss"></label></div><button class="primary" type="submit">Guardar operación</button></div></form></dialog>
 
-    <dialog id="multiSelectorDialog" class="multiSelectorDialog">
+    <div id="multiSelectorBackdrop" class="multiSelectorBackdrop" hidden></div>
+<div id="multiSelectorPanel" class="multiSelectorPanel" role="region" aria-labelledby="selectorTitle" hidden>
       <div class="selectorSheet">
         <div class="selectorSheetHead"><div><small>Filtro múltiple</small><h3 id="selectorTitle">Seleccionar</h3></div><button id="closeMultiSelector" type="button">×</button></div>
         <div id="selectorSearchWrap" class="selectorSearchWrap"><input id="selectorSearchInput" placeholder="Buscar..." autocomplete="off" /></div>
         <div id="selectorOptionsList" class="selectorOptionsList"></div>
         <div class="selectorSheetFooter"><button id="selectorClearBtn" class="ghost" type="button">Limpiar</button><button id="selectorApplyBtn" class="primary" type="button">Aplicar selección</button></div>
       </div>
-    </dialog>
+    </div>
 
     <dialog id="locationReviewDialog" class="locationReviewDialog">
       <div class="dialogHead"><div><span>CATÁLOGO CONTROLADO</span><h2>Zonas y conjuntos por revisar</h2><small id="locationReviewMeta"></small></div><button id="closeLocationReview">×</button></div>
@@ -672,6 +673,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0783"></script>
+  <script type="module" src="./app.js?v=0784"></script>
 </body>
 </html>
