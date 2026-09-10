@@ -40,8 +40,8 @@ test('falla secundaria no bloquea ZIP y falla Core usa legacy',async()=>{
 });
 
 test('DB_NAME legacy e IndexedDB permanecen sin cambio',async()=>{
-  const source=await readFile(new URL('../db.js',import.meta.url),'utf8');
-  assert.match(source,/const DB_NAME = 'grupos-inmobiliarios'/);assert.equal(SHADOW_LEGACY_DB_NAME,'grupos-inmobiliarios');assert.match(source,/indexedDB\.open\(DB_NAME, DB_VERSION\)/);
+  const source=await readFile(new URL('../db.js',import.meta.url),'utf8'),helper=await readFile(new URL('../idb-open.js',import.meta.url),'utf8');
+  assert.match(source,/const DB_NAME = 'grupos-inmobiliarios'/);assert.match(source,/const DB_VERSION = 15/);assert.equal(SHADOW_LEGACY_DB_NAME,'grupos-inmobiliarios');assert.match(source,/name: DB_NAME/);assert.match(source,/version: DB_VERSION/);assert.match(helper,/indexedDBApi\.open\(name, version\)/);
 });
 
 test('shadow export no modifica origen y conserva mappings legacy',()=>{

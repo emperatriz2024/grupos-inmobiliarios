@@ -1,8 +1,9 @@
-import { isDemandRequest } from './intent-utils.js?v=0782';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0782';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0782';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0782';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0782';
+import { openIndexedDatabase, readStoreCounts } from './idb-open.js?v=0783';
+import { isDemandRequest } from './intent-utils.js?v=0783';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0783';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0783';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0783';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0783';
 import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
 import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchPrefilteredCandidates,OpportunityEngine} from './core/radar/demand-engine.js';
 import {reconcileReadiness} from './core/radar/readiness-engine.js';
@@ -59,10 +60,18 @@ const OWNER_TWIN_STORE='owner_twins',OWNER_EVENT_STORE='owner_events',CAPTURE_ST
 const VISIT_STORE='visits',VISIT_EVENT_STORE='visit_events',DEAL_STORE='deals',DEAL_EVENT_STORE='deal_events';
 
 
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+export function openDB(options={}) {
+  return openIndexedDatabase({
+    name: DB_NAME,
+    version: DB_VERSION,
+    ...options,
+    onDiagnostic: detail => {
+      options.onDiagnostic?.(detail);
+      if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.CustomEvent === 'function') {
+        globalThis.dispatchEvent(new CustomEvent('gi-db-diagnostic', { detail }));
+      }
+    },
+    onUpgrade: req => {
       const db = req.result;
       if (!db.objectStoreNames.contains(PROP_STORE)) {
         const s = db.createObjectStore(PROP_STORE, { keyPath: 'id' });
@@ -210,10 +219,17 @@ function openDB() {
       const demandStore=req.transaction.objectStore(DEMAND_STORE);
       if(!demandStore.indexNames.contains('market_identity'))demandStore.createIndex('market_identity',['workspace_id','origin','requester_observed','criteria_fingerprint'],{unique:false});
       if(!demandStore.indexNames.contains('requester_identity'))demandStore.createIndex('requester_identity',['workspace_id','requester_observed'],{unique:false});
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    }
   });
+}
+
+export async function probeLocalDatabase(options={}) {
+  const db = await openDB(options);
+  try {
+    return await readStoreCounts(db, { properties: PROP_STORE, imports: IMPORT_STORE });
+  } finally {
+    db.close();
+  }
 }
 
 function reqP(req) {

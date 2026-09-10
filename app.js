@@ -1,6 +1,6 @@
 
 import {
-  mergeProperties, patchPropertyPriceAudits, findImportCheckpointByFileHash, saveImportCheckpoint, getStats, getRecentImports,
+  mergeProperties, patchPropertyPriceAudits, findImportCheckpointByFileHash, saveImportCheckpoint, getStats, getRecentImports, probeLocalDatabase,
   getAllProperties, getFavoriteIds, toggleFavorite, getPropertiesByIds,
   learnContactsFromProperties, upsertContacts, getAllContacts, getContactStats,
   ensureLocationCatalogSeed, getLocationCatalog, getLocationStats, getLocationPendings, recordLocationPendings,
@@ -14,26 +14,26 @@ import {
   rebuildPropertyTwins,savePropertyTwinAction,savePipeline,getControlTower,
   getOwnerTwins,saveOwnerTwin,getCaptures,saveCapture,getOwnerControlTower,
   getVisits,saveVisit,getDeals,saveDeal,getDealControlTower, DB_NAME, DB_VERSION
-} from './db.js?v=0782';
+} from './db.js?v=0783';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0782';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0782';
-import { isDemandRequest } from './intent-utils.js?v=0782';
-import { consolidateProperties } from './dedupe-utils.js?v=0782';
+} from './search-utils.js?v=0783';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0783';
+import { isDemandRequest } from './intent-utils.js?v=0783';
+import { consolidateProperties } from './dedupe-utils.js?v=0783';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0782';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0782';
-import { normLocation } from './location-catalog.js?v=0782';
-import { BUYER_FEATURES, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0782';
+} from './dropbox.js?v=0783';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0783';
+import { normLocation } from './location-catalog.js?v=0783';
+import { BUYER_FEATURES, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0783';
 import { legacyBuyerToClientDemand, evaluateDemandProperty } from './core/radar/demand-engine.js';
-import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0782';
-import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0782';
-import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0782';
+import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0783';
+import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0783';
+import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0783';
 import { adapterForUrl, safeExternalUrl, sourceTypeFromUrl } from './external/adapters.js';
 import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
@@ -42,7 +42,7 @@ import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
 import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
-import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0782';
+import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0783';
 import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
@@ -1155,7 +1155,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(bytes, fileName, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0782',{type:'module'});
+    const worker = new Worker('./worker.js?v=0783',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1317,8 +1317,9 @@ function renderLocationReview(){
 async function afterLocationDecision(){
   locationCatalog=await getLocationCatalog();await rematchAllPropertyLocations(locationCatalog);locationCatalog=await getLocationCatalog();await refreshLocationStats();await loadData();renderLocationReview();
 }
-async function initLocationSystem(){
-  await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();
+async function initLocationSystem(onPhase=()=>{}){
+  onPhase('LOCATION_SEED');await ensureLocationCatalogSeed();onPhase('LOCATION_SEED_OK');
+  onPhase('LOCATION_CATALOG');locationCatalog=await getLocationCatalog();onPhase('LOCATION_CATALOG_OK');
   const migration=localStorage.getItem('gi_location_migration_v0412');
   if(!migration){await rematchAllPropertyLocations(locationCatalog);localStorage.setItem('gi_location_migration_v0412',String(Date.now()));locationCatalog=await getLocationCatalog();}
   await refreshLocationStats();
@@ -1327,8 +1328,8 @@ $('#openLocationReview')?.addEventListener('click',async()=>{locationPendings=aw
 $('#closeLocationReview')?.addEventListener('click',()=>$('#locationReviewDialog').close());
 $('#refreshLocationCatalog')?.addEventListener('click',async()=>{locationCatalog=await getLocationCatalog();await rematchAllPropertyLocations(locationCatalog);await refreshLocationStats();await loadData();alert('Catálogo aplicado nuevamente a tu inventario.');});
 
-async function loadData() {
-  if(!locationCatalog.zones?.length){await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();}
+async function loadData({skipLocation=false}={}) {
+  if(!skipLocation&&!locationCatalog.zones?.length){await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();}
   let rawProperties=await getAllProperties();
   const priceAuditNeeded=rawProperties.filter(p=>p.price_audit_version!=='0600');
   if(priceAuditNeeded.length){
@@ -1786,15 +1787,42 @@ function renderStartupDiagnostics(patch={}){
   const box=$('#startupDiagnostics');if(!box)return;
   box.textContent=`build ${startupBuildSha} · ${APP_VERSION}/${ASSET_VERSION} · DB ${DB_NAME} v${DB_VERSION} · propiedades ${startupSnapshot.properties??'leyendo…'} · grupos ${startupSnapshot.imports??'leyendo…'} · SW ${startupSwState} · ${startupSnapshot.state}`;
 }
-async function refreshStartupDiagnostics(state='CORE listo'){const stats=await getStats();renderStartupDiagnostics({properties:stats.properties,imports:stats.imports,state});}
+function startupPhase(phase,error=null,attempt=null){
+  const suffix=error?` · ${error.name||'Error'} · ${error.message||error} · intento ${attempt||error.attempt||1}`:'';
+  renderStartupDiagnostics({state:`${phase}${suffix}`});
+}
+globalThis.addEventListener?.('gi-db-diagnostic',event=>{
+  const d=event.detail||{};
+  if(d.status==='blocked')startupPhase('DB_OPEN',Object.assign(new Error('apertura bloqueada'),{name:'BlockedError'}),d.attempt);
+  else if(d.status==='before'||d.status==='after')startupPhase(d.phase);
+});
+async function refreshStartupDiagnostics(state='CORE_READY'){const stats=await getStats();renderStartupDiagnostics({properties:stats.properties,imports:stats.imports,state});}
+function showDatabaseRecovery(error){
+  startupPhase('DB_OPEN',error,error?.attempt);
+  const recovery=$('#databaseRecovery');if(recovery)recovery.hidden=false;
+}
 async function initCore(){
   const versionLabel=$('#appVersionLabel');if(versionLabel)versionLabel.textContent=APP_LABEL;
   renderStartupDiagnostics();
-  await initLocationSystem();
-  if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();
-  await loadData();
+  startupPhase('DB_OPEN');
+  let probe;
+  try{probe=await probeLocalDatabase();}
+  catch(error){showDatabaseRecovery(error);throw error;}
+  startupPhase('DB_OPEN_OK');
+  renderStartupDiagnostics({properties:probe.properties,imports:probe.imports});
+  if($('#propertyCount'))$('#propertyCount').textContent=probe.properties.toLocaleString('es-VE');
+  if($('#importCount'))$('#importCount').textContent=probe.imports.toLocaleString('es-VE');
+  let locationFailed=false;
+  try{
+    await initLocationSystem(startupPhase);
+  }catch(error){locationFailed=true;diagnosticLog('startup','location_degraded',error?.message||String(error),'warn');startupPhase('LOCATION_CATALOG',error,error?.attempt);}
+  try{if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();}catch(error){diagnosticLog('startup','buyers_degraded',error?.message||String(error),'warn');}
+  startupPhase('LOAD_PROPERTIES');
+  await loadData({skipLocation:locationFailed});startupPhase('LOAD_PROPERTIES_OK');
+  startupPhase('LOAD_IMPORTS');await getRecentImports();startupPhase('LOAD_IMPORTS_OK');
+  startupPhase('LOAD_FAVORITES');await getFavoriteIds();startupPhase('LOAD_FAVORITES_OK');
   renderBackupState();renderSecondaryState();
-  await refreshStartupDiagnostics();
+  await refreshStartupDiagnostics('CORE_READY');
 }
 async function initExternalServices(){
   getWorkerInfo().then(info=>{startupBuildSha=String(info.build_sha||'no disponible').slice(0,12);const label=$('#appVersionLabel');if(label)label.textContent=`${APP_LABEL} · ${startupBuildSha}`;return refreshStartupDiagnostics();}).catch(()=>{startupBuildSha='no disponible';renderStartupDiagnostics({properties:allProperties.length});});
@@ -1805,9 +1833,15 @@ async function initExternalServices(){
   try{await refreshCollectorStatus();await syncSecondaryWhatsApp({silent:true});}catch(error){diagnosticLog('startup','whatsapp_secondary',error?.message||String(error),'warn');}
 }
 async function initApp(){
-  try{await initCore();}catch(error){console.error('init core',error);renderStartupDiagnostics({state:`CORE ERROR: ${error?.message||error}`});return;}
+  try{await initCore();}catch(error){console.error('init core',error);if(!String(startupSnapshot.state).startsWith('DB_OPEN'))startupPhase('CORE',error,error?.attempt);return;}
   initExternalServices().catch(error=>diagnosticLog('startup','external_services',error?.message||String(error),'warn'));
 }
+$('#retryLocalDatabase')?.addEventListener('click',async()=>{
+  const button=$('#retryLocalDatabase');button.disabled=true;startupSnapshot.state='DB_OPEN';renderStartupDiagnostics();
+  try{await initCore();$('#databaseRecovery').hidden=true;initExternalServices().catch(()=>{});}
+  catch(error){showDatabaseRecovery(error);}
+  finally{button.disabled=false;}
+});
 initApp();
 setInterval(()=>{if(document.visibilityState==='visible'){refreshCollectorStatus();syncSecondaryWhatsApp({silent:true});}},5*60*1000);
 
@@ -1821,5 +1855,5 @@ document.addEventListener('visibilitychange',()=>{
 if ('serviceWorker' in navigator){
   startupSwState=navigator.serviceWorker.controller?'activo':'registrando';renderStartupDiagnostics({properties:allProperties.length});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{startupSwState='activo al reabrir';renderStartupDiagnostics({properties:allProperties.length});});
-  navigator.serviceWorker.register('./sw.js?v=0782').then(registration=>{const updateState=()=>{startupSwState=registration.waiting?'actualización lista al reabrir':navigator.serviceWorker.controller?'activo':'instalado';renderStartupDiagnostics({properties:allProperties.length});};updateState();registration.addEventListener('updatefound',()=>registration.installing?.addEventListener('statechange',updateState));}).catch(error=>{startupSwState='error';renderStartupDiagnostics({properties:allProperties.length});diagnosticLog('pwa','register_service_worker',error?.message||String(error));});
+  navigator.serviceWorker.register('./sw.js?v=0783').then(registration=>{const updateState=()=>{startupSwState=registration.waiting?'actualización lista al reabrir':navigator.serviceWorker.controller?'activo':'instalado';renderStartupDiagnostics({properties:allProperties.length});};updateState();registration.addEventListener('updatefound',()=>registration.installing?.addEventListener('statechange',updateState));}).catch(error=>{startupSwState='error';renderStartupDiagnostics({properties:allProperties.length});diagnosticLog('pwa','register_service_worker',error?.message||String(error));});
 }

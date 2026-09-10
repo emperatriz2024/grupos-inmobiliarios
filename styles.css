@@ -656,3 +656,5 @@
 .batchErrors{margin-top:12px;text-align:left;border:1px solid #302b22;border-radius:12px;background:#090909}.batchErrors summary{cursor:pointer;padding:11px;color:#e6c96b;font-size:10px;font-weight:800}.batchErrors>div{padding:9px 11px;border-top:1px solid #242424}.batchErrors b,.batchErrors small{display:block}.batchErrors b{font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.batchErrors small{margin-top:4px;color:#a78680;font-size:8px;line-height:1.45;word-break:break-word}
 
 .startupDiagnostics{grid-column:1/-1;font-size:.7rem;color:#a8b0ba;line-height:1.35;overflow-wrap:anywhere}
+
+.databaseRecovery{margin:.45rem auto 0;max-width:760px;padding:.65rem;border:1px solid #f59e0b;border-radius:.5rem;background:#fff7ed;color:#7c2d12;font-size:.82rem}.databaseRecovery button{margin-left:.5rem}

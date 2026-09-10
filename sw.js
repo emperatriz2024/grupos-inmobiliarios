@@ -1,8 +1,8 @@
 const CACHE_PREFIX='grupos-inmobiliarios-';
-const CACHE=`${CACHE_PREFIX}v0782-production`;
-const V='?v=0782';
+const CACHE=`${CACHE_PREFIX}v0783-production`;
+const V='?v=0783';
 const ASSETS=[
-  './','./index.html','./styles.css'+V,'./app.js'+V,'./db.js'+V,'./worker.js'+V,'./engine.js'+V,
+  './','./index.html','./styles.css'+V,'./app.js'+V,'./db.js'+V,'./idb-open.js'+V,'./worker.js'+V,'./engine.js'+V,
   './zip-reader.js'+V,'./search-utils.js'+V,'./date-utils.js'+V,'./contact-utils.js'+V,
   './location-utils.js'+V,'./location-catalog.js'+V,'./intent-utils.js'+V,'./dedupe-utils.js'+V,
   './dropbox.js'+V,'./buyer-utils.js'+V,'./external-source-utils.js'+V,'./freshness-utils.js'+V,

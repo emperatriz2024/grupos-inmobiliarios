@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0782" />
+  <link rel="stylesheet" href="./styles.css?v=0783" />
 </head>
 <body>
   <main class="shell">
@@ -22,6 +22,10 @@
       </div>
       <div id="appVersionLabel" class="version"></div>
       <div id="startupDiagnostics" class="startupDiagnostics" role="status">Leyendo base local…</div>
+      <div id="databaseRecovery" class="databaseRecovery" role="alert" hidden>
+        <span>Base local temporalmente bloqueada por iOS. Tus datos NO serán eliminados.</span>
+        <button id="retryLocalDatabase" type="button">Reintentar base local</button>
+      </div>
     </header>
 
     <section class="stats">
@@ -668,6 +672,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0782"></script>
+  <script type="module" src="./app.js?v=0783"></script>
 </body>
 </html>
