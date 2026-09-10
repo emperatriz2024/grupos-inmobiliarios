@@ -164,14 +164,14 @@ function annotateContactResolution(p){
 function contactBadge(p){const x=p?.phone_resolution?.source;return x==='directorio'?'WhatsApp · contacto':x==='publicacion'?'Tel. publicación':x==='ambiguo'?'Contacto ambiguo':'Sin contacto';}
 
 function buildWhatsAppMessage(p) {
-  const summary=[propertyTitle(p),displayZone(p),p.price_usd?formatMoney(p.price_usd):null,p.area_m2?`${p.area_m2} m²`:null].filter(Boolean).join(' · ');
-  const reference=(p?.external_url||p?.reference||'').trim();
+  const original=String(p?.text||'').trim();
   return [
-    'Hola colega, ¿esta propiedad la tienes disponible actualmente?',
+    'Hola colega, esta propiedad sigue disponible:',
     '',
-    summary||'Propiedad consultada en Radar Inmobiliario.',
-    reference||null
-  ].filter(x=>x!=null).join('\n');
+    original||'Propiedad consultada en Radar Inmobiliario.',
+    '',
+    'Quedo atenta, gracias.'
+  ].join('\n');
 }
 function buildWhatsAppHref(p){
   const num=whatsappNumber(effectivePhone(p)); if(!num)return '';
@@ -333,14 +333,14 @@ function getFilters() {
   };
 }
 
-function runSearch(resetVisible=true) {
+function runSearch(resetVisible=true,{persist=true}={}) {
   if (resetVisible) visibleCount = 30;
   const f = getFilters();
   currentResults = sortProperties(allProperties.filter(p => matchesFilters(p, f)), $('#sortMode').value);
   $('#resultCount').textContent = currentResults.length.toLocaleString('es-VE');
   $('#resultHint').textContent = currentResults.length ? 'Base local · orden aplicada' : 'Sin coincidencias';
   renderResults();
-  rememberSearchPosition();
+  if(persist)rememberSearchPosition();
 }
 function renderResults() {
   const box = $('#results');
@@ -352,12 +352,20 @@ function renderResults() {
 $('#loadMore').onclick = () => { visibleCount += 30; renderResults(); rememberSearchPosition(); };
 $('#searchBtn').onclick = () => runSearch();
 $('#q').addEventListener('keydown', e => { if(e.key === 'Enter') { e.preventDefault(); runSearch(); }});
-$('#sortMode').onchange = () => runSearch();
+let filterSearchTimer=null;
+function scheduleFilterSearch(){clearTimeout(filterSearchTimer);filterSearchTimer=setTimeout(()=>runSearch(),180);}
+['residence','minPrice','maxPrice','minArea','maxArea'].forEach(id=>$('#'+id).addEventListener('input',scheduleFilterSearch));
+['operation','bedrooms','bathrooms','parking','maxAge','sortMode'].forEach(id=>$('#'+id).addEventListener('change',()=>runSearch()));
+['planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id=>$('#'+id).addEventListener('change',()=>runSearch()));
 $('#clearFilters').onclick = () => {
+  clearTimeout(filterSearchTimer);
   ['q','operation','residence','minPrice','maxPrice','bedrooms','bathrooms','parking','minArea','maxArea','maxAge'].forEach(id => $('#'+id).value='');
+  $('#sortMode').value='recent';
   ['planta100','planta','pozo','tanque','amoblado','financiamiento','piscina','onlyPhone'].forEach(id => $('#'+id).checked=false);
-  selectedPropertyTypes.clear(); selectedMunicipalities.clear(); selectedZones.clear(); updateSelectorUI();
-  runSearch();
+  selectedPropertyTypes.clear(); selectedMunicipalities.clear(); selectedZones.clear();
+  [SEARCH_STATE_KEY,SEARCH_SCROLL_KEY,SEARCH_CARD_KEY].forEach(key=>sessionStorage.removeItem(key));
+  updateSelectorUI();
+  runSearch(true,{persist:false});
 };
 
 const PROPERTY_TYPES=['Apartamento','Townhouse','Penthouse','Casa','Terreno','Local comercial','Oficina','Galpón','Anexo'];
@@ -388,7 +396,8 @@ function renderPills(containerId,set,labelFn=x=>x){
         const z=locationCatalog.zones.find(z=>z.id===zid);return z&&set.has(z.municipio_id);
       }));
     }
-    updateSelectorUI();rememberSearchPosition();
+    updateSelectorUI();
+    runSearch();
   });
 }
 function updateSelectorUI(){
@@ -440,7 +449,7 @@ $('#selectorApplyBtn').onclick=()=>{
     selectedMunicipalities=new Set(selectorDraft);
     if(selectedMunicipalities.size)selectedZones=new Set([...selectedZones].filter(zid=>{const z=locationCatalog.zones.find(z=>z.id===zid);return z&&selectedMunicipalities.has(z.municipio_id);}));
   }else selectedZones=new Set(selectorDraft);
-  updateSelectorUI();rememberSearchPosition();$('#multiSelectorDialog').close();
+  updateSelectorUI();$('#multiSelectorDialog').close();runSearch();
 };
 
 async function openDetail(id,{returnToBuyerMatches=null}={}) {
@@ -1146,7 +1155,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(bytes, fileName, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0780',{type:'module'});
+    const worker = new Worker('./worker.js?v=0781',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1789,5 +1798,5 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
   });
-  navigator.serviceWorker.register('./sw.js?v=0780').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  navigator.serviceWorker.register('./sw.js?v=0781').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
 }
