@@ -1,6 +1,6 @@
 const CACHE_PREFIX='grupos-inmobiliarios-';
-const CACHE=`${CACHE_PREFIX}v0781-production`;
-const V='?v=0781';
+const CACHE=`${CACHE_PREFIX}v0782-production`;
+const V='?v=0782';
 const ASSETS=[
   './','./index.html','./styles.css'+V,'./app.js'+V,'./db.js'+V,'./worker.js'+V,'./engine.js'+V,
   './zip-reader.js'+V,'./search-utils.js'+V,'./date-utils.js'+V,'./contact-utils.js'+V,
@@ -9,14 +9,8 @@ const ASSETS=[
   './version.js','./diagnostics.js','./core/property-policy.js','./core/operational-zip-batch.js','./external/adapters.js','./ingestion/source-ingestion.js','./ingestion/secondary-processing.js','./ingestion/demand-processing.js','./ingestion/manual-zip-batch.js','./ingestion/manual-import-state.js','./ingestion/worker-client.js','./core/radar/demand-engine.js','./core/radar/territory.js','./core/radar/config.js','./secondary-whatsapp/contract.js',
   './manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'
 ];
-self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',event=>event.waitUntil((async()=>{
-  const keys=await caches.keys();
-  await Promise.all(keys.filter(key=>key.startsWith(CACHE_PREFIX)&&key!==CACHE).map(key=>caches.delete(key)));
-  await self.clients.claim();
-  const clients=await self.clients.matchAll({type:'window'});
-  clients.forEach(client=>client.postMessage({type:'RADAR_VERSION_READY',version:'0.7.8'}));
-})()));
+self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS))));
+self.addEventListener('activate',event=>event.waitUntil(Promise.resolve()));
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||new URL(event.request.url).origin!==self.location.origin)return;
   event.respondWith((async()=>{
@@ -24,6 +18,11 @@ self.addEventListener('fetch',event=>{
       const response=await fetch(new Request(event.request,{cache:'no-store'}));
       if(response.ok){const cache=await caches.open(CACHE);cache.put(event.request,response.clone()).catch(()=>{});}
       return response;
-    }catch{return (await caches.match(event.request))||(await caches.match('./index.html'));}
+    }catch{
+      const cached=await caches.match(event.request);
+      if(cached)return cached;
+      if(event.request.mode==='navigate')return caches.match('./index.html');
+      return Response.error();
+    }
   })());
 });

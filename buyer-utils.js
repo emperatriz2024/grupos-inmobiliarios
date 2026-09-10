@@ -1,4 +1,4 @@
-import { masterAvailabilityGate } from './freshness-utils.js?v=0530';
+import { masterAvailabilityGate } from './freshness-utils.js?v=0782';
 
 // Radar Inmobiliario v0.5.1 — buyer matching engine.
 // Matching is deliberately explainable: every score includes reasons and gaps.

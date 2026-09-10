@@ -13,27 +13,27 @@ import {
   syncClientTwin,getClientTwins,getClientPropertyStates,setClientPropertyState,saveClientFollowUp,getTwinEvents,getBrokerTwinAgenda,createBrokerDraft,
   rebuildPropertyTwins,savePropertyTwinAction,savePipeline,getControlTower,
   getOwnerTwins,saveOwnerTwin,getCaptures,saveCapture,getOwnerControlTower,
-  getVisits,saveVisit,getDeals,saveDeal,getDealControlTower
-} from './db.js?v=0770';
+  getVisits,saveVisit,getDeals,saveDeal,getDealControlTower, DB_NAME, DB_VERSION
+} from './db.js?v=0782';
 import {
   matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0530';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0530';
-import { isDemandRequest } from './intent-utils.js?v=0530';
-import { consolidateProperties } from './dedupe-utils.js?v=0530';
+} from './search-utils.js?v=0782';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0782';
+import { isDemandRequest } from './intent-utils.js?v=0782';
+import { consolidateProperties } from './dedupe-utils.js?v=0782';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0530';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0530';
-import { normLocation } from './location-catalog.js?v=0530';
-import { BUYER_FEATURES, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0530';
+} from './dropbox.js?v=0782';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0782';
+import { normLocation } from './location-catalog.js?v=0782';
+import { BUYER_FEATURES, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0782';
 import { legacyBuyerToClientDemand, evaluateDemandProperty } from './core/radar/demand-engine.js';
-import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0530';
-import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0530';
-import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0530';
+import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0782';
+import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0782';
+import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0782';
 import { adapterForUrl, safeExternalUrl, sourceTypeFromUrl } from './external/adapters.js';
 import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
@@ -42,7 +42,7 @@ import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
 import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
-import { APP_LABEL, APP_VERSION } from './version.js';
+import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0782';
 import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
@@ -1155,7 +1155,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(bytes, fileName, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0781',{type:'module'});
+    const worker = new Worker('./worker.js?v=0782',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1779,9 +1779,34 @@ $('#linkSecondary')?.addEventListener('click',()=>refreshCollectorStatus({showQr
 $('#syncSecondaryNow')?.addEventListener('click',()=>syncSecondaryWhatsApp({silent:false}));
 $('#secondaryDiagnostics')?.addEventListener('click',()=>{const box=$('#secondaryDiagnosticBox');if(!box)return;box.hidden=!box.hidden;box.textContent=JSON.stringify({...secondaryStats(),cursor:localStorage.getItem(SECONDARY_CURSOR_KEY)||null,mode:'production-cloud',tokensRequiredByUser:false,zipFallback:true},null,2);});
 
+let startupBuildSha='pendiente',startupSwState='sin registrar';
+const startupSnapshot={properties:null,imports:null,state:'iniciando'};
+function renderStartupDiagnostics(patch={}){
+  Object.assign(startupSnapshot,patch);
+  const box=$('#startupDiagnostics');if(!box)return;
+  box.textContent=`build ${startupBuildSha} · ${APP_VERSION}/${ASSET_VERSION} · DB ${DB_NAME} v${DB_VERSION} · propiedades ${startupSnapshot.properties??'leyendo…'} · grupos ${startupSnapshot.imports??'leyendo…'} · SW ${startupSwState} · ${startupSnapshot.state}`;
+}
+async function refreshStartupDiagnostics(state='CORE listo'){const stats=await getStats();renderStartupDiagnostics({properties:stats.properties,imports:stats.imports,state});}
+async function initCore(){
+  const versionLabel=$('#appVersionLabel');if(versionLabel)versionLabel.textContent=APP_LABEL;
+  renderStartupDiagnostics();
+  await initLocationSystem();
+  if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();
+  await loadData();
+  renderBackupState();renderSecondaryState();
+  await refreshStartupDiagnostics();
+}
+async function initExternalServices(){
+  getWorkerInfo().then(info=>{startupBuildSha=String(info.build_sha||'no disponible').slice(0,12);const label=$('#appVersionLabel');if(label)label.textContent=`${APP_LABEL} · ${startupBuildSha}`;return refreshStartupDiagnostics();}).catch(()=>{startupBuildSha='no disponible';renderStartupDiagnostics({properties:allProperties.length});});
+  await Promise.resolve();
+  try{await initDropbox();}catch(error){diagnosticLog('startup','dropbox',error?.message||String(error),'warn');}
+  const resumableBatch=localStorage.getItem(INGESTION_BATCH_KEY);
+  if(resumableBatch)monitorIngestionBatch(resumableBatch).catch(error=>diagnosticLog('startup','ingestion_resume',error?.message||String(error),'warn'));
+  try{await refreshCollectorStatus();await syncSecondaryWhatsApp({silent:true});}catch(error){diagnosticLog('startup','whatsapp_secondary',error?.message||String(error),'warn');}
+}
 async function initApp(){
-  const versionLabel=$('#appVersionLabel');if(versionLabel){versionLabel.textContent=APP_LABEL;getWorkerInfo().then(info=>{versionLabel.textContent=`${APP_LABEL} · ${String(info.build_sha||'').slice(0,12)}`;}).catch(()=>{});}
-  try{await initLocationSystem();if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();await loadData();await initDropbox();const resumableBatch=localStorage.getItem(INGESTION_BATCH_KEY);if(resumableBatch)await monitorIngestionBatch(resumableBatch);renderBackupState();renderSecondaryState();await refreshCollectorStatus();await syncSecondaryWhatsApp({silent:true});}catch(e){console.error('init app',e);alert(`No pude iniciar completamente la app: ${e.message}`);}
+  try{await initCore();}catch(error){console.error('init core',error);renderStartupDiagnostics({state:`CORE ERROR: ${error?.message||error}`});return;}
+  initExternalServices().catch(error=>diagnosticLog('startup','external_services',error?.message||String(error),'warn'));
 }
 initApp();
 setInterval(()=>{if(document.visibilityState==='visible'){refreshCollectorStatus();syncSecondaryWhatsApp({silent:true});}},5*60*1000);
@@ -1793,10 +1818,8 @@ document.addEventListener('visibilitychange',()=>{
   else if(document.visibilityState==='visible') restoreSearchPosition();
 });
 
-if('caches' in window){caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('grupos-inmobiliarios-')&&!k.includes('v0511')).map(k=>caches.delete(k)))).catch(()=>{});}
 if ('serviceWorker' in navigator){
-  navigator.serviceWorker.addEventListener('message',event=>{
-    if(event.data?.type==='RADAR_VERSION_READY'&&event.data.version===APP_VERSION)console.info(`Radar ${APP_LABEL} listo para usar.`);
-  });
-  navigator.serviceWorker.register('./sw.js?v=0781').catch(error=>diagnosticLog('pwa','register_service_worker',error?.message||String(error)));
+  startupSwState=navigator.serviceWorker.controller?'activo':'registrando';renderStartupDiagnostics({properties:allProperties.length});
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{startupSwState='activo al reabrir';renderStartupDiagnostics({properties:allProperties.length});});
+  navigator.serviceWorker.register('./sw.js?v=0782').then(registration=>{const updateState=()=>{startupSwState=registration.waiting?'actualización lista al reabrir':navigator.serviceWorker.controller?'activo':'instalado';renderStartupDiagnostics({properties:allProperties.length});};updateState();registration.addEventListener('updatefound',()=>registration.installing?.addEventListener('statechange',updateState));}).catch(error=>{startupSwState='error';renderStartupDiagnostics({properties:allProperties.length});diagnosticLog('pwa','register_service_worker',error?.message||String(error));});
 }

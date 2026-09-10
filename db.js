@@ -1,8 +1,8 @@
-import { isDemandRequest } from './intent-utils.js?v=0530';
-import { extractLocationTerms, bestZone } from './location-utils.js?v=0530';
-import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0530';
-import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0530';
-import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0530';
+import { isDemandRequest } from './intent-utils.js?v=0782';
+import { extractLocationTerms, bestZone } from './location-utils.js?v=0782';
+import { detectDateOrderFromDates, parseFlexibleDate, toISODate } from './date-utils.js?v=0782';
+import { cleanPhone, personAliasKeys } from './contact-utils.js?v=0782';
+import { SEED_MUNICIPALITIES, SEED_ZONES, SEED_COMPLEXES, normLocation, slugLocation, resolveLocationRecord } from './location-catalog.js?v=0782';
 import { APP_VERSION, BACKUP_SCHEMA_VERSION } from './version.js';
 import {legacyBuyerToClientDemand,consolidateMarketDemands,isDemandActive,matchPrefilteredCandidates,OpportunityEngine} from './core/radar/demand-engine.js';
 import {reconcileReadiness} from './core/radar/readiness-engine.js';
@@ -11,8 +11,8 @@ import {buildPropertyTwin,evolvePipeline,controlTower} from './core/radar/revenu
 import {buildOwnerTwin,mergeOwners,evolveCapture,demandSignals,ownerTower} from './core/radar/owner-capture-demand.js';
 import {evolveVisit,evolveDeal,dealTower} from './core/radar/visits-deal-room.js';
 
-const DB_NAME = 'grupos-inmobiliarios';
-const DB_VERSION = 15;
+export const DB_NAME = 'grupos-inmobiliarios';
+export const DB_VERSION = 15;
 const PROP_STORE = 'properties';
 const IMPORT_STORE = 'imports';
 const FAV_STORE = 'favorites';
