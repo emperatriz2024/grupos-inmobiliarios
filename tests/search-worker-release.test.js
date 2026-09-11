@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {Worker} from 'node:worker_threads';
 import {SearchWorkerController} from '../search-worker-controller.js';
 import {createSearchRecord,matchesSearchRecord,prepareFilters} from '../search-index.js';
-import {matchesFilters,sortProperties} from '../search-utils.js?v=0784';
+import {matchesFilters,sortProperties} from '../search-utils.js?v=0786';
 const app=fs.readFileSync(new URL('../app.js',import.meta.url),'utf8');
 const fixture=i=>({id:String(i),operation:i%2?'Alquiler':'Venta',property_type:i%2?'Apartamento':'Casa',municipality_id:'m1',municipality:'Valencia',zone_id:'z1',zone:'Centro',residence:'Sol',price_usd:50000+i,bedrooms:3,bathrooms:2,parking:1,area_m2:100,planta_100:true,planta_electrica:true,pozo:true,tanque:true,amoblado:true,financiamiento:true,piscina:true,phone:'04141234567',date_iso:new Date(Date.now()-86400000).toISOString().slice(0,10),time:'10:30',text:'Casa en venta Valencia Centro Torre Sol.',appearances:i%7});
 test('worker REAL indexa 13.051; cola READY, IDs, cancelación, rebuild, main vivo',async()=>{
@@ -48,7 +48,7 @@ test('main ne filtre pas; zonas y municipios solo 60 etiquetas por página',()=>
  const nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,innerHTML:'',querySelectorAll:()=>[]});return nodes.get(id);};
  const context=vm.createContext({$,performance,searchMetric(){},normLoc:s=>s.toLowerCase(),esc:s=>s,Set,Map});
  vm.runInContext(`let selectorMode='zones',selectorDraft=new Set(),selectedMunicipalities=new Set();const PROPERTY_TYPES=['Casa','Apartamento'];const zoneCatalog=Array.from({length:2000},(_,i)=>({id:String(i),nombre:'Zona '+i,municipio_id:'m'}));const locationCatalog={municipalities:zoneCatalog};function municipalityName(){return 'Municipio'}`,context);
- vm.runInContext(app.slice(app.indexOf('let selectorLimit=60;'),app.indexOf('function openSelector(')),context);
- for(const mode of ['zones','municipalities']){vm.runInContext(`selectorMode='${mode}';selectorLimit=60;renderSelectorOptions()`,context);assert.equal(($ ('#selectorOptionsList').innerHTML.match(/<label/g)||[]).length,60);vm.runInContext('selectorLimit=120;renderSelectorOptions()',context);assert.equal(($ ('#selectorOptionsList').innerHTML.match(/<label/g)||[]).length,60);}
+ vm.runInContext(app.slice(app.indexOf('let selectorLimit=15;'),app.indexOf('function openSelector(')),context);
+ for(const mode of ['zones','municipalities']){vm.runInContext(`selectorMode='${mode}';selectorLimit=15;renderSelectorOptions()`,context);assert.equal(($ ('#selectorOptionsList').innerHTML.match(/<label/g)||[]).length,15);vm.runInContext('selectorLimit=30;renderSelectorOptions()',context);assert.equal(($ ('#selectorOptionsList').innerHTML.match(/<label/g)||[]).length,15);}
  const source=fs.readFileSync(new URL('../search-index.js',import.meta.url),'utf8');const query=source.slice(source.indexOf('export function matchesSearchRecord'));assert.doesNotMatch(query,/extractLocationTerms|isDemandRequest\(|norm\(p\.text/);
 });

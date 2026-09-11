@@ -1,4 +1,4 @@
-import {createSearchRecord, matchesSearchRecord, prepareFilters} from './search-index.js?v=0785';
+import {createSearchRecord, matchesSearchRecord, prepareFilters} from './search-index.js?v=0786';
 
 // Persistent, isolated from ZIP ingestion. All derived inventory stays in this worker.
 export function installSearchWorker(port){

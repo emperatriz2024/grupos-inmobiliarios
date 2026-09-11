@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {searchPropertiesChunked} from '../search-chunks.js';
-import {matchesFilters,sortProperties} from '../search-utils.js?v=0784';
+import {matchesFilters,sortProperties} from '../search-utils.js?v=0786';
 const app=fs.readFileSync(new URL('../app.js',import.meta.url),'utf8');
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const fixture=i=>({id:String(i),text:'Casa en venta en Valencia, zona Centro, torre Sol. 3 habitaciones. '+('Información original completa. '.repeat(30)),date_iso:new Date(Date.now()-86400000).toISOString().slice(0,10),operation:'Venta',property_type:'Casa',municipality:'Valencia',municipality_id:'m1',zone:'Centro',zone_id:'z1',residence:'Sol',price_usd:50000+i,bedrooms:3,bathrooms:2,parking:2,area_m2:100,phone:'04141234567',planta_100:true,planta_electrica:true,pozo:true,tanque:true,amoblado:true,financiamiento:true,piscina:true});

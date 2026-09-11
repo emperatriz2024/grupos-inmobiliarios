@@ -1,4 +1,4 @@
-import {SearchWorkerController} from './search-worker-controller.js?v=0785';
+import {SearchWorkerController} from './search-worker-controller.js?v=0786';
 
 import {
   mergeProperties, patchPropertyPriceAudits, findImportCheckpointByFileHash, saveImportCheckpoint, getStats, getRecentImports, probeLocalDatabase,
@@ -15,26 +15,26 @@ import {
   rebuildPropertyTwins,savePropertyTwinAction,savePipeline,getControlTower,
   getOwnerTwins,saveOwnerTwin,getCaptures,saveCapture,getOwnerControlTower,
   getVisits,saveVisit,getDeals,saveDeal,getDealControlTower, DB_NAME, DB_VERSION
-} from './db.js?v=0783';
+} from './db.js?v=0786';
 import {
   sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
-} from './search-utils.js?v=0784';
-import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0783';
-import { isDemandRequest } from './intent-utils.js?v=0783';
-import { consolidateProperties } from './dedupe-utils.js?v=0783';
+} from './search-utils.js?v=0786';
+import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0786';
+import { isDemandRequest } from './intent-utils.js?v=0786';
+import { consolidateProperties } from './dedupe-utils.js?v=0786';
 import {
   getDropboxSettings, saveDropboxSettings, startDropboxOAuth, finishDropboxOAuthIfPresent,
   disconnectDropbox as dropboxDisconnect, listPendingZips, listDropboxContactFiles, downloadDropboxFile, moveDropboxFile,
   uploadDropboxFile, redirectUri as dropboxRedirectUri
-} from './dropbox.js?v=0783';
-import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0783';
-import { normLocation } from './location-catalog.js?v=0783';
-import { BUYER_FEATURES, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0783';
+} from './dropbox.js?v=0786';
+import { parseContactBlob, buildContactIndex, resolvePropertyContact, displayPhone } from './contact-utils.js?v=0786';
+import { normLocation } from './location-catalog.js?v=0786';
+import { BUYER_FEATURES, buyerCriteriaText, buyerWhatsAppHref } from './buyer-utils.js?v=0786';
 import { legacyBuyerToClientDemand, evaluateDemandProperty } from './core/radar/demand-engine.js';
-import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0783';
-import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0783';
-import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0783';
+import { findMasterCandidates, candidateDecision, probableCaptorForMaster, sourceLabel } from './external-source-utils.js?v=0786';
+import { extractProperty, auditExistingPropertyPrice } from './engine.js?v=0786';
+import { sourceFreshness, externalFreshnessStats } from './freshness-utils.js?v=0786';
 import { adapterForUrl, safeExternalUrl, sourceTypeFromUrl } from './external/adapters.js';
 import { propertyDisplayName } from './core/property-policy.js';
 import { diagnosticLog } from './diagnostics.js';
@@ -43,7 +43,7 @@ import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
 import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
-import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0785';
+import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0786';
 import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
@@ -439,7 +439,7 @@ function updateSelectorUI(){
   renderPills('municipalitySelectedPills',selectedMunicipalities,municipalityName);
   renderPills('zoneSelectedPills',selectedZones,zoneName);
 }
-let selectorLimit=60;
+let selectorLimit=15;
 function renderSelectorOptions(){
   const started=performance.now();
   const q=normLoc($('#selectorSearchInput')?.value||''),box=$('#selectorOptionsList');
@@ -450,13 +450,13 @@ function renderSelectorOptions(){
   }else if(selectorMode==='municipalities'){
     const rows=(locationCatalog.municipalities||[]).filter(m=>m.activo!==false&&(!q||normLoc(m.nombre).includes(q)));
     total=rows.length;
-    box.innerHTML=rows.length?rows.slice(selectorLimit-60,selectorLimit).map(m=>`<label class="selectorOption"><input type="checkbox" value="${esc(m.id)}" ${selectorDraft.has(m.id)?'checked':''}><span>${esc(m.nombre)}</span></label>`).join(''):'<div class="empty">No encontré municipios.</div>';
+    box.innerHTML=rows.length?rows.slice(selectorLimit-15,selectorLimit).map(m=>`<label class="selectorOption"><input type="checkbox" value="${esc(m.id)}" ${selectorDraft.has(m.id)?'checked':''}><span>${esc(m.nombre)}</span></label>`).join(''):'<div class="empty">No encontré municipios.</div>';
   }else{
     const allowed=selectedMunicipalities.size?new Set(selectedMunicipalities):null;
     const rows=zoneCatalog.filter(z=>(!allowed||allowed.has(z.municipio_id))&&(!q||normLoc(z.nombre+' '+(z.aliases||[]).join(' ')).includes(q)));
     const groups=new Map();
     total=rows.length;
-    for(const z of rows.slice(selectorLimit-60,selectorLimit)){const mn=municipalityName(z.municipio_id);if(!groups.has(mn))groups.set(mn,[]);groups.get(mn).push(z);}
+    for(const z of rows.slice(selectorLimit-15,selectorLimit)){const mn=municipalityName(z.municipio_id);if(!groups.has(mn))groups.set(mn,[]);groups.get(mn).push(z);}
     box.innerHTML=rows.length?[...groups.entries()].map(([mn,zones])=>`<div class="selectorGroupTitle">${esc(mn)}</div>${zones.map(z=>`<label class="selectorOption"><input type="checkbox" value="${esc(z.id)}" ${selectorDraft.has(z.id)?'checked':''}><span>${esc(z.nombre)}</span></label>`).join('')}`).join(''):'<div class="empty">No encontré zonas para esos municipios.</div>';
   }
   box.querySelectorAll('input').forEach(x=>x.onchange=()=>{if(x.checked)selectorDraft.add(x.value);else selectorDraft.delete(x.value);});
@@ -464,7 +464,7 @@ function renderSelectorOptions(){
   searchMetric('selectorRenderMs',performance.now()-started);
 }
 function openSelector(mode){
-  const started=performance.now();selectorLimit=60;
+  const started=performance.now();selectorLimit=15;
   selectorMode=mode;
   selectorDraft=new Set(mode==='types'?selectedPropertyTypes:mode==='municipalities'?selectedMunicipalities:selectedZones);
   $('#selectorTitle').textContent=mode==='types'?'Tipos de inmueble':mode==='municipalities'?'Municipios':'Zonas / sectores';
@@ -485,8 +485,8 @@ function closeSelector(){
 $('#closeMultiSelector').onclick=closeSelector;
 $('#multiSelectorBackdrop').onclick=closeSelector;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#multiSelectorPanel').hidden)closeSelector();});
-$('#selectorSearchInput').oninput=()=>{selectorLimit=60;renderSelectorOptions();};
-$('#selectorMoreBtn').onclick=()=>{selectorLimit+=60;renderSelectorOptions();};
+$('#selectorSearchInput').oninput=()=>{selectorLimit=15;renderSelectorOptions();};
+$('#selectorMoreBtn').onclick=()=>{selectorLimit+=15;renderSelectorOptions();};
 $('#selectorClearBtn').onclick=()=>{selectorDraft.clear();renderSelectorOptions();};
 $('#selectorApplyBtn').onclick=()=>{
   if(selectorMode==='types')selectedPropertyTypes=new Set(selectorDraft);
@@ -497,12 +497,12 @@ $('#selectorApplyBtn').onclick=()=>{
   updateSelectorUI();rememberSearchPosition();closeSelector();
 };
 
-async function openDetail(id,{returnToBuyerMatches=null}={}) {
+async function openDetail(id,{returnToBuyerMatches=null,enrichment=null}={}) {
   detailReturnToBuyerMatches=returnToBuyerMatches;
   const p = allProperties.find(x=>x.id===id);
   if (!p) return;
-  const master=(await getMasterProperties()).find(row=>row.id===id||(row.legacy_ids||[]).includes(id))||null;
-  const own=master?await getOwnListingDetails(master.id):null;
+  const master=enrichment?.master||null;
+  const own=enrichment?.own||null;
   $('#detailType').textContent = [p.operation,p.property_type,p.zone,p.residence].filter(Boolean).join(' · ');
   $('#detailTitle').textContent = propertyTitle(p);
   const phone = effectivePhone(p);
@@ -549,7 +549,9 @@ async function openDetail(id,{returnToBuyerMatches=null}={}) {
     else restoreSearchPosition();
     detailClosingToMatches=false;
   };
-  $('#detailDialog').showModal();
+  $('#detailDialog').dataset.propertyId=id;
+  if(!$('#detailDialog').open)$('#detailDialog').showModal();
+  if(!enrichment)setTimeout(()=>intelligenceWorker?.postMessage({type:'detail',id}),0);
 }
 $('#closeDialog').onclick = () => { detailReturnToBuyerMatches=null;$('#detailDialog').close();restoreSearchPosition(); };
 $('#detailDialog').addEventListener('close',()=>{if(!detailClosingToMatches&&!detailReturnToBuyerMatches)restoreSearchPosition();});
@@ -1200,7 +1202,7 @@ $('#externalPublishedDate') && ($('#externalPublishedDate').value=isoToday());
 
 function processZipWithWorker(bytes, fileName, group, progressCb) {
   return new Promise((resolve,reject)=>{
-    const worker = new Worker('./worker.js?v=0783',{type:'module'});
+    const worker = new Worker('./worker.js?v=0786',{type:'module'});
     worker.onmessage = async (e)=>{
       const m=e.data;
       if(m.type==='status'){ progressCb?.({phase:m.step,text:m.text,bytes:m.bytes}); return; }
@@ -1373,47 +1375,38 @@ $('#openLocationReview')?.addEventListener('click',async()=>{locationPendings=aw
 $('#closeLocationReview')?.addEventListener('click',()=>$('#locationReviewDialog').close());
 $('#refreshLocationCatalog')?.addEventListener('click',async()=>{locationCatalog=await getLocationCatalog();await rematchAllPropertyLocations(locationCatalog);await refreshLocationStats();await loadData();alert('Catálogo aplicado nuevamente a tu inventario.');});
 
+let intelligenceWorker=null,intelligenceRunning=false,intelligenceAgain=false;
+function scheduleIntelligence(){
+  if(intelligenceRunning){intelligenceAgain=true;return;}
+  intelligenceRunning=true;
+  setTimeout(()=>{
+    $('#intelligenceStatus').textContent='Sincronizando inteligencia…';
+    try{
+      intelligenceWorker??=new Worker('./intelligence-worker.js?v=0786',{type:'module'});
+      intelligenceWorker.onmessage=({data})=>{
+        if(data.type==='detail'&&$('#detailDialog').open&&$('#detailDialog').dataset.propertyId===data.id)openDetail(data.id,{returnToBuyerMatches:detailReturnToBuyerMatches,enrichment:data});
+        if(data.type==='contacts'){contactDirectory=data.rows;contactIndex=data.index;}
+        if(data.type==='task'&&!data.ok)diagnosticLog('background',data.name,data.error?.message||'Error','warn');
+        if(data.type==='complete'){intelligenceRunning=false;$('#intelligenceStatus').textContent='Inteligencia sincronizada';if(intelligenceAgain){intelligenceAgain=false;scheduleIntelligence();}}
+      };
+      intelligenceWorker.onerror=()=>{intelligenceRunning=false;$('#intelligenceStatus').textContent='Inteligencia pendiente · operación disponible';};
+      intelligenceWorker.postMessage({type:'start',demandEnabled:demandEngineEnabled});
+    }catch{intelligenceRunning=false;$('#intelligenceStatus').textContent='Inteligencia pendiente · operación disponible';}
+  },250);
+}
 async function loadData({skipLocation=false}={}) {
-  if(!skipLocation&&!locationCatalog.zones?.length){await ensureLocationCatalogSeed();locationCatalog=await getLocationCatalog();}
-  let rawProperties=await getAllProperties();
-  const priceAuditNeeded=rawProperties.filter(p=>p.price_audit_version!=='0600');
-  if(priceAuditNeeded.length){
-    const audited=priceAuditNeeded.map(auditExistingPropertyPrice);
-    await patchPropertyPriceAudits(audited);
-    rawProperties=await getAllProperties();
-    const corrected=audited.filter((p,i)=>p.price_audit_status==='corrected').length;
-    const ambiguous=audited.filter(p=>p.price_audit_status==='ambiguous').length;
-    localStorage.setItem('gi_price_audit_0600',JSON.stringify({at:new Date().toISOString(),checked:audited.length,corrected,ambiguous}));
-  }
-  const valid=rawProperties.filter(p=>{const r=recencyInfo(p);return Number.isFinite(r.days)&&r.days<=60&&!isDemandRequest(p.text||'');});
-  const consolidated=consolidateProperties(valid);
-  const coreSync=await syncRadarCore(valid,consolidated);
-  if(demandEngineEnabled&&coreSync.touchedMasterIds?.length)await runDemandOpportunityMatching({trigger_type:'INVENTORY_REFRESH',trigger_entity_id:coreSync.touchedMasterIds});
-  await recalculateAllBuyerMatches({silent:true});
-  const radarStats=await getRadarCoreStats();
-  contactDirectory=await getAllContacts();contactIndex=buildContactIndex(contactDirectory);
-  allProperties=consolidated.map(annotateContactResolution);
+  const started=performance.now();
+  allProperties=await getAllProperties();
+  ++searchGeneration;
+  try{getSearchController().rebuild(allProperties).catch(error=>{$('#searchIndexStatus').textContent=error.name+': '+error.message;});}catch(error){$('#searchIndexStatus').textContent=error.name+': '+error.message;}
+  try{locationCatalog=await getLocationCatalog();}catch{locationCatalog={municipalities:[],zones:[],complexes:[]};}
   favoriteIds=await getFavoriteIds();
-  await refreshStatsOnly(allProperties.length);await refreshRecent();await refreshContactStats();
-  if($('#radarMasterCount'))$('#radarMasterCount').textContent=radarStats.masters.toLocaleString('es-VE');
-  if($('#radarSourceCount'))$('#radarSourceCount').textContent=radarStats.sources.toLocaleString('es-VE');
-  if($('#radarBuyerCount'))$('#radarBuyerCount').textContent=radarStats.buyers.toLocaleString('es-VE');
-  if($('#radarMatchCount'))$('#radarMatchCount').textContent=radarStats.matches.toLocaleString('es-VE');
-  const avgAppearances=radarStats.masters>0 ? radarStats.sources/radarStats.masters : 0;
-  if($('#radarAvgAppearances'))$('#radarAvgAppearances').textContent=avgAppearances.toLocaleString('es-VE',{minimumFractionDigits:1,maximumFractionDigits:1});
-  if($('#radarGroupingNote'))$('#radarGroupingNote').textContent=radarStats.sources
-    ? `${radarStats.sources.toLocaleString('es-VE')} publicaciones vinculadas a ${radarStats.masters.toLocaleString('es-VE')} inmuebles únicos.`
-    : 'Sin publicaciones vinculadas todavía.';
-  await refreshBuyersData();
-  await refreshExternalSourcesUI();
-  buildZoneCatalog();updateSelectorUI();
-  const restored=restoreSearchFormState();
-  if(restored){currentResults=allProperties;$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Filtros restaurados · pulsa Buscar propiedades';}
-  else{currentResults=allProperties;$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent=`${allProperties.length.toLocaleString('es-VE')} inmuebles únicos`;visibleCount=30;}
-  renderResults();if(restored)restoreSearchPosition();if($('#viewSaved').classList.contains('active'))renderSaved();
-  ++searchGeneration;$('#searchBtn').textContent='Buscar propiedades';$('#searchBtn').removeAttribute('aria-busy');
-  try{getSearchController().rebuild(allProperties).catch(()=>{$('#searchIndexStatus').textContent='Búsqueda no disponible. Recarga la aplicación.';});}
-  catch{$('#searchIndexStatus').textContent='Búsqueda no disponible. Recarga la aplicación.';}
+  buildZoneCatalog();updateSelectorUI();restoreSearchFormState();
+  currentResults=allProperties;visibleCount=30;renderResults();
+  $('#resultCount').textContent=allProperties.length.toLocaleString('es-VE');
+  $('#searchBtn').textContent='Buscar propiedades';$('#searchBtn').removeAttribute('aria-busy');
+  startupPhase('RADAR_READY');globalThis.RADAR_READY=true;searchMetric('startupReadyMs',performance.now()-started);
+  scheduleIntelligence();
 }
 $('#resetBtn').onclick = async () => {
   alert('El borrado masivo está deshabilitado en V0.6 Professional Audit para proteger los datos locales.');
@@ -1844,7 +1837,7 @@ globalThis.addEventListener?.('gi-db-diagnostic',event=>{
   if(d.status==='blocked')startupPhase('DB_OPEN',Object.assign(new Error('apertura bloqueada'),{name:'BlockedError'}),d.attempt);
   else if(d.status==='before'||d.status==='after')startupPhase(d.phase);
 });
-async function refreshStartupDiagnostics(state='CORE_READY'){const stats=await getStats();renderStartupDiagnostics({properties:stats.properties,imports:stats.imports,state});}
+async function refreshStartupDiagnostics(state='RADAR_READY'){const stats=await getStats();renderStartupDiagnostics({properties:stats.properties,imports:stats.imports,state});}
 function showDatabaseRecovery(error){
   startupPhase('DB_OPEN',error,error?.attempt);
   const recovery=$('#databaseRecovery');if(recovery)recovery.hidden=false;
@@ -1860,29 +1853,23 @@ async function initCore(){
   renderStartupDiagnostics({properties:probe.properties,imports:probe.imports});
   if($('#propertyCount'))$('#propertyCount').textContent=probe.properties.toLocaleString('es-VE');
   if($('#importCount'))$('#importCount').textContent=probe.imports.toLocaleString('es-VE');
-  let locationFailed=false;
-  try{
-    await initLocationSystem(startupPhase);
-  }catch(error){locationFailed=true;diagnosticLog('startup','location_degraded',error?.message||String(error),'warn');startupPhase('LOCATION_CATALOG',error,error?.attempt);}
-  try{if(demandEngineEnabled)await mirrorLegacyBuyersToDemands();}catch(error){diagnosticLog('startup','buyers_degraded',error?.message||String(error),'warn');}
   startupPhase('LOAD_PROPERTIES');
-  await loadData({skipLocation:locationFailed});startupPhase('LOAD_PROPERTIES_OK');
-  startupPhase('LOAD_IMPORTS');await getRecentImports();startupPhase('LOAD_IMPORTS_OK');
-  startupPhase('LOAD_FAVORITES');await getFavoriteIds();startupPhase('LOAD_FAVORITES_OK');
+  await loadData();
   renderBackupState();renderSecondaryState();
-  await refreshStartupDiagnostics('CORE_READY');
+
 }
 async function initExternalServices(){
   getWorkerInfo().then(info=>{startupBuildSha=String(info.build_sha||'no disponible').slice(0,12);const label=$('#appVersionLabel');if(label)label.textContent=`${APP_LABEL} · ${startupBuildSha}`;return refreshStartupDiagnostics();}).catch(()=>{startupBuildSha='no disponible';renderStartupDiagnostics({properties:allProperties.length});});
-  await Promise.resolve();
+  await new Promise(resolve=>setTimeout(resolve,100));
   try{await initDropbox();}catch(error){diagnosticLog('startup','dropbox',error?.message||String(error),'warn');}
   const resumableBatch=localStorage.getItem(INGESTION_BATCH_KEY);
   if(resumableBatch)monitorIngestionBatch(resumableBatch).catch(error=>diagnosticLog('startup','ingestion_resume',error?.message||String(error),'warn'));
+  await new Promise(resolve=>setTimeout(resolve,100));
   try{await refreshCollectorStatus();await syncSecondaryWhatsApp({silent:true});}catch(error){diagnosticLog('startup','whatsapp_secondary',error?.message||String(error),'warn');}
 }
 async function initApp(){
   try{await initCore();}catch(error){console.error('init core',error);if(!String(startupSnapshot.state).startsWith('DB_OPEN'))startupPhase('CORE',error,error?.attempt);return;}
-  initExternalServices().catch(error=>diagnosticLog('startup','external_services',error?.message||String(error),'warn'));
+  setTimeout(()=>initExternalServices().catch(error=>diagnosticLog('startup','external_services',error?.message||String(error),'warn')),100);
 }
 $('#retryLocalDatabase')?.addEventListener('click',async()=>{
   const button=$('#retryLocalDatabase');button.disabled=true;startupSnapshot.state='DB_OPEN';renderStartupDiagnostics();
@@ -1903,5 +1890,5 @@ document.addEventListener('visibilitychange',()=>{
 if ('serviceWorker' in navigator){
   startupSwState=navigator.serviceWorker.controller?'activo':'registrando';renderStartupDiagnostics({properties:allProperties.length});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{startupSwState='activo al reabrir';renderStartupDiagnostics({properties:allProperties.length});});
-  navigator.serviceWorker.register('./sw.js?v=0783').then(registration=>{const updateState=()=>{startupSwState=registration.waiting?'actualización lista al reabrir':navigator.serviceWorker.controller?'activo':'instalado';renderStartupDiagnostics({properties:allProperties.length});};updateState();registration.addEventListener('updatefound',()=>registration.installing?.addEventListener('statechange',updateState));}).catch(error=>{startupSwState='error';renderStartupDiagnostics({properties:allProperties.length});diagnosticLog('pwa','register_service_worker',error?.message||String(error));});
+  navigator.serviceWorker.register('./sw.js?v=0786').then(registration=>{const updateState=()=>{startupSwState=registration.waiting?'actualización lista al reabrir':navigator.serviceWorker.controller?'activo':'instalado';renderStartupDiagnostics({properties:allProperties.length});};updateState();registration.addEventListener('updatefound',()=>registration.installing?.addEventListener('statechange',updateState));}).catch(error=>{startupSwState='error';renderStartupDiagnostics({properties:allProperties.length});diagnosticLog('pwa','register_service_worker',error?.message||String(error));});
 }

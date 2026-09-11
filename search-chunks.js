@@ -1,5 +1,5 @@
-import {matchesFilters} from './search-utils.js?v=0784';
-import {propertyTimestamp} from './date-utils.js?v=0783';
+import {matchesFilters} from './search-utils.js?v=0786';
+import {propertyTimestamp} from './date-utils.js?v=0786';
 const breathe=()=>new Promise(resolve=>setTimeout(resolve,0));
 // Chunk filtering and stable merge-sort, including the first cold-cache search.
 export async function searchPropertiesChunked(properties,filters={},mode='recent',{cancelled=()=>false,yieldTask=breathe}={}){

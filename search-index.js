@@ -1,7 +1,7 @@
-import {norm} from './search-utils.js?v=0784';
-import {normLoc,extractLocationTerms} from './location-utils.js?v=0783';
-import {isDemandRequest} from './intent-utils.js?v=0783';
-import {propertyTimestamp} from './date-utils.js?v=0783';
+import {norm} from './search-utils.js?v=0786';
+import {normLoc,extractLocationTerms} from './location-utils.js?v=0786';
+import {isDemandRequest} from './intent-utils.js?v=0786';
+import {propertyTimestamp} from './date-utils.js?v=0786';
 const SEARCH_ALIAS=[
   [/\b(?:town\s*house|townhouse|townhause|town\s*home|townhome|\bth\b)\b/g,'townhouse'],
   [/\b(?:apto|apartamento)\b/g,'apartamento'],
