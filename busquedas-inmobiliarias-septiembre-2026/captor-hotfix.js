@@ -3,15 +3,17 @@
 const PREFIX2='hola Colega me envías esta opción por favor';
 function safePhone(x){try{return phone(x)}catch{return null}}
 function safeKey(x){try{return key(x)}catch{return String(x||'').toLowerCase().trim()}}
+function getContacts(){try{return typeof contacts!=='undefined'&&Array.isArray(contacts)?contacts:[]}catch{return[]}}
+function getContactMap(){try{return typeof cmap!=='undefined'&&cmap&&cmap.get?cmap:null}catch{return null}}
 function resolveCaptor(p){
   const senderPhone=safePhone(p.sender);
   const messagePhone=safePhone(p.raw);
   if(senderPhone){p.phone=senderPhone;p.contactName=p.sender||senderPhone;p.contactSource='número del emisor del grupo';return p}
   if(messagePhone){p.phone=messagePhone;p.contactName=p.sender||'Captador';p.contactSource='número publicado por el captador';return p}
-  const sk=safeKey(p.sender);
-  let matches=(window.cmap&&window.cmap.get?window.cmap.get(sk):null)||[];
-  if(!matches.length&&sk&&window.contacts){
-    const maybe=window.contacts.filter(c=>c&&c.k&&c.phone&&c.k.length>=5&&(c.k.includes(sk)||sk.includes(c.k)));
+  const sk=safeKey(p.sender),map=getContactMap(),list=getContacts();
+  let matches=(map&&sk?map.get(sk):null)||[];
+  if(!matches.length&&sk){
+    const maybe=list.filter(c=>c&&c.k&&c.phone&&c.k.length>=5&&(c.k.includes(sk)||sk.includes(c.k)));
     const uniq=[...new Map(maybe.map(c=>[c.phone,c])).values()];
     if(uniq.length===1)matches=uniq;
   }
@@ -19,13 +21,12 @@ function resolveCaptor(p){
   if(numbers.length===1){p.phone=numbers[0];p.contactName=matches[0].name||p.sender;p.contactSource='nombre del emisor vinculado a contactos iPhone';return p}
   p.phone=null;p.contactName=p.sender||null;p.contactSource=numbers.length>1?'nombre ambiguo en contactos':'captador sin teléfono vinculado';return p;
 }
-window.resolve=resolveCaptor;
+try{resolve=resolveCaptor}catch{};try{window.resolve=resolveCaptor}catch{}
 function esc2(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function cash2(v){return v?'$'+new Intl.NumberFormat('es-VE').format(v):'—'}
 function renderCaptor(a){
   const count=document.querySelector('#count'),results=document.querySelector('#results');
-  if(count)count.textContent='('+a.length+')';
-  if(!results)return;
+  if(count)count.textContent='('+a.length+')';if(!results)return;
   if(!a.length){results.className='empty';results.innerHTML='No encontré inventario vigente con esos criterios.';return}
   results.className='';
   results.innerHTML=a.slice(0,250).map(p=>{
@@ -44,17 +45,24 @@ function renderCaptor(a){
   }).join('');
   document.querySelectorAll('[data-captor-wa]').forEach(b=>b.onclick=()=>location.href=b.dataset.captorWa);
 }
-window.render=renderCaptor;
+try{render=renderCaptor}catch{};try{window.render=renderCaptor}catch{}
 function relabel(){
   const h=[...document.querySelectorAll('h2')].find(x=>x.textContent.trim()==='Contactos de asesores');if(h)h.textContent='Directorio de captadores';
   const btn=document.querySelector('#contactBtn');if(btn)btn.textContent='Importar contactos y vincular captadores';
   const st=document.querySelector('#contactStatus');if(st)st.textContent='Si el chat exportado trae un número, se usa directamente. Si trae el nombre guardado del colega, se vincula con tus contactos del iPhone.';
-  const labels=[...document.querySelectorAll('.stat span')];labels.forEach(x=>{if(x.textContent.trim()==='WhatsApp directo')x.textContent='captadores resueltos'});
-  const notice=document.querySelector('.notice');if(notice)notice.innerHTML='El botón de WhatsApp siempre debe abrir al <b>captador/emisor real</b>. La app no te pedirá escoger un contacto al azar.';
+  [...document.querySelectorAll('.stat span')].forEach(x=>{if(x.textContent.trim()==='WhatsApp directo')x.textContent='captadores resueltos'});
+  const notice=document.querySelector('.notice');if(notice)notice.innerHTML='El botón de WhatsApp siempre abre al <b>captador/emisor real</b>. Nunca te pedirá escoger una persona al azar.';
 }
-function refresh(){
+async function refresh(){
   relabel();
-  try{if(window.props&&Array.isArray(window.props)){window.props.forEach(resolveCaptor);if(window.puts)window.puts('properties',window.props).catch(()=>{});renderCaptor(window.props);if(window.stat)window.stat()}}catch(e){console.warn('captor hotfix',e)}
+  try{
+    if(typeof props!=='undefined'&&Array.isArray(props)){
+      props.forEach(resolveCaptor);
+      try{if(typeof puts==='function')await puts('properties',props)}catch{}
+      renderCaptor(props);
+      try{if(typeof stat==='function')stat()}catch{}
+    }
+  }catch(e){console.warn('captor hotfix',e)}
 }
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(refresh,250));else setTimeout(refresh,250);
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(refresh,150));else setTimeout(refresh,150);
 })();
