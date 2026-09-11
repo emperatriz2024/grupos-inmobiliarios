@@ -1,4 +1,4 @@
 export const APP_VERSION='0.7.8';
 export const APP_LABEL='V0.7.8 PRODUCTION';
-export const ASSET_VERSION='0784';
+export const ASSET_VERSION='0785';
 export const BACKUP_SCHEMA_VERSION=3;

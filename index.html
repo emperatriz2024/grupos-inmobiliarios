@@ -11,7 +11,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <title>Grupos Inmobiliarios</title>
-  <link rel="stylesheet" href="./styles.css?v=0784" />
+  <link rel="stylesheet" href="./styles.css?v=0785" />
 </head>
 <body>
   <main class="shell">
@@ -43,6 +43,7 @@
           <input id="q" placeholder="Ej. apartamento Mañongo planta" autocomplete="off" />
         </label>
         <button id="searchBtn" class="primary">Buscar propiedades</button>
+        <small id="searchIndexStatus" role="status">Preparando búsqueda</small>
       </div>
 
       <details class="card filters" open>
@@ -648,6 +649,7 @@
         <div class="selectorSheetHead"><div><small>Filtro múltiple</small><h3 id="selectorTitle">Seleccionar</h3></div><button id="closeMultiSelector" type="button">×</button></div>
         <div id="selectorSearchWrap" class="selectorSearchWrap"><input id="selectorSearchInput" placeholder="Buscar..." autocomplete="off" /></div>
         <div id="selectorOptionsList" class="selectorOptionsList"></div>
+        <button id="selectorMoreBtn" type="button" class="ghost" hidden>Mostrar más</button>
         <div class="selectorSheetFooter"><button id="selectorClearBtn" class="ghost" type="button">Limpiar</button><button id="selectorApplyBtn" class="primary" type="button">Aplicar selección</button></div>
       </div>
     </div>
@@ -673,6 +675,6 @@
     <button data-view="viewSaved"><span>♡</span>Guardadas</button>
   </nav>
 
-  <script type="module" src="./app.js?v=0784"></script>
+  <script type="module" src="./app.js?v=0785"></script>
 </body>
 </html>

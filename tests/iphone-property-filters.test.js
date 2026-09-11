@@ -6,7 +6,7 @@ import {searchPropertiesChunked} from '../search-chunks.js';
 import {matchesFilters,sortProperties} from '../search-utils.js?v=0784';
 const app=fs.readFileSync(new URL('../app.js',import.meta.url),'utf8');
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
-const fixture=i=>({id:String(i),text:'Casa en venta en Valencia, zona Centro, torre Sol. 3 habitaciones. '+('Información original completa. '.repeat(30)),date_iso:new Date().toISOString().slice(0,10),operation:'Venta',property_type:'Casa',municipality:'Valencia',municipality_id:'m1',zone:'Centro',zone_id:'z1',residence:'Sol',price_usd:50000+i,bedrooms:3,bathrooms:2,parking:2,area_m2:100,phone:'04141234567',planta_100:true,planta_electrica:true,pozo:true,tanque:true,amoblado:true,financiamiento:true,piscina:true});
+const fixture=i=>({id:String(i),text:'Casa en venta en Valencia, zona Centro, torre Sol. 3 habitaciones. '+('Información original completa. '.repeat(30)),date_iso:new Date(Date.now()-86400000).toISOString().slice(0,10),operation:'Venta',property_type:'Casa',municipality:'Valencia',municipality_id:'m1',zone:'Centro',zone_id:'z1',residence:'Sol',price_usd:50000+i,bedrooms:3,bathrooms:2,parking:2,area_m2:100,phone:'04141234567',planta_100:true,planta_electrica:true,pozo:true,tanque:true,amoblado:true,financiamiento:true,piscina:true});
 test('13.051 registros: filtro y orden equivalentes, event loop vivo, sin mutar propiedades',async()=>{
  const rows=Array.from({length:13051},(_,i)=>Object.freeze(fixture(i)));
  let ticks=0;const timer=setInterval(()=>ticks++,0);
@@ -28,7 +28,7 @@ test('todos los filtros mantienen semántica e índice invalida texto cambiado',
 test('selectores DOM: abrir tres modos, múltiples, aplicar, cerrar y pill sin búsqueda',()=>{
  assert.match(html,/<div id="multiSelectorPanel"[^>]*hidden>/);assert.doesNotMatch(html,/<dialog id="multiSelector/);
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:true,value:'',textContent:'',onclick:null,focus(){},querySelectorAll(){return this.buttons||[];}});return nodes.get(id);};
- const context=vm.createContext({Set,document:{body:{classList:{add(){},remove(){}}},addEventListener(){}},$:node});
+ const context=vm.createContext({Set,performance,searchMetric(){},document:{body:{classList:{add(){},remove(){}}},addEventListener(){}},$:node});
  vm.runInContext(`let selectorMode,selectorDraft=new Set(),selectedPropertyTypes=new Set(),selectedMunicipalities=new Set(),selectedZones=new Set();let saves=0,updates=0;const locationCatalog={zones:[]};function renderSelectorOptions(){}function updateSelectorUI(){updates++}function rememberSearchPosition(){saves++}function esc(x){return x}`,context);
  vm.runInContext(app.slice(app.indexOf('function openSelector('),app.indexOf('async function openDetail')),context);
  for(const [id,mode] of [['openTypeSelector','types'],['openMunicipalitySelector','municipalities'],['openZoneSelector','zones']]){

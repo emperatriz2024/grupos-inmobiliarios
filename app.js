@@ -1,4 +1,4 @@
-import {searchPropertiesChunked} from './search-chunks.js?v=0784';
+import {SearchWorkerController} from './search-worker-controller.js?v=0785';
 
 import {
   mergeProperties, patchPropertyPriceAudits, findImportCheckpointByFileHash, saveImportCheckpoint, getStats, getRecentImports, probeLocalDatabase,
@@ -17,7 +17,7 @@ import {
   getVisits,saveVisit,getDeals,saveDeal,getDealControlTower, DB_NAME, DB_VERSION
 } from './db.js?v=0783';
 import {
-  matchesFilters, sortProperties, formatMoney, recencyInfo, effectivePhone,
+  sortProperties, formatMoney, recencyInfo, effectivePhone,
   whatsappNumber
 } from './search-utils.js?v=0784';
 import { extractLocationTerms, bestZone, normLoc } from './location-utils.js?v=0783';
@@ -43,7 +43,7 @@ import { processSecondaryEvents } from './ingestion/secondary-processing.js';
 import { processZipDemandMessages } from './ingestion/demand-processing.js';
 import { radarDemandEngineEnabled } from './core/radar/config.js';
 import { runOperationalZipBatch, ZIP_BATCH_PHASES } from './core/operational-zip-batch.js';
-import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0784';
+import { APP_LABEL, APP_VERSION, ASSET_VERSION } from './version.js?v=0785';
 import {commercialMetrics} from './core/radar/visits-deal-room.js';
 import {getWorkerInfo,startIngestionJob,getIngestionBatch,getIngestionResultChunk} from './ingestion/worker-client.js';
 
@@ -335,19 +335,35 @@ function getFilters() {
 }
 
 let searchGeneration=0;
+let searchController=null;
+const searchPerformance={};
+function searchMetric(name,ms){
+  const metric=searchPerformance[name]??={last:0,max:0};metric.last=ms;metric.max=Math.max(metric.max,ms);
+}
+globalThis.radarSearchPerformance=searchPerformance;
+function getSearchController(){
+  if(!searchController)searchController=new SearchWorkerController({onStatus:text=>{$('#searchIndexStatus').textContent=text;},onMetric:searchMetric});
+  return searchController;
+}
 async function runSearch(resetVisible=true,{persist=true}={}) {
-  const generation=++searchGeneration;
+  const started=performance.now(),generation=++searchGeneration;
   const f=getFilters(), mode=$('#sortMode').value;
   const button=$('#searchBtn');
   button.textContent='Buscando…'; button.setAttribute('aria-busy','true');
   try {
-    const results=await searchPropertiesChunked(allProperties,f,mode,{cancelled:()=>generation!==searchGeneration});
+    const controller=getSearchController();
+    const response=controller.search(f,mode,generation);
+    searchMetric('searchDispatchTaskMs',performance.now()-started);
+    setTimeout(()=>searchMetric('tapToUIFreeMs',performance.now()-started),0);
+    const ids=await response;
+    if(generation!==searchGeneration||ids===null)return;
+    const results=await controller.propertiesForIds(ids,()=>generation!==searchGeneration);
     if(generation!==searchGeneration || results===null)return;
     if(resetVisible)visibleCount=30;
     currentResults=results;
     $('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');
     $('#resultHint').textContent=currentResults.length?'Base local · orden aplicada':'Sin coincidencias';
-    renderResults();
+    const renderStarted=performance.now();renderResults();searchMetric('renderTaskMs',performance.now()-renderStarted);searchMetric('queryTotalMs',performance.now()-started);
     if(persist)rememberSearchPosition();
   } catch(error) {
     if(generation===searchGeneration)$('#resultHint').textContent='No se pudo completar la búsqueda. Intenta de nuevo.';
@@ -423,30 +439,39 @@ function updateSelectorUI(){
   renderPills('municipalitySelectedPills',selectedMunicipalities,municipalityName);
   renderPills('zoneSelectedPills',selectedZones,zoneName);
 }
+let selectorLimit=60;
 function renderSelectorOptions(){
+  const started=performance.now();
   const q=normLoc($('#selectorSearchInput')?.value||''),box=$('#selectorOptionsList');
+  let total=0;
   if(selectorMode==='types'){
     const rows=PROPERTY_TYPES.filter(v=>!q||normLoc(v).includes(q));
     box.innerHTML=rows.length?rows.map(v=>`<label class="selectorOption"><input type="checkbox" value="${esc(v)}" ${selectorDraft.has(v)?'checked':''}><span>${esc(v)}</span></label>`).join(''):'<div class="empty">No encontré opciones.</div>';
   }else if(selectorMode==='municipalities'){
     const rows=(locationCatalog.municipalities||[]).filter(m=>m.activo!==false&&(!q||normLoc(m.nombre).includes(q)));
-    box.innerHTML=rows.length?rows.map(m=>`<label class="selectorOption"><input type="checkbox" value="${esc(m.id)}" ${selectorDraft.has(m.id)?'checked':''}><span>${esc(m.nombre)}</span></label>`).join(''):'<div class="empty">No encontré municipios.</div>';
+    total=rows.length;
+    box.innerHTML=rows.length?rows.slice(selectorLimit-60,selectorLimit).map(m=>`<label class="selectorOption"><input type="checkbox" value="${esc(m.id)}" ${selectorDraft.has(m.id)?'checked':''}><span>${esc(m.nombre)}</span></label>`).join(''):'<div class="empty">No encontré municipios.</div>';
   }else{
     const allowed=selectedMunicipalities.size?new Set(selectedMunicipalities):null;
     const rows=zoneCatalog.filter(z=>(!allowed||allowed.has(z.municipio_id))&&(!q||normLoc(z.nombre+' '+(z.aliases||[]).join(' ')).includes(q)));
     const groups=new Map();
-    for(const z of rows){const mn=municipalityName(z.municipio_id);if(!groups.has(mn))groups.set(mn,[]);groups.get(mn).push(z);}
+    total=rows.length;
+    for(const z of rows.slice(selectorLimit-60,selectorLimit)){const mn=municipalityName(z.municipio_id);if(!groups.has(mn))groups.set(mn,[]);groups.get(mn).push(z);}
     box.innerHTML=rows.length?[...groups.entries()].map(([mn,zones])=>`<div class="selectorGroupTitle">${esc(mn)}</div>${zones.map(z=>`<label class="selectorOption"><input type="checkbox" value="${esc(z.id)}" ${selectorDraft.has(z.id)?'checked':''}><span>${esc(z.nombre)}</span></label>`).join('')}`).join(''):'<div class="empty">No encontré zonas para esos municipios.</div>';
   }
   box.querySelectorAll('input').forEach(x=>x.onchange=()=>{if(x.checked)selectorDraft.add(x.value);else selectorDraft.delete(x.value);});
+  $('#selectorMoreBtn').hidden=selectorMode==='types'||total<=selectorLimit;
+  searchMetric('selectorRenderMs',performance.now()-started);
 }
 function openSelector(mode){
+  const started=performance.now();selectorLimit=60;
   selectorMode=mode;
   selectorDraft=new Set(mode==='types'?selectedPropertyTypes:mode==='municipalities'?selectedMunicipalities:selectedZones);
   $('#selectorTitle').textContent=mode==='types'?'Tipos de inmueble':mode==='municipalities'?'Municipios':'Zonas / sectores';
   $('#selectorSearchWrap').hidden=false;$('#selectorSearchInput').value='';renderSelectorOptions();
   $('#multiSelectorBackdrop').hidden=false;$('#multiSelectorPanel').hidden=false;
   document.body.classList.add('selectorSheetOpen');
+  searchMetric('openSelector_'+mode+'Ms',performance.now()-started);
 }
 $('#openTypeSelector').onclick=()=>openSelector('types');
 $('#openMunicipalitySelector').onclick=()=>openSelector('municipalities');
@@ -460,7 +485,8 @@ function closeSelector(){
 $('#closeMultiSelector').onclick=closeSelector;
 $('#multiSelectorBackdrop').onclick=closeSelector;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#multiSelectorPanel').hidden)closeSelector();});
-$('#selectorSearchInput').oninput=()=>renderSelectorOptions();
+$('#selectorSearchInput').oninput=()=>{selectorLimit=60;renderSelectorOptions();};
+$('#selectorMoreBtn').onclick=()=>{selectorLimit+=60;renderSelectorOptions();};
 $('#selectorClearBtn').onclick=()=>{selectorDraft.clear();renderSelectorOptions();};
 $('#selectorApplyBtn').onclick=()=>{
   if(selectorMode==='types')selectedPropertyTypes=new Set(selectorDraft);
@@ -1382,9 +1408,12 @@ async function loadData({skipLocation=false}={}) {
   await refreshExternalSourcesUI();
   buildZoneCatalog();updateSelectorUI();
   const restored=restoreSearchFormState();
-  if(restored){currentResults=sortProperties(allProperties,'recent');$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Filtros restaurados · pulsa Buscar propiedades';}
-  else{currentResults=sortProperties(allProperties,'recent');$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent=`${allProperties.length.toLocaleString('es-VE')} inmuebles únicos`;visibleCount=30;}
+  if(restored){currentResults=allProperties;$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent='Filtros restaurados · pulsa Buscar propiedades';}
+  else{currentResults=allProperties;$('#resultCount').textContent=currentResults.length.toLocaleString('es-VE');$('#resultHint').textContent=`${allProperties.length.toLocaleString('es-VE')} inmuebles únicos`;visibleCount=30;}
   renderResults();if(restored)restoreSearchPosition();if($('#viewSaved').classList.contains('active'))renderSaved();
+  ++searchGeneration;$('#searchBtn').textContent='Buscar propiedades';$('#searchBtn').removeAttribute('aria-busy');
+  try{getSearchController().rebuild(allProperties).catch(()=>{$('#searchIndexStatus').textContent='Búsqueda no disponible. Recarga la aplicación.';});}
+  catch{$('#searchIndexStatus').textContent='Búsqueda no disponible. Recarga la aplicación.';}
 }
 $('#resetBtn').onclick = async () => {
   alert('El borrado masivo está deshabilitado en V0.6 Professional Audit para proteger los datos locales.');
