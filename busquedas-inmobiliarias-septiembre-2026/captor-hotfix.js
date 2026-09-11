@@ -1,6 +1,20 @@
 (()=>{
 'use strict';
 const PREFIX2='hola Colega me envías esta opción por favor';
+function robustParse(txt){
+  const lines=String(txt||'').replace(/\r/g,'').replace(/\u202f/g,' ').replace(/\u00a0/g,' ').split('\n');
+  const out=[];let cur=null;
+  const date='(\\d{1,2}[\\/.\\-]\\d{1,2}[\\/.\\-]\\d{2,4})';
+  const bracket=new RegExp('^\\['+date+',\\s*([^\\]]+)\\]\\s*(?:-\\s*)?(.+?):\\s?(.*)$');
+  const plain=new RegExp('^'+date+',\\s*(.+?)\\s+-\\s+(.+?):\\s?(.*)$');
+  for(const line of lines){
+    let m=line.match(bracket)||line.match(plain);
+    if(m){if(cur)out.push(cur);cur={date:m[1],sender:m[3].trim(),text:m[4]||''};}
+    else if(cur)cur.text+='\n'+line;
+  }
+  if(cur)out.push(cur);return out;
+}
+try{parse=robustParse}catch{};try{window.parse=robustParse}catch{}
 function safePhone(x){try{return phone(x)}catch{return null}}
 function safeKey(x){try{return key(x)}catch{return String(x||'').toLowerCase().trim()}}
 function getContacts(){try{return typeof contacts!=='undefined'&&Array.isArray(contacts)?contacts:[]}catch{return[]}}
