@@ -47,7 +47,7 @@ function robustParse5(txt){return splitText5(txt,null)}
 try{parse=robustParse5}catch{}
 
 function allPhones5(x){
-  const s=String(x||''),out=[],re=/(?:^|[^\d])((?:\+?58[\s().\-]*)?0?4\d{2}(?:[\s().\-]*\d){7})(?=$|[^\d])/g;
+  const s=String(x||''),out=[],re=/(?:^|[^\d])((?:\+?58[\s().\-]{0,3})?0?4\d{2}(?:[\s().\-]{0,3}\d){7})(?=$|[^\d])/g;
   let m;while((m=re.exec(s))){
     let d=m[1].replace(/\D/g,'');if(d.startsWith('58'))d=d.slice(2);if(d.startsWith('0'))d=d.slice(1);
     if(d.length===10&&d[0]==='4')out.push('+58'+d);
