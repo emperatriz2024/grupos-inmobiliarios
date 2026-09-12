@@ -238,7 +238,7 @@ else setTimeout(bind7,500);
 document.addEventListener('click',function(e){
   const t=e.target&&e.target.closest;
   if(!t)return;
-  if(e.target.closest('#oppPasteBtn'))runPasteSearch7();
-  else if(e.target.closest('#oppRefresh'))renderOpportunities7()
+  if(e.target.closest('#oppPasteBtn')){alert('DIAGNÓSTICO: el toque SÍ llegó al botón. Toca OK y espera el resultado.');runPasteSearch7()}
+  else if(e.target.closest('#oppRefresh')){alert('DIAGNÓSTICO: el toque SÍ llegó al botón. Toca OK y espera el resultado.');renderOpportunities7()}
 });
 })();
