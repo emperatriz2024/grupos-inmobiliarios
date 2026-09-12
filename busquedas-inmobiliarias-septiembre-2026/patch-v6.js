@@ -92,7 +92,8 @@ function capKey6(p){const c=captor6(p);if(c.phone)return'ph:'+c.phone;const nm=n
 const D6=new WeakMap();
 function d6(p){
  let d=D6.get(p);if(d)return d;
- const C=captor6(p),capKey=C.phone?('ph:'+C.phone):('nm:'+n6(C.name||p?.sender||'').replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria)\b/g,' ').replace(/[^a-z0-9ñ]/g,''));
+ const C=captor6(p),nm=n6(C.name||p?.sender||'').replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria)\b/g,' ').replace(/[^a-z0-9ñ]/g,'');
+ const capKey=C.phone?('ph:'+C.phone):(nm?('nm:'+nm):('uniq:'+(p?.id||n6(raw6(p)).slice(0,140))));
  d={type:type6(p),loc:loc6(p),captor:C,capKey,stats:stats6(p),tokens:tokens6(p),project:n6(project6(p)),op:op6(p)};
  D6.set(p,d);return d
 }
