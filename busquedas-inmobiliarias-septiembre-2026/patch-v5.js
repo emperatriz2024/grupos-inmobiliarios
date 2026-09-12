@@ -62,7 +62,7 @@ function cleanName5(s){
 function plausibleName5(s){
   const x=cleanName5(s),w=x.split(/\s+/).filter(Boolean);
   if(w.length<2||w.length>6)return null;
-  if(/\b(?:precio|canon|venta|alquiler|casa|town|apartamento|terreno|parcela|habitacion|baño|bano|puesto|pozo|planta|residencia|conjunto|urbanizacion|inversion|ref|codigo|cod)\b/i.test(x))return null;
+  if(/\b(?:precio|canon|venta|alquiler|casa|town|apartamento|terreno|parcela|habitacion|baño|bano|puesto|pozo|planta|residencia|conjunto|urbanizacion|inversion|ref|codigo|cod|imagen|video|audio|sticker|gif|multimedia|documento|omitida|omitido|eliminado|eliminaste|editado|contactame|contactanos|contactar|contactenos|contacto|llamar|llame|comunicarse|comuniquese|escribir|escribeme|informacion|whatsapp|inbox|mensaje)\b/i.test(x))return null;
   return x;
 }
 function senderKeyTokens5(sender){
