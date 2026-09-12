@@ -167,7 +167,7 @@ function taggedAmounts5(raw){
 function strictPrices5(raw,op){
   const a=taggedAmounts5(raw),sale=a.filter(x=>x.kind==='sale').map(x=>x.v),rent=a.filter(x=>x.kind==='rent').map(x=>x.v),any=a.filter(x=>x.kind==='any').map(x=>x.v);
   let salePrice=sale.length?sale.at(-1):null,rentPrice=rent.length?rent.at(-1):null;
-  if(op==='Venta'&&!salePrice)salePrice=any.find(v=>v>=5000)||any.find(v=>v>=1000)||null;
+  if((op==='Venta'||!op)&&!salePrice)salePrice=any.find(v=>v>=5000)||any.find(v=>v>=1000)||null;
   if(op==='Alquiler'&&!rentPrice)rentPrice=any.find(v=>v>=100&&v<=15000)||null;
   if(op==='Venta/Alquiler'){if(!salePrice)salePrice=any.find(v=>v>=5000)||null;if(!rentPrice)rentPrice=any.find(v=>v>=100&&v<=15000&&v!==salePrice)||null}
   return{salePrice,rentPrice};
