@@ -75,7 +75,7 @@ function source6(p){return String(p?.source||p?.group||p?.file||'grupo').split('
 const STOP6=new Set('se la el en de del y con para por una un los las que su sus esta este es son vende venta alquiler precio inversion ref referencia oportunidad nueva captacion inmueble propiedad casa townhouse town house san diego carabobo disponible negociable metros mts mt m2 habitaciones habitacion banos baño bano puestos puesto estacionamiento codigo cod imagen omitida asesor asesora colega inmobiliaria inmobiliario'.split(/\s+/));
 function tokens6(p){let x=n6(raw6(p));x=x.replace(/https?:\/\/\S+/g,' ').replace(/(?:\+?58[\s().\-]{0,3})?0?(?:412|414|416|424|426)(?:[\s().\-]{0,3}\d){7}/g,' ').replace(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b/g,' ').replace(/\b\d+(?:[.,]\d+)?\b/g,' ').replace(/[^a-zñ\s]/g,' ');return new Set(x.split(/\s+/).filter(w=>w.length>=4&&!STOP6.has(w)))}
 function jac6(a,b){if(!a.size||!b.size)return 0;let n=0;for(const x of a)if(b.has(x))n++;return n/(a.size+b.size-n)}
-function project6(p){const x=n6(raw6(p));const r=/(?:res(?:idencias?|\.)?|conjunto(?:\s+residencial)?|urb(?:anizacion|\.)?|edificio|villa(?:s)?|residencial)\s+([a-z0-9ñ ]{3,45})/g;let m,best='';while((m=r.exec(x))){let z=m[1].replace(/\b(?:ubicado|ubicada|en|san diego|valencia|edo|carabobo|cuenta|consta|con|venta|alquiler)\b.*$/,'').trim();if(z.length>best.length)best=z}return best}
+function project6(p){const x=n6(raw6(p));const r=/(?:res(?:idencias?|\.)?|conjunto(?:\s+residencial)?|urb(?:anizacion|\.)?|edificio|villa(?:s)?|residencial)\s+([a-z0-9ñ ]{3,45})/g;let m,best='';while((m=r.exec(x))){let z=m[1].replace(/\b(?:ubicado|ubicada|en|san diego|valencia|edo|carabobo|cuenta|consta|con|venta|alquiler)\b.*$/,'').replace(/\d.*$/,'').trim();if(z.length>best.length)best=z}return best}
 function capKey6(p){const c=captor6(p);if(c.phone)return'ph:'+c.phone;const nm=n6(c.name||p?.sender||'').replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria)\b/g,' ').replace(/[^a-z0-9ñ]/g,'');return'nm:'+nm}
 const D6=new WeakMap();
 function d6(p){
@@ -88,9 +88,11 @@ function sameListing6(a,b){
  const da=d6(a),db=d6(b);
  if(da.capKey!==db.capKey)return false;if(da.type!==db.type)return false;if(da.loc.municipio&&db.loc.municipio&&da.loc.municipio!==db.loc.municipio)return false;
  const sa=da.stats,sb=db.stats,za=n6(da.loc.zona||''),zb=n6(db.loc.zona||''),pa=da.project,pb=db.project;
+ const sameProject=pa&&pb&&(pa===pb||pa.includes(pb)||pb.includes(pa)),diffProject=pa&&pb&&!sameProject;
+ if(diffProject)return false;
  const area=sa.m2&&sb.m2&&Math.abs(sa.m2-sb.m2)<=Math.max(2,Math.min(sa.m2,sb.m2)*.015);const beds=sa.h!=null&&sb.h!=null&&sa.h===sb.h,baths=sa.b!=null&&sb.b!=null&&sa.b===sb.b,parks=sa.e!=null&&sb.e!=null&&sa.e===sb.e;
  const j=jac6(da.tokens,db.tokens);
- if(pa&&pb&&(pa===pb||pa.includes(pb)||pb.includes(pa))&&j>=.30)return true;
+ if(sameProject&&j>=.30)return true;
  if(za&&zb&&za===zb&&area&&(beds||baths)&&j>=.30)return true;
  if(area&&beds&&baths&&(parks||j>=.42))return true;
  if(j>=.70)return true;
