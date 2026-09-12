@@ -75,13 +75,19 @@ function freshRequest7(p,R,days){
 // Agrupa el inventario a usar por tipo+municipio. Si hay algo cargado en "Mi Inventario",
 // se usa ESO exclusivamente (es lo que Empi realmente representa); si no, se usa todo el
 // inventario general ya importado y deduplicado, como antes.
-function buildInventoryBuckets7(R){
-  const source=(Array.isArray(window.misInmuebles)&&window.misInmuebles.length)?window.misInmuebles:R.dedupe6((Array.isArray(props)?props:[]).filter(p=>!R.request6(p)));
+function buildInventoryBuckets7(R,opts){
+  const useMio=!(opts&&opts.forceGeneral)&&Array.isArray(window.misInmuebles)&&window.misInmuebles.length;
+  const source=useMio?window.misInmuebles:R.dedupe6((Array.isArray(props)?props:[]).filter(p=>!R.request6(p)));
   const buckets=new Map();
   for(const it of source){
-    const d=R.d6(it),key=(d.type||'?')+'|'+(d.loc.municipio||'?');
-    if(!buckets.has(key))buckets.set(key,[]);
-    buckets.get(key).push(it)
+    const tipos=R.typesAll6?R.typesAll6(it):[R.type6(it)].filter(Boolean);
+    const muns=R.municipiosAll6?R.municipiosAll6(it):[R.loc6(it).municipio].filter(Boolean);
+    const keys=new Set();
+    for(const t of tipos)for(const m of muns)keys.add(t+'|'+m);
+    for(const key of keys){
+      if(!buckets.has(key))buckets.set(key,[]);
+      buckets.get(key).push(it)
+    }
   }
   return buckets
 }
@@ -168,8 +174,9 @@ function cardHtml7(dem,matches,R,propId,proposals,senderLabel){
   const capName=e7(dem.captor.name||senderLabel||'Colega');
   const budgetTxt=dem.budget?'hasta $'+new Intl.NumberFormat('es-VE').format(dem.budget):'presupuesto no especificado';
   const matchList=matches.map(m=>{
-    const price=R.priceLabel6(m,dem.op||undefined),loc=[R.loc6(m).municipio,R.loc6(m).zona].filter(Boolean).join(' · ');
-    return'<div class="spec" style="text-align:left;padding:8px 10px"><b>'+price+'</b><span>'+e7(loc||'Ubicación por confirmar')+'</span></div>'
+    const price=R.priceLabel6(m,dem.op||undefined),loc=[R.loc6(m).municipio,R.loc6(m).zona].filter(Boolean).join(' · '),c=R.captor6(m),wa=R.wa6(m,c);
+    const contactBtn=wa?'<a href="'+e7(wa)+'" target="_blank" style="display:block;margin-top:4px;font-size:11px;color:#4e20d3;text-decoration:none;font-weight:700">Contactar a '+e7(c.name)+' por WhatsApp</a>':'<span style="display:block;margin-top:4px;font-size:11px;opacity:.6">'+e7(c.name)+' -- sin teléfono</span>';
+    return'<div class="spec" style="text-align:left;padding:8px 10px"><b>'+price+'</b><span>'+e7(loc||'Ubicación por confirmar')+'</span>'+contactBtn+'</div>'
   }).join('');
   return'<article class="card"><div class="sender"><b>Solicitante:</b> '+capName+'</div><div class="loc">Busca '+e7(dem.tipo||'inmueble')+(dem.loc.municipio?' en '+e7(dem.loc.municipio):'')+' · '+budgetTxt+'</div><div class="features" style="margin-top:8px">'+matchList+'</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+lead+'<button class="copyProp" data-propid="'+propId+'">Copiar propuesta</button></div><details><summary>Mensaje original de la solicitud</summary><pre>'+e7(dem.raw)+'</pre></details></article>'
 }
@@ -209,7 +216,7 @@ function matchAdhoc7(text){
   const R=window.RI6;if(!R)return null;
   const p={raw:text,sender:'',date:todayStr7()};
   const dem=demandExtract7(p);if(!dem)return null;
-  const buckets=buildInventoryBuckets7(R);
+  const buckets=buildInventoryBuckets7(R,{forceGeneral:true});
   let matches=matchesFor7(dem,buckets,R);
   if(dem.budget)matches=matches.filter(inv=>{const pr=R.priceFor6(inv,'Venta')||R.priceFor6(inv,'Alquiler');return!pr||pr<=dem.budget*1.1});
   matches=matches.slice().sort((a,b)=>{const pa=R.priceFor6(a,'Venta')||R.priceFor6(a,'Alquiler')||1e15,pb=R.priceFor6(b,'Venta')||R.priceFor6(b,'Alquiler')||1e15;return pa-pb});
