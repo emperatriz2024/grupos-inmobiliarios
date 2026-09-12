@@ -344,6 +344,7 @@ async function persistCollapsed5(){
   return props;
 }
 async function apply5(){
+  if(window.__BI_ENGINE){return}
   try{
     if(typeof props==='undefined'||!Array.isArray(props)||typeof db==='undefined'){setTimeout(apply5,500);return}
     const repaired=[];

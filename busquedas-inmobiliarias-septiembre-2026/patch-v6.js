@@ -91,6 +91,7 @@ function render6(a,wantOp){
 }
 function bind6(){
  const sb=document.querySelector('#searchBtn');if(sb)sb.onclick=search6;document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>{const o=document.querySelector('#op');if(o)o.value=b.dataset.op||'';search6()});document.querySelectorAll('[data-ft]').forEach(b=>b.onclick=()=>{const f=document.querySelector('#ft');if(f)f.value=b.dataset.ft||'';search6()});
+ const q6=document.querySelector('#q');if(q6&&!q6.dataset.v6){q6.dataset.v6='1';q6.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();search6()}})}
  try{search=search6}catch{}try{render=(a)=>render6(dedupe6((a||[]).filter(p=>!request6(p))),null)}catch{}
  if(Array.isArray(props)&&props.length)render6(dedupe6(props.filter(p=>!request6(p))),null);
  const st=document.querySelector('#status');if(st&&st.textContent&&!st.textContent.includes('V6'))st.textContent=st.textContent+' · Motor V6 activo';
