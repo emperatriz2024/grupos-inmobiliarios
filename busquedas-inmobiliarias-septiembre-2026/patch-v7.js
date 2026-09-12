@@ -60,7 +60,7 @@ function budgetFor7(raw){
 
 function demandExtract7(p){
   const R=window.RI6;if(!R)return null;
-  return{tipo:R.type6(p),loc:R.loc6(p),op:R.op6(p),budget:budgetFor7(R.raw6(p)),captor:R.captor6(p),raw:R.raw6(p)}
+  return{tipo:R.type6(p),tiposAll:R.typesAll6?R.typesAll6(p):[R.type6(p)].filter(Boolean),loc:R.loc6(p),municipiosAll:R.municipiosAll6?R.municipiosAll6(p):[R.loc6(p).municipio].filter(Boolean),op:R.op6(p),budget:budgetFor7(R.raw6(p)),captor:R.captor6(p),raw:R.raw6(p)}
 }
 
 // Agrupa el inventario vigente (no-solicitudes, ya deduplicado) por tipo+municipio
@@ -76,6 +76,22 @@ function buildInventoryBuckets7(R){
   return buckets
 }
 
+// Una solicitud puede aceptar varias opciones a la vez (ej. "LOCAL / CASA COMERCIAL",
+// o zonas que caen en más de un municipio). Buscamos en TODAS las combinaciones que
+// menciona, no solo en la primera que detecta el clasificador general.
+function matchKeysFor7(dem){
+  const tipos=dem.tiposAll?.length?dem.tiposAll:[dem.tipo||'?'];
+  const muns=dem.municipiosAll?.length?dem.municipiosAll:[dem.loc.municipio||'?'];
+  const keys=new Set();
+  for(const t of tipos)for(const m of muns)keys.add(t+'|'+m);
+  return[...keys]
+}
+function matchesFor7(dem,buckets,R){
+  const seen=new Set(),out=[];
+  for(const key of matchKeysFor7(dem))for(const it of(buckets.get(key)||[]))if(!seen.has(it)){seen.add(it);out.push(it)}
+  return out
+}
+
 function opportunities7(){
   const R=window.RI6;if(!R||!Array.isArray(props))return[];
   const buckets=buildInventoryBuckets7(R);
@@ -83,8 +99,7 @@ function opportunities7(){
   const out=[];
   for(const sol of solicitudes){
     const dem=demandExtract7(sol);if(!dem)continue;
-    const key=(dem.tipo||'?')+'|'+(dem.loc.municipio||'?');
-    let matches=buckets.get(key)||[];
+    let matches=matchesFor7(dem,buckets,R);
     if(dem.budget)matches=matches.filter(inv=>{const pr=R.priceFor6(inv,'Venta')||R.priceFor6(inv,'Alquiler');return!pr||pr<=dem.budget*1.1});
     if(!matches.length)continue;
     matches=matches.slice().sort((a,b)=>{const pa=R.priceFor6(a,'Venta')||R.priceFor6(a,'Alquiler')||1e15,pb=R.priceFor6(b,'Venta')||R.priceFor6(b,'Alquiler')||1e15;return pa-pb});
@@ -178,8 +193,8 @@ function matchAdhoc7(text){
   const R=window.RI6;if(!R)return null;
   const p={raw:text,sender:'',date:todayStr7()};
   const dem=demandExtract7(p);if(!dem)return null;
-  const buckets=buildInventoryBuckets7(R),key=(dem.tipo||'?')+'|'+(dem.loc.municipio||'?');
-  let matches=buckets.get(key)||[];
+  const buckets=buildInventoryBuckets7(R);
+  let matches=matchesFor7(dem,buckets,R);
   if(dem.budget)matches=matches.filter(inv=>{const pr=R.priceFor6(inv,'Venta')||R.priceFor6(inv,'Alquiler');return!pr||pr<=dem.budget*1.1});
   matches=matches.slice().sort((a,b)=>{const pa=R.priceFor6(a,'Venta')||R.priceFor6(a,'Alquiler')||1e15,pb=R.priceFor6(b,'Venta')||R.priceFor6(b,'Alquiler')||1e15;return pa-pb});
   return{dem,matches:matches.slice(0,5)}

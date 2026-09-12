@@ -24,6 +24,8 @@ const LOC6={
  'Los Guayos':{'Los Guayos':['los guayos'],Paraparal:['paraparal']}
 };
 function loc6(p){const x=n6(raw6(p));for(const[mun,zs]of Object.entries(LOC6))for(const[z,aa]of Object.entries(zs))if(aa.some(a=>x.includes(n6(a))))return{municipio:mun,zona:z};const bares=[['san\\s+diego','San Diego'],['naguanagua','Naguanagua'],['los\\s+guayos','Los Guayos'],['valencia','Valencia']];let best=null,bestIdx=-1;for(const[needle,label]of bares){const m=new RegExp('\\b'+needle+'\\b').exec(x);if(m&&m.index>bestIdx){bestIdx=m.index;best=label}}if(best)return{municipio:best,zona:p?.zona||null};return{municipio:p?.municipio||p?.municipality||null,zona:p?.zona||p?.zone||null}}
+function typesAll6(p){const x=n6(raw6(p)),out=[];for(const[t,r]of TYPE6)if(r.test(x)&&!out.includes(t))out.push(t);return out}
+function municipiosAll6(p){const x=n6(raw6(p)),out=new Set();for(const[mun,zs]of Object.entries(LOC6))for(const[,aa]of Object.entries(zs))if(aa.some(a=>x.includes(n6(a))))out.add(mun);const bares=[['san\\s+diego','San Diego'],['naguanagua','Naguanagua'],['los\\s+guayos','Los Guayos'],['valencia','Valencia']];for(const[needle,label]of bares)if(new RegExp('\\b'+needle+'\\b').test(x))out.add(label);return[...out]}
 function request6(p){const x=n6(raw6(p)),h=x.slice(0,1000);if(/^\W*(?:solicitud|solicito|busco|se busca|cliente busca|requiero|necesito)\b/.test(h))return true;const req=/\b(?:solicitud|solicito|solicita|se solicita|busco|se busca|cliente busca|requiero|requiere|necesito|buscando|busqueda|presupuesto hasta|para la compra|mi cliente quiere|conjuntos de interes)\b/.test(h),listing=/\b(?:se vende|vendo|vende|en venta|se alquila|alquilo|en alquiler|disponible|nueva captacion|ofrece en venta|ofrece en alquiler)\b/.test(h);return req&&!listing}
 function op6(p){const x=n6(raw6(p));const sale=/\b(?:se\s+vende|vende|vendo|venta|en\s+venta|precio\s+de\s+venta|venta\s+privada|ofrece\s+en\s+venta)\b/.test(x),rent=/\b(?:se\s+alquila|alquila|alquiler|en\s+alquiler|arrendamiento|renta|canon)\b/.test(x);if(sale&&rent)return'Venta/Alquiler';if(rent)return'Alquiler';if(sale)return'Venta';return p?.op||p?.operation||null}
 
@@ -161,5 +163,5 @@ function bind6(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(bind6,350));else setTimeout(bind6,350);
 window.__BI_ENGINE='V6.0';
-window.RI6={type6,loc6,op6,captor6,d6,request6,features6,project6,raw6,dedupe6,priceFor6,priceLabel6,opLabel6,ageLabel6,wa6,cash6};
+window.RI6={type6,loc6,op6,captor6,d6,request6,features6,project6,raw6,dedupe6,priceFor6,priceLabel6,opLabel6,ageLabel6,wa6,cash6,typesAll6,municipiosAll6};
 })();
