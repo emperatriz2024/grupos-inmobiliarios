@@ -58,6 +58,16 @@ function captorDirectory6(){
  }
  DIR6.forProps=props;DIR6.map=m;return m
 }
+let CDIR6={forContacts:null,map:null};
+function contactDirectory6(){
+ if(CDIR6.forContacts===contacts&&CDIR6.map)return CDIR6.map;
+ const m=new Map();
+ for(const c of(Array.isArray(contacts)?contacts:[])){
+  const key=nameKey6(c.name||'');if(!key||key.length<4)continue;
+  if(!m.has(key))m.set(key,c.phone)
+ }
+ CDIR6.forContacts=contacts;CDIR6.map=m;return m
+}
 function captor6(p){
  const d=captorDirect6(p);
  if(d.phone)return d;
@@ -65,6 +75,8 @@ function captor6(p){
  if(key&&key.length>=4){
   const hit=captorDirectory6().get(key);
   if(hit)return{phone:hit.phone,name:d.name||hit.name,source:'teléfono visto en otra publicación del mismo captador'}
+  const cphone=contactDirectory6().get(key);
+  if(cphone)return{phone:cphone,name:d.name,source:'contacto vinculado (VCF)'}
  }
  return d
 }
