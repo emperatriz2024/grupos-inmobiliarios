@@ -70,7 +70,7 @@ function captor6(p){
 }
 function num6(v){const n=Number(v);return Number.isFinite(n)?n:null}
 function stats6(p){return{m2:num6(p?.m2??p?.area),h:num6(p?.h??p?.bedrooms),b:num6(p?.b??p?.bathrooms),e:num6(p?.e??p?.parking)}}
-function ts6(p){if(Number.isFinite(+p?.ts)&&+p.ts>0)return+p.ts;const s=String(p?.date||''),m=s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);if(!m)return 0;let y=+m[3];if(y<100)y+=2000;return new Date(y,+m[2]-1,+m[1],12).getTime()}
+function ts6(p){if(Number.isFinite(+p?.ts)&&+p.ts>0)return+p.ts;const s=String(p?.date||''),m=s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);if(!m)return 0;let a=+m[1],b=+m[2],y=+m[3];if(y<100)y+=2000;let day,month;if(a>12&&b<=12){day=a;month=b}else if(b>12&&a<=12){day=b;month=a}else{day=a;month=b}return new Date(y,month-1,day,12).getTime()}
 function source6(p){return String(p?.source||p?.group||p?.file||'grupo').split('/')[0].trim()||'grupo'}
 const STOP6=new Set('se la el en de del y con para por una un los las que su sus esta este es son vende venta alquiler precio inversion ref referencia oportunidad nueva captacion inmueble propiedad casa townhouse town house san diego carabobo disponible negociable metros mts mt m2 habitaciones habitacion banos baño bano puestos puesto estacionamiento codigo cod imagen omitida asesor asesora colega inmobiliaria inmobiliario'.split(/\s+/));
 function tokens6(p){let x=n6(raw6(p));x=x.replace(/https?:\/\/\S+/g,' ').replace(/(?:\+?58[\s().\-]{0,3})?0?(?:412|414|416|424|426)(?:[\s().\-]{0,3}\d){7}/g,' ').replace(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b/g,' ').replace(/\b\d+(?:[.,]\d+)?\b/g,' ').replace(/[^a-zñ\s]/g,' ');return new Set(x.split(/\s+/).filter(w=>w.length>=4&&!STOP6.has(w)))}
