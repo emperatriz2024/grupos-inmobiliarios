@@ -31,7 +31,8 @@ function phones6(s){const out=[],re=/(?:\+?58[\s().\-]{0,3})?0?(?:412|414|416|42
 function cleanPerson6(s){let x=String(s||'').replace(/(?:\+?58[\s().\-]{0,3})?0?(?:412|414|416|424|426)(?:[\s().\-]{0,3}\d){7}/g,' ').replace(/[*_~•📲📞☎️👉➡️✅🔹🔸]/g,' ');x=x.replace(/\b(?:tlf|tel[eé]fono|telefono|celular|whatsapp|contacto|contacta|asesor(?:a)?|inmobiliari[oa]|licda?|lic|econ|realtor)\b[:.\s-]*/gi,' ');return x.replace(/[^\p{L}\s.'-]/gu,' ').replace(/\s+/g,' ').trim()}
 function person6(s){const x=cleanPerson6(s),w=x.split(/\s+/).filter(Boolean);if(w.length<2||w.length>6)return null;if(/\b(?:precio|canon|venta|alquiler|casa|town|apartamento|terreno|parcela|habitacion|bano|puesto|pozo|planta|residencia|conjunto|urbanizacion|inversion|ref|codigo|cod|metros|mts|privilege|remax)\b/i.test(n6(x)))return null;return x}
 function senderTokens6(s){return n6(s).replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria|remax)\b/g,' ').replace(/[^a-z0-9ñ\s]/g,' ').split(/\s+/).filter(w=>w.length>=4)}
-function captor6(p){
+function nameKey6(s){return n6(s).replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria|remax)\b/g,' ').replace(/[^a-z0-9ñ]/g,'')}
+function captorDirect6(p){
  const raw=raw6(p),lines=raw.split(/\n/),st=senderTokens6(p?.sender||''),cand=[];
  for(let i=0;i<lines.length;i++){
   const phs=phones6(lines[i]);if(!phs.length)continue;
@@ -45,6 +46,28 @@ function captor6(p){
  return{phone:null,name:p?.contactName||cleanPerson6(p?.sender)||p?.sender||'Captador por confirmar',source:'sin teléfono vinculado'};
 }
 
+let DIR6={forProps:null,map:null};
+function captorDirectory6(){
+ if(DIR6.forProps===props&&DIR6.map)return DIR6.map;
+ const m=new Map();
+ for(const p of(Array.isArray(props)?props:[])){
+  const d=captorDirect6(p);if(!d.phone)continue;
+  const key=nameKey6(d.name||p?.sender||'');if(!key||key.length<4)continue;
+  const cur=m.get(key),strong=d.source==='número publicado por el captador';
+  if(!cur||(strong&&cur.source!=='número publicado por el captador'))m.set(key,{phone:d.phone,name:d.name,source:d.source})
+ }
+ DIR6.forProps=props;DIR6.map=m;return m
+}
+function captor6(p){
+ const d=captorDirect6(p);
+ if(d.phone)return d;
+ const key=nameKey6(d.name||p?.sender||'');
+ if(key&&key.length>=4){
+  const hit=captorDirectory6().get(key);
+  if(hit)return{phone:hit.phone,name:d.name||hit.name,source:'teléfono visto en otra publicación del mismo captador'}
+ }
+ return d
+}
 function num6(v){const n=Number(v);return Number.isFinite(n)?n:null}
 function stats6(p){return{m2:num6(p?.m2??p?.area),h:num6(p?.h??p?.bedrooms),b:num6(p?.b??p?.bathrooms),e:num6(p?.e??p?.parking)}}
 function ts6(p){if(Number.isFinite(+p?.ts)&&+p.ts>0)return+p.ts;const s=String(p?.date||''),m=s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);if(!m)return 0;let y=+m[3];if(y<100)y+=2000;return new Date(y,+m[2]-1,+m[1],12).getTime()}

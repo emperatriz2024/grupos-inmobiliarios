@@ -157,7 +157,9 @@ function taggedAmounts5(raw){
     ['sale',new RegExp('(?:precio(?:\\s+de\\s+venta|\\s+ref\\.?|\\s+de\\s+oportunidad)?|valor|inversi[oó]n|ref(?:erencia)?|baja|oferta)\\s*[:\\-~.]?\\s*(?:usd|us\\$|\\$)?\\s*'+A+'\\s*(?:usd|d[oó]lares?|\\$)?','gi')],
     ['rent',new RegExp('(?:canon(?:\\s+de\\s+arrendamiento)?|alquiler|renta|arrendamiento)\\s*[:\\-~.]?\\s*(?:usd|us\\$|\\$)?\\s*'+A+'\\s*(?:usd|d[oó]lares?|\\$)?','gi')],
     ['any',new RegExp('(?:usd|us\\$|\\$)\\s*'+A,'gi')],
-    ['any',new RegExp(A+'\\s*(?:usd|d[oó]lares?|\\$)','gi')]
+    ['any',new RegExp(A+'\\s*(?:usd|d[oó]lares?|\\$)','gi')],
+    ['any',new RegExp('(?:💰|💲|💵)\\s*'+A,'g')],
+    ['any',new RegExp(A+'\\s*(?:💰|💲|💵)','g')]
   ];
   for(const[k,r]of defs){let m;while((m=r.exec(s))){const v=amount5(m[1],m[2]);if(v&&v>=100&&v<=100000000)out.push({v,kind:k,index:m.index})}}
   return out.sort((a,b)=>a.index-b.index);
