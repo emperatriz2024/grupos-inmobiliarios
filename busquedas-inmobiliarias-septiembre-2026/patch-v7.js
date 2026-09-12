@@ -136,6 +136,25 @@ function waLead7(dem,proposalText,R){
   return'https://wa.me/'+c.phone.replace(/\D/g,'')+'?text='+encodeURIComponent(proposalText)
 }
 
+function cardHtml7(dem,matches,R,propId,proposals,senderLabel){
+  const proposalText=buildProposal7(dem,matches,R);
+  proposals.set(propId,proposalText);
+  const wa=waLead7(dem,proposalText,R),lead=wa?'<a class="primary" style="display:inline-block;text-decoration:none;text-align:center;padding:10px;border-radius:10px" href="'+wa+'" target="_blank">Enviar propuesta por WhatsApp</a>':'<div class="hint">Sin teléfono vinculado -- copia la propuesta y envíasela por donde corresponda.</div>';
+  const capName=e7(dem.captor.name||senderLabel||'Colega');
+  const budgetTxt=dem.budget?'hasta $'+new Intl.NumberFormat('es-VE').format(dem.budget):'presupuesto no especificado';
+  const matchList=matches.map(m=>{
+    const price=R.priceLabel6(m,dem.op||undefined),loc=[R.loc6(m).municipio,R.loc6(m).zona].filter(Boolean).join(' · ');
+    return'<div class="spec" style="text-align:left;padding:8px 10px"><b>'+price+'</b><span>'+e7(loc||'Ubicación por confirmar')+'</span></div>'
+  }).join('');
+  return'<article class="card"><div class="sender"><b>Solicitante:</b> '+capName+'</div><div class="loc">Busca '+e7(dem.tipo||'inmueble')+(dem.loc.municipio?' en '+e7(dem.loc.municipio):'')+' · '+budgetTxt+'</div><div class="features" style="margin-top:8px">'+matchList+'</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+lead+'<button class="copyProp" data-propid="'+propId+'">Copiar propuesta</button></div><details><summary>Mensaje original de la solicitud</summary><pre>'+e7(dem.raw)+'</pre></details></article>'
+}
+function wireCopyButtons7(root,proposals){
+  root.querySelectorAll('.copyProp').forEach(b=>b.onclick=()=>{
+    const ok=copyText7(proposals.get(b.getAttribute('data-propid')));
+    const prev=b.textContent;b.textContent=ok?'¡Copiado!':'No se pudo copiar';setTimeout(()=>{b.textContent=prev},1500)
+  })
+}
+
 function renderOpportunities7(){
   const R=window.RI6,root=document.querySelector('#oppResults'),clustersEl=document.querySelector('#oppClusters');
   if(!root)return;
@@ -148,27 +167,41 @@ function renderOpportunities7(){
     }).join(''):'<div class="hint">Todavía no hay solicitudes suficientes para ver tendencias.</div>'
   }
   const ops=opportunities7(),proposals=new Map();
-  root.innerHTML=ops.length?ops.map(({sol,dem,matches},idx)=>{
-    const propId='prop'+idx,proposalText=buildProposal7(dem,matches,R);
-    proposals.set(propId,proposalText);
-    const wa=waLead7(dem,proposalText,R),lead=wa?'<a class="primary" style="display:inline-block;text-decoration:none;text-align:center;padding:10px;border-radius:10px" href="'+wa+'" target="_blank">Enviar propuesta por WhatsApp</a>':'<div class="hint">Sin teléfono del colega -- copia la propuesta y envíasela por donde te contactó.</div>';
-    const capName=e7(dem.captor.name||sol.sender||'Colega');
-    const budgetTxt=dem.budget?'hasta $'+new Intl.NumberFormat('es-VE').format(dem.budget):'presupuesto no especificado';
-    const matchList=matches.map(m=>{
-      const price=R.priceLabel6(m,dem.op||undefined),loc=[R.loc6(m).municipio,R.loc6(m).zona].filter(Boolean).join(' · ');
-      return'<div class="spec" style="text-align:left;padding:8px 10px"><b>'+price+'</b><span>'+e7(loc||'Ubicación por confirmar')+'</span></div>'
-    }).join('');
-    return'<article class="card"><div class="sender"><b>Colega:</b> '+capName+'</div><div class="loc">Busca '+e7(dem.tipo||'inmueble')+(dem.loc.municipio?' en '+e7(dem.loc.municipio):'')+' · '+budgetTxt+'</div><div class="features" style="margin-top:8px">'+matchList+'</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+lead+'<button class="copyProp" data-propid="'+propId+'">Copiar propuesta</button></div><details><summary>Mensaje original de la solicitud</summary><pre>'+e7(dem.raw)+'</pre></details></article>'
-  }).join(''):'<div class="hint">No encontré coincidencias entre tus solicitudes de colegas y tu inventario todavía. Esto crece a medida que importas más grupos.</div>';
-  root.querySelectorAll('.copyProp').forEach(b=>b.onclick=()=>{
-    const ok=copyText7(proposals.get(b.getAttribute('data-propid')));
-    const prev=b.textContent;b.textContent=ok?'¡Copiado!':'No se pudo copiar';setTimeout(()=>{b.textContent=prev},1500)
-  })
+  root.innerHTML=ops.length?ops.map(({sol,dem,matches},idx)=>cardHtml7(dem,matches,R,'prop'+idx,proposals,sol.sender)).join(''):'<div class="hint">No encontré coincidencias entre tus solicitudes de colegas y tu inventario todavía. Esto crece a medida que importas más grupos.</div>';
+  wireCopyButtons7(root,proposals)
+}
+
+// --- Solicitud pegada a mano: no pasa por prop()/el filtro de puntaje de importación,
+// porque aquí ya sabemos con certeza que es una solicitud (no hace falta clasificarla).
+function todayStr7(){const d=new Date();return d.getDate()+'/'+(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2)}
+function matchAdhoc7(text){
+  const R=window.RI6;if(!R)return null;
+  const p={raw:text,sender:'',date:todayStr7()};
+  const dem=demandExtract7(p);if(!dem)return null;
+  const buckets=buildInventoryBuckets7(R),key=(dem.tipo||'?')+'|'+(dem.loc.municipio||'?');
+  let matches=buckets.get(key)||[];
+  if(dem.budget)matches=matches.filter(inv=>{const pr=R.priceFor6(inv,'Venta')||R.priceFor6(inv,'Alquiler');return!pr||pr<=dem.budget*1.1});
+  matches=matches.slice().sort((a,b)=>{const pa=R.priceFor6(a,'Venta')||R.priceFor6(a,'Alquiler')||1e15,pb=R.priceFor6(b,'Venta')||R.priceFor6(b,'Alquiler')||1e15;return pa-pb});
+  return{dem,matches:matches.slice(0,5)}
+}
+function runPasteSearch7(){
+  const R=window.RI6,ta=document.querySelector('#oppPaste'),root=document.querySelector('#oppPasteResults');
+  if(!root)return;
+  if(!R){root.innerHTML='<div class="hint">El módulo de búsqueda todavía no cargó. Espera unos segundos e inténtalo de nuevo.</div>';return}
+  const text=(ta?.value||'').trim();
+  if(!text){root.innerHTML='<div class="hint">Pega primero el texto de la solicitud.</div>';return}
+  const res=matchAdhoc7(text);
+  if(!res){root.innerHTML='<div class="hint">No pude leer esa solicitud.</div>';return}
+  const proposals=new Map();
+  root.innerHTML=res.matches.length?cardHtml7(res.dem,res.matches,R,'pasteprop',proposals,'Solicitud pegada'):'<div class="hint">No encontré en tu inventario nada que calce con esta solicitud ('+e7(res.dem.tipo||'tipo no identificado')+(res.dem.loc.municipio?' en '+e7(res.dem.loc.municipio):'')+').</div>';
+  wireCopyButtons7(root,proposals)
 }
 
 function bind7(){
   const btn=document.querySelector('#oppRefresh');
   if(btn)btn.onclick=renderOpportunities7;
+  const pasteBtn=document.querySelector('#oppPasteBtn');
+  if(pasteBtn)pasteBtn.onclick=runPasteSearch7;
   // Si ya hay datos cargados al entrar, mostrar algo de una vez.
   if(Array.isArray(props)&&props.length)renderOpportunities7()
 }
