@@ -170,20 +170,26 @@ function wireCopyButtons7(root,proposals){
   })
 }
 
+function showError7(root,err){
+  root.innerHTML='<div class="hint" style="color:#b91c1c;background:#fef2f2;padding:10px;border-radius:8px;border:1px solid #fecaca">Ocurrió un error al calcular esto. Manda captura de este mensaje: <br><code style="font-size:11px;white-space:pre-wrap;display:block;margin-top:6px">'+e7(String(err&&err.stack||err))+'</code></div>'
+}
+
 function renderOpportunities7(){
   const R=window.RI6,root=document.querySelector('#oppResults'),clustersEl=document.querySelector('#oppClusters');
   if(!root)return;
   if(!R){root.innerHTML='<div class="hint">El módulo de búsqueda todavía no cargó. Espera unos segundos y vuelve a tocar "Actualizar oportunidades".</div>';return}
-  const clusters=demandClusters7();
-  if(clustersEl){
-    clustersEl.innerHTML=clusters.length?clusters.slice(0,8).map(c=>{
-      const avg=c.budgets.length?Math.round(c.budgets.reduce((a,b)=>a+b,0)/c.budgets.length):null;
-      return'<div class="pill" style="margin:3px">'+e7(c.tipo||'Tipo?')+' en '+e7(c.municipio||'municipio?')+' · '+c.count+' solicitud'+(c.count===1?'':'es')+(avg?' · promedio $'+new Intl.NumberFormat('es-VE').format(avg):'')+'</div>'
-    }).join(''):'<div class="hint">Todavía no hay solicitudes suficientes para ver tendencias.</div>'
-  }
-  const ops=opportunities7(),proposals=new Map();
-  root.innerHTML=ops.length?ops.map(({sol,dem,matches},idx)=>cardHtml7(dem,matches,R,'prop'+idx,proposals,sol.sender)).join(''):'<div class="hint">No encontré coincidencias entre tus solicitudes de colegas y tu inventario todavía. Esto crece a medida que importas más grupos.</div>';
-  wireCopyButtons7(root,proposals)
+  try{
+    const clusters=demandClusters7();
+    if(clustersEl){
+      clustersEl.innerHTML=clusters.length?clusters.slice(0,8).map(c=>{
+        const avg=c.budgets.length?Math.round(c.budgets.reduce((a,b)=>a+b,0)/c.budgets.length):null;
+        return'<div class="pill" style="margin:3px">'+e7(c.tipo||'Tipo?')+' en '+e7(c.municipio||'municipio?')+' · '+c.count+' solicitud'+(c.count===1?'':'es')+(avg?' · promedio $'+new Intl.NumberFormat('es-VE').format(avg):'')+'</div>'
+      }).join(''):'<div class="hint">Todavía no hay solicitudes suficientes para ver tendencias.</div>'
+    }
+    const ops=opportunities7(),proposals=new Map();
+    root.innerHTML=ops.length?ops.map(({sol,dem,matches},idx)=>cardHtml7(dem,matches,R,'prop'+idx,proposals,sol.sender)).join(''):'<div class="hint">No encontré coincidencias entre tus solicitudes de colegas y tu inventario todavía. Esto crece a medida que importas más grupos.</div>';
+    wireCopyButtons7(root,proposals)
+  }catch(err){showError7(root,err)}
 }
 
 // --- Solicitud pegada a mano: no pasa por prop()/el filtro de puntaje de importación,
@@ -205,11 +211,13 @@ function runPasteSearch7(){
   if(!R){root.innerHTML='<div class="hint">El módulo de búsqueda todavía no cargó. Espera unos segundos e inténtalo de nuevo.</div>';return}
   const text=(ta?.value||'').trim();
   if(!text){root.innerHTML='<div class="hint">Pega primero el texto de la solicitud.</div>';return}
-  const res=matchAdhoc7(text);
-  if(!res){root.innerHTML='<div class="hint">No pude leer esa solicitud.</div>';return}
-  const proposals=new Map();
-  root.innerHTML=res.matches.length?cardHtml7(res.dem,res.matches,R,'pasteprop',proposals,'Solicitud pegada'):'<div class="hint">No encontré en tu inventario nada que calce con esta solicitud ('+e7(res.dem.tipo||'tipo no identificado')+(res.dem.loc.municipio?' en '+e7(res.dem.loc.municipio):'')+').</div>';
-  wireCopyButtons7(root,proposals)
+  try{
+    const res=matchAdhoc7(text);
+    if(!res){root.innerHTML='<div class="hint">No pude leer esa solicitud.</div>';return}
+    const proposals=new Map();
+    root.innerHTML=res.matches.length?cardHtml7(res.dem,res.matches,R,'pasteprop',proposals,'Solicitud pegada'):'<div class="hint">No encontré en tu inventario nada que calce con esta solicitud ('+e7(res.dem.tipo||'tipo no identificado')+(res.dem.loc.municipio?' en '+e7(res.dem.loc.municipio):'')+').</div>';
+    wireCopyButtons7(root,proposals)
+  }catch(err){showError7(root,err)}
 }
 
 function bind7(){
