@@ -63,12 +63,22 @@ function demandExtract7(p){
   return{tipo:R.type6(p),tiposAll:R.typesAll6?R.typesAll6(p):[R.type6(p)].filter(Boolean),loc:R.loc6(p),municipiosAll:R.municipiosAll6?R.municipiosAll6(p):[R.loc6(p).municipio].filter(Boolean),op:R.op6(p),budget:budgetFor7(R.raw6(p)),captor:R.captor6(p),raw:R.raw6(p)}
 }
 
-// Agrupa el inventario vigente (no-solicitudes, ya deduplicado) por tipo+municipio
-// para poder buscar coincidencias rápido sin recorrer todo por cada solicitud.
+// Una solicitud se considera vigente solo si tiene 7 días o menos (después de eso, se asume
+// que probablemente ya se resolvió o el colega dejó de buscarla activamente).
+function freshRequest7(p,R,days){
+  const t=R.ts6(p);
+  if(!t)return true;
+  const ageDays=(Date.now()-t)/86400000;
+  return ageDays<=days
+}
+
+// Agrupa el inventario a usar por tipo+municipio. Si hay algo cargado en "Mi Inventario",
+// se usa ESO exclusivamente (es lo que Empi realmente representa); si no, se usa todo el
+// inventario general ya importado y deduplicado, como antes.
 function buildInventoryBuckets7(R){
-  const inv=R.dedupe6((Array.isArray(props)?props:[]).filter(p=>!R.request6(p)));
+  const source=(Array.isArray(window.misInmuebles)&&window.misInmuebles.length)?window.misInmuebles:R.dedupe6((Array.isArray(props)?props:[]).filter(p=>!R.request6(p)));
   const buckets=new Map();
-  for(const it of inv){
+  for(const it of source){
     const d=R.d6(it),key=(d.type||'?')+'|'+(d.loc.municipio||'?');
     if(!buckets.has(key))buckets.set(key,[]);
     buckets.get(key).push(it)
@@ -95,7 +105,7 @@ function matchesFor7(dem,buckets,R){
 function opportunities7(){
   const R=window.RI6;if(!R||!Array.isArray(props))return[];
   const buckets=buildInventoryBuckets7(R);
-  const solicitudes=props.filter(p=>R.request6(p));
+  const solicitudes=props.filter(p=>R.request6(p)&&freshRequest7(p,R,7));
   const out=[];
   for(const sol of solicitudes){
     const dem=demandExtract7(sol);if(!dem)continue;
@@ -108,10 +118,10 @@ function opportunities7(){
   return out
 }
 
-// Agrupa las solicitudes por tipo+municipio para el resumen de tendencias de demanda.
+// Agrupa las solicitudes vigentes (últimos 7 días) por tipo+municipio para el resumen de tendencias de demanda.
 function demandClusters7(){
   const R=window.RI6;if(!R||!Array.isArray(props))return[];
-  const solicitudes=props.filter(p=>R.request6(p));
+  const solicitudes=props.filter(p=>R.request6(p)&&freshRequest7(p,R,7));
   const map=new Map();
   for(const sol of solicitudes){
     const dem=demandExtract7(sol);if(!dem)continue;
@@ -226,11 +236,57 @@ function bind7(){
   if(btn)btn.onclick=renderOpportunities7;
   const pasteBtn=document.querySelector('#oppPasteBtn');
   if(pasteBtn)pasteBtn.onclick=runPasteSearch7;
+  const miBtn=document.querySelector('#misInmueblesBtn');
+  if(miBtn)miBtn.onclick=saveMisInmuebles7;
+  renderMisInmueblesList7();
   // Si ya hay datos cargados al entrar, mostrar algo de una vez.
   if(Array.isArray(props)&&props.length)renderOpportunities7()
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(bind7,500));
 else setTimeout(bind7,500);
+
+// --- Mi Inventario: propiedades que Empi misma representa, separadas por una línea "---".
+// Se guardan en su propio almacén de IndexedDB (misInmuebles), aparte de todo lo importado.
+function splitMisInmuebles7(text){
+  return String(text||'').split(/\n\s*-{3,}\s*\n/).map(s=>s.trim()).filter(Boolean)
+}
+function classifyMisInmueble7(raw,id){
+  let p=null;
+  try{p=prop({date:todayStr7(),sender:'Mi Inventario',text:raw},'mi-inventario')}catch(e){}
+  if(!p)p={raw,sender:'Mi Inventario',date:todayStr7()};
+  p.id=id;
+  return p
+}
+function deleteMisInmueble7(id){
+  return new Promise((resolve,reject)=>{
+    try{const t=db.transaction('misInmuebles','readwrite');t.objectStore('misInmuebles').delete(id);t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error)}catch(e){reject(e)}
+  })
+}
+function renderMisInmueblesList7(){
+  const root=document.querySelector('#misInmueblesList'),R=window.RI6;
+  if(!root)return;
+  const items=Array.isArray(window.misInmuebles)?window.misInmuebles:[];
+  if(!items.length){root.innerHTML='Todavía no has cargado nada aquí. Mientras esté vacío, las búsquedas usan todo tu inventario importado.';return}
+  root.innerHTML=items.map((it,idx)=>{
+    const tipo=R?(R.type6(it)||'Inmueble'):'Inmueble',loc=R?[R.loc6(it).municipio,R.loc6(it).zona].filter(Boolean).join(' · '):'',price=R?R.priceLabel6(it,undefined):'';
+    return'<div class="spec" style="display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;padding:8px 10px;margin-bottom:6px"><span><b>'+e7(tipo)+'</b> '+e7(loc||'ubicación por confirmar')+' · '+e7(price||'')+'</span><button class="delMiInmueble" data-idx="'+idx+'" style="width:auto;padding:5px 10px;font-size:12px">Quitar</button></div>'
+  }).join('');
+  root.querySelectorAll('.delMiInmueble').forEach(b=>b.onclick=async()=>{
+    const idx=+b.getAttribute('data-idx'),item=window.misInmuebles[idx];
+    window.misInmuebles=window.misInmuebles.filter((_,i)=>i!==idx);
+    try{await deleteMisInmueble7(item.id)}catch(e){}
+    renderMisInmueblesList7()
+  })
+}
+function saveMisInmuebles7(){
+  const ta=document.querySelector('#misInmueblesPaste'),text=(ta?.value||'').trim();
+  if(!text)return;
+  const chunks=splitMisInmuebles7(text);
+  if(!chunks.length)return;
+  const nuevos=chunks.map((raw,i)=>classifyMisInmueble7(raw,'mi'+Date.now()+'-'+i));
+  window.misInmuebles=(Array.isArray(window.misInmuebles)?window.misInmuebles:[]).concat(nuevos);
+  puts('misInmuebles',nuevos).then(()=>{if(ta)ta.value='';renderMisInmueblesList7()}).catch(()=>{})
+}
 
 // Respaldo a prueba de fallos: un solo listener de clics en TODO el documento, puesto de
 // inmediato (sin esperar setTimeout ni a que el botón ya exista en el DOM). Así, sin importar
@@ -238,7 +294,8 @@ else setTimeout(bind7,500);
 document.addEventListener('click',function(e){
   const t=e.target&&e.target.closest;
   if(!t)return;
-  if(e.target.closest('#oppPasteBtn')){alert('DIAGNÓSTICO: el toque SÍ llegó al botón. Toca OK y espera el resultado.');runPasteSearch7()}
-  else if(e.target.closest('#oppRefresh')){alert('DIAGNÓSTICO: el toque SÍ llegó al botón. Toca OK y espera el resultado.');renderOpportunities7()}
+  if(e.target.closest('#oppPasteBtn'))runPasteSearch7();
+  else if(e.target.closest('#oppRefresh'))renderOpportunities7();
+  else if(e.target.closest('#misInmueblesBtn'))saveMisInmuebles7()
 });
 })();
