@@ -161,4 +161,5 @@ function bind6(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(bind6,350));else setTimeout(bind6,350);
 window.__BI_ENGINE='V6.0';
+window.RI6={type6,loc6,op6,captor6,d6,request6,features6,project6,raw6,dedupe6,priceFor6,priceLabel6,opLabel6,ageLabel6,wa6,cash6};
 })();
