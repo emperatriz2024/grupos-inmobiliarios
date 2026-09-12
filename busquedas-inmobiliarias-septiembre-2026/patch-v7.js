@@ -208,6 +208,7 @@ function matchAdhoc7(text){
 function runPasteSearch7(){
   const R=window.RI6,ta=document.querySelector('#oppPaste'),root=document.querySelector('#oppPasteResults');
   if(!root)return;
+  root.innerHTML='<div class="hint">Buscando...</div>';
   if(!R){root.innerHTML='<div class="hint">El módulo de búsqueda todavía no cargó. Espera unos segundos e inténtalo de nuevo.</div>';return}
   const text=(ta?.value||'').trim();
   if(!text){root.innerHTML='<div class="hint">Pega primero el texto de la solicitud.</div>';return}
@@ -230,4 +231,14 @@ function bind7(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(bind7,500));
 else setTimeout(bind7,500);
+
+// Respaldo a prueba de fallos: un solo listener de clics en TODO el documento, puesto de
+// inmediato (sin esperar setTimeout ni a que el botón ya exista en el DOM). Así, sin importar
+// ninguna condición de carrera de tiempos, tocar estos botones siempre hace algo.
+document.addEventListener('click',function(e){
+  const t=e.target&&e.target.closest;
+  if(!t)return;
+  if(e.target.closest('#oppPasteBtn'))runPasteSearch7();
+  else if(e.target.closest('#oppRefresh'))renderOpportunities7()
+});
 })();
