@@ -190,7 +190,7 @@ function strictCount5(raw,k,typeName){
   return null;
 }
 function strictFeatures5(raw){
-  const x=n5(raw),out=[],map={pozo:/\bpozo\b/,planta:/\bplanta\s+electrica\b|\bplanta\s+(?:100|80|75|50)\s*%?/,piscina:/\bpiscina\b/,amoblado:/\bamoblad[oa]\b|\bamueblad[oa]\b|\bsemi\s*amoblad[oa]\b/,vigilancia:/\bvigilancia\b|\bseguridad\s+24/,financiamiento:/\bfinanciamiento\b|\bfinancia/,vehículo:/\b(?:acepta|recibe)\s+vehiculo\b|\bvehiculo\s+como\s+parte\s+de\s+pago\b/,maletero:/\bmaletero\b/,balcón:/\bbalcon\b/,terraza:/\bterraza\b/,patio:/\bpatio\b/,'gas directo':/\bgas\s+directo\b/,ascensor:/\bascensor\b/,inversor:/\binversor\b/};
+  const x=n5(raw),out=[],map={pozo:/\bpozo\b/,planta:/\bplanta\s+electrica\b|\bplanta\s+(?:100|80|75|50)\s*%?/,piscina:/\bpiscina\b/,amoblado:/\bamoblad[oa]\b|\bamueblad[oa]\b|\bsemi\s*amoblad[oa]\b/,vigilancia:/\bvigilancia\b|\bseguridad\s+24/,financiamiento:/\bfinanciamiento\b|\bfinancia/,vehículo:/\b(?:acepta|recibe)\s+vehiculo\b|\bvehiculo\s+como\s+parte\s+de\s+pago\b/,maletero:/\bmaletero\b/,balcón:/\bbalcon\b/,terraza:/\bterraza\b/,patio:/\bpatio\b/,'gas directo':/\bgas\s+directo\b/,ascensor:/\bascensor\b/,inversor:/\binversor\b/,'obra gris':/\bobra\s+gris\b/,'obra blanca':/\bobra\s+blanca\b/,'a estrenar':/\b(?:a|para|sin)\s+estrenar\b/};
   for(const[k,r]of Object.entries(map))if(r.test(x))out.push(k);return out;
 }
 
