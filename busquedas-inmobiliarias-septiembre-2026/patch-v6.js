@@ -54,38 +54,57 @@ function tokens6(p){let x=n6(raw6(p));x=x.replace(/https?:\/\/\S+/g,' ').replace
 function jac6(a,b){if(!a.size||!b.size)return 0;let n=0;for(const x of a)if(b.has(x))n++;return n/(a.size+b.size-n)}
 function project6(p){const x=n6(raw6(p));const r=/(?:res(?:idencias?|\.)?|conjunto(?:\s+residencial)?|urb(?:anizacion|\.)?|edificio|villa(?:s)?|residencial)\s+([a-z0-9ñ ]{3,45})/g;let m,best='';while((m=r.exec(x))){let z=m[1].replace(/\b(?:ubicado|ubicada|en|san diego|valencia|edo|carabobo|cuenta|consta|con|venta|alquiler)\b.*$/,'').trim();if(z.length>best.length)best=z}return best}
 function capKey6(p){const c=captor6(p);if(c.phone)return'ph:'+c.phone;const nm=n6(c.name||p?.sender||'').replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria)\b/g,' ').replace(/[^a-z0-9ñ]/g,'');return'nm:'+nm}
+const D6=new WeakMap();
+function d6(p){
+ let d=D6.get(p);if(d)return d;
+ const C=captor6(p),capKey=C.phone?('ph:'+C.phone):('nm:'+n6(C.name||p?.sender||'').replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria)\b/g,' ').replace(/[^a-z0-9ñ]/g,''));
+ d={type:type6(p),loc:loc6(p),captor:C,capKey,stats:stats6(p),tokens:tokens6(p),project:n6(project6(p)),op:op6(p)};
+ D6.set(p,d);return d
+}
 function sameListing6(a,b){
- if(capKey6(a)!==capKey6(b))return false;if(type6(a)!==type6(b))return false;const la=loc6(a),lb=loc6(b);if(la.municipio&&lb.municipio&&la.municipio!==lb.municipio)return false;
- const sa=stats6(a),sb=stats6(b),za=n6(la.zona||''),zb=n6(lb.zona||''),pa=n6(project6(a)),pb=n6(project6(b));
+ const da=d6(a),db=d6(b);
+ if(da.capKey!==db.capKey)return false;if(da.type!==db.type)return false;if(da.loc.municipio&&db.loc.municipio&&da.loc.municipio!==db.loc.municipio)return false;
+ const sa=da.stats,sb=db.stats,za=n6(da.loc.zona||''),zb=n6(db.loc.zona||''),pa=da.project,pb=db.project;
  const area=sa.m2&&sb.m2&&Math.abs(sa.m2-sb.m2)<=Math.max(2,Math.min(sa.m2,sb.m2)*.015);const beds=sa.h!=null&&sb.h!=null&&sa.h===sb.h,baths=sa.b!=null&&sb.b!=null&&sa.b===sb.b,parks=sa.e!=null&&sb.e!=null&&sa.e===sb.e;
- const j=jac6(tokens6(a),tokens6(b));
+ const j=jac6(da.tokens,db.tokens);
  if(pa&&pb&&(pa===pb||pa.includes(pb)||pb.includes(pa))&&j>=.30)return true;
  if(za&&zb&&za===zb&&area&&(beds||baths)&&j>=.30)return true;
  if(area&&beds&&baths&&(parks||j>=.42))return true;
  if(j>=.70)return true;
  return false;
 }
-function dedupe6(arr){const sorted=[...arr].sort((a,b)=>ts6(b)-ts6(a)),wins=[];for(const p of sorted){let w=wins.find(x=>sameListing6(x,p));if(!w){p._historyCount=1;p._groupSet6=new Set([source6(p)]);p._firstSeen6=ts6(p);p._lastSeen6=ts6(p);wins.push(p)}else{w._historyCount=(w._historyCount||1)+1;w._groupSet6=w._groupSet6||new Set([source6(w)]);w._groupSet6.add(source6(p));w._firstSeen6=Math.min(w._firstSeen6||ts6(w),ts6(p));w._lastSeen6=Math.max(w._lastSeen6||ts6(w),ts6(p))}}for(const w of wins)w._groupCount=w._groupSet6?.size||1;return wins}
+function dedupe6(arr){
+ const sorted=[...arr].sort((a,b)=>ts6(b)-ts6(a)),buckets=new Map();
+ for(const p of sorted){
+  const key=d6(p).capKey;let bucket=buckets.get(key);if(!bucket){bucket=[];buckets.set(key,bucket)}
+  let w=bucket.find(x=>sameListing6(x,p));
+  if(!w){p._historyCount=1;p._groupSet6=new Set([source6(p)]);p._firstSeen6=ts6(p);p._lastSeen6=ts6(p);bucket.push(p)}
+  else{w._historyCount=(w._historyCount||1)+1;w._groupSet6=w._groupSet6||new Set([source6(w)]);w._groupSet6.add(source6(p));w._firstSeen6=Math.min(w._firstSeen6||ts6(w),ts6(p));w._lastSeen6=Math.max(w._lastSeen6||ts6(w),ts6(p))}
+ }
+ const wins=[];for(const bucket of buckets.values())wins.push(...bucket);
+ for(const w of wins)w._groupCount=w._groupSet6?.size||1;
+ return wins
+}
 
 function intent6(q){const x=n6(q);let t=null;for(const[v,r]of TYPE6)if(r.test(x)){t=v;break}let mun=null,z=null;for(const[m,zs]of Object.entries(LOC6)){for(const[zz,aa]of Object.entries(zs))if(aa.some(a=>x.includes(n6(a)))){mun=m;z=zz;break}if(mun)break}if(!mun){if(/\bsan\s+diego\b/.test(x))mun='San Diego';else if(/\bnaguanagua\b/.test(x))mun='Naguanagua';else if(/\blos\s+guayos\b/.test(x))mun='Los Guayos';else if(/\bvalencia\b/.test(x))mun='Valencia'}let op=null;if(/\b(?:venta|vendo|vende|comprar|compra)\b/.test(x))op='Venta';else if(/\b(?:alquiler|alquilo|alquila|renta|canon)\b/.test(x))op='Alquiler';return{type:t,municipio:mun,zona:z,op}}
-function priceFor6(p,op){if(op==='Venta')return num6(p?.precioVenta??p?.salePrice??(op6(p)==='Venta'?p?.precio:null));if(op==='Alquiler')return num6(p?.precioAlquiler??p?.rentPrice??(op6(p)==='Alquiler'?p?.precio:null));return num6(p?.precio??p?.precioVenta??p?.precioAlquiler)}
-function eligibleOp6(p,want){const got=op6(p);if(!want)return true;if(want==='Venta')return got==='Venta'||got==='Venta/Alquiler';if(want==='Alquiler')return got==='Alquiler'||got==='Venta/Alquiler';return got===want}
+function priceFor6(p,op){const got=d6(p).op;if(op==='Venta')return num6(p?.precioVenta??p?.salePrice??(got==='Venta'?p?.precio:null));if(op==='Alquiler')return num6(p?.precioAlquiler??p?.rentPrice??(got==='Alquiler'?p?.precio:null));return num6(p?.precio??p?.precioVenta??p?.precioAlquiler)}
+function eligibleOp6(p,want){const got=d6(p).op;if(!want)return true;if(want==='Venta')return got==='Venta'||got==='Venta/Alquiler';if(want==='Alquiler')return got==='Alquiler'||got==='Venta/Alquiler';return got===want}
 function features6(p){return Array.isArray(p?.features)?p.features:[]}
 
 function search6(){
  const q=document.querySelector('#q')?.value||'',it=intent6(q),uiMun=document.querySelector('#municipio')?.value||'',uiZ=document.querySelector('#zona')?.value||'',uiT=document.querySelector('#tipo')?.value||'',uiOp=document.querySelector('#op')?.value||'',wantOp=uiOp&&uiOp!=='?'?uiOp:it.op;
  const pm=+(document.querySelector('#pmax')?.value||0),hm=+(document.querySelector('#hmin')?.value||0),bm=+(document.querySelector('#bmin')?.value||0),em=+(document.querySelector('#emin')?.value||0),mm=+(document.querySelector('#mmin')?.value||0),ft=document.querySelector('#ft')?.value||'';
  const wantMun=uiMun||it.municipio,wantZ=uiZ||it.zona,wantT=uiT||it.type;
- let a=(Array.isArray(props)?props:[]).filter(p=>{if(request6(p))return false;const L=loc6(p),T=type6(p),S=stats6(p);if(wantMun&&L.municipio!==wantMun)return false;if(wantZ&&L.zona!==wantZ)return false;if(wantT&&T!==wantT)return false;if(uiOp==='?'&&op6(p))return false;if(!eligibleOp6(p,wantOp))return false;const pr=priceFor6(p,wantOp);if(pm&&(!pr||pr>pm))return false;if(hm&&(S.h==null||S.h<hm))return false;if(bm&&(S.b==null||S.b<bm))return false;if(em&&(S.e==null||S.e<em))return false;if(mm&&(S.m2==null||S.m2<mm))return false;if(ft&&!features6(p).includes(ft))return false;return true});
+ let a=(Array.isArray(props)?props:[]).filter(p=>{if(request6(p))return false;const D=d6(p),L=D.loc,T=D.type,S=D.stats;if(wantMun&&L.municipio!==wantMun)return false;if(wantZ&&L.zona!==wantZ)return false;if(wantT&&T!==wantT)return false;if(uiOp==='?'&&D.op)return false;if(!eligibleOp6(p,wantOp))return false;const pr=priceFor6(p,wantOp);if(pm&&(!pr||pr>pm))return false;if(hm&&(S.h==null||S.h<hm))return false;if(bm&&(S.b==null||S.b<bm))return false;if(em&&(S.e==null||S.e<em))return false;if(mm&&(S.m2==null||S.m2<mm))return false;if(ft&&!features6(p).includes(ft))return false;return true});
  a=dedupe6(a).sort((x,y)=>ts6(y)-ts6(x));render6(a,wantOp);document.querySelector('#resultados')?.scrollIntoView({behavior:'smooth'});
 }
 function ageLabel6(p){const t=ts6(p);if(!t)return'';const d=Math.max(0,Math.floor((Date.now()-t)/86400000));return d===0?'hoy':d===1?'hace 1 día':'hace '+d+' días'}
 function wa6(p,c){if(!c.phone)return null;return'https://wa.me/'+c.phone.replace(/\D/g,'')+'?text='+encodeURIComponent(PREFIX6+'\n\n'+raw6(p))}
-function opLabel6(p,want){if(want==='Venta')return'Venta';if(want==='Alquiler')return'Alquiler';return op6(p)||'Operación por confirmar'}
-function priceLabel6(p,want){if(want==='Venta')return cash6(priceFor6(p,'Venta'));if(want==='Alquiler')return cash6(priceFor6(p,'Alquiler'));const o=op6(p);if(o==='Venta/Alquiler'){const v=priceFor6(p,'Venta'),a=priceFor6(p,'Alquiler');return[(v?'Venta '+cash6(v):''),(a?'Alquiler '+cash6(a):'')].filter(Boolean).join('<br>')||'—'}return cash6(priceFor6(p,o))}
+function opLabel6(p,want){if(want==='Venta')return'Venta';if(want==='Alquiler')return'Alquiler';return d6(p).op||'Operación por confirmar'}
+function priceLabel6(p,want){if(want==='Venta')return cash6(priceFor6(p,'Venta'));if(want==='Alquiler')return cash6(priceFor6(p,'Alquiler'));const o=d6(p).op;if(o==='Venta/Alquiler'){const v=priceFor6(p,'Venta'),a=priceFor6(p,'Alquiler');return[(v?'Venta '+cash6(v):''),(a?'Alquiler '+cash6(a):'')].filter(Boolean).join('<br>')||'—'}return cash6(priceFor6(p,o))}
 function render6(a,wantOp){
  const root=document.querySelector('#results'),count=document.querySelector('#count');if(count)count.textContent='('+a.length+')';if(!root)return;if(!a.length){root.className='empty';root.textContent='No encontré inventario vigente con esos criterios.';return}root.className='';
- root.innerHTML=a.slice(0,300).map(p=>{const L=loc6(p),T=type6(p),S=stats6(p),C=captor6(p),wa=wa6(p,C),loc=[L.zona,L.municipio].filter(Boolean).join(' · ')||'Ubicación por confirmar',hist=(p._historyCount||1)>1?'<div class="hint" style="margin-top:7px">Última publicación · publicado '+p._historyCount+' veces en '+(p._groupCount||1)+' grupo'+((p._groupCount||1)===1?'':'s')+'</div>':'',f=features6(p).slice(0,7).map(x=>'<span class="pill">'+e6(x)+'</span>').join(''),contact=wa?'<button class="primary wa" data-wa6="'+e6(wa)+'">Contactar captador por WhatsApp</button><div class="hint">'+e6(C.source)+'</div>':'<button class="wa" disabled>Captador sin teléfono vinculado</button><div class="hint">Captador: '+e6(C.name)+'</div>';
+ root.innerHTML=a.slice(0,300).map(p=>{const D=d6(p),L=D.loc,T=D.type,S=D.stats,C=D.captor,wa=wa6(p,C),loc=[L.zona,L.municipio].filter(Boolean).join(' · ')||'Ubicación por confirmar',hist=(p._historyCount||1)>1?'<div class="hint" style="margin-top:7px">Última publicación · publicado '+p._historyCount+' veces en '+(p._groupCount||1)+' grupo'+((p._groupCount||1)===1?'':'s')+'</div>':'',f=features6(p).slice(0,7).map(x=>'<span class="pill">'+e6(x)+'</span>').join(''),contact=wa?'<button class="primary wa" data-wa6="'+e6(wa)+'">Contactar captador por WhatsApp</button><div class="hint">'+e6(C.source)+'</div>':'<button class="wa" disabled>Captador sin teléfono vinculado</button><div class="hint">Captador: '+e6(C.name)+'</div>';
  return'<article class="card"><div class="head"><div><div><span class="pill">'+e6(opLabel6(p,wantOp))+'</span>'+(T?'<span class="pill">'+e6(T)+'</span>':'')+'</div><div class="loc">'+e6(loc)+'</div><div class="sender"><b>Captador:</b> '+e6(C.name)+'</div></div><div><div class="price">'+priceLabel6(p,wantOp)+'</div><div class="age">'+e6(ageLabel6(p))+'</div></div></div><div class="specs"><div class="spec"><b>'+e6(S.m2??'—')+'</b><span>m²</span></div><div class="spec"><b>'+e6(S.h??'—')+'</b><span>HAB</span></div><div class="spec"><b>'+e6(S.b??'—')+'</b><span>BAÑOS</span></div><div class="spec"><b>'+e6(S.e??'—')+'</b><span>PUESTOS</span></div></div><div class="features">'+f+'</div>'+hist+contact+'<details><summary>Mensaje original</summary><pre>'+e6(raw6(p))+'</pre></details></article>'}).join('');
  root.querySelectorAll('[data-wa6]').forEach(b=>b.onclick=()=>{location.href=b.getAttribute('data-wa6')});
 }
