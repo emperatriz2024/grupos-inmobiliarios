@@ -94,17 +94,19 @@ function buildInventoryBuckets7(R,opts){
 
 // Una solicitud puede aceptar varias opciones a la vez (ej. "LOCAL / CASA COMERCIAL",
 // o zonas que caen en más de un municipio). Buscamos en TODAS las combinaciones que
-// menciona, no solo en la primera que detecta el clasificador general.
-function matchKeysFor7(dem){
-  const tipos=dem.tiposAll?.length?dem.tiposAll:[dem.tipo||'?'];
-  const muns=dem.municipiosAll?.length?dem.municipiosAll:[dem.loc.municipio||'?'];
-  const keys=new Set();
-  for(const t of tipos)for(const m of muns)keys.add(t+'|'+m);
-  return[...keys]
-}
+// menciona. Si no menciona ningún tipo o ningún municipio, esa dimensión queda SIN
+// restringir (busca en cualquiera), en vez de exigir que el inmueble tampoco tenga
+// tipo/municipio detectado -- eso casi nunca pasa en el inventario real.
 function matchesFor7(dem,buckets,R){
+  const tipos=dem.tiposAll?.length?dem.tiposAll:(dem.tipo?[dem.tipo]:null);
+  const muns=dem.municipiosAll?.length?dem.municipiosAll:(dem.loc.municipio?[dem.loc.municipio]:null);
   const seen=new Set(),out=[];
-  for(const key of matchKeysFor7(dem))for(const it of(buckets.get(key)||[]))if(!seen.has(it)){seen.add(it);out.push(it)}
+  for(const[key,items]of buckets){
+    const i=key.lastIndexOf('|'),t=key.slice(0,i),m=key.slice(i+1);
+    if(tipos&&!tipos.includes(t))continue;
+    if(muns&&!muns.includes(m))continue;
+    for(const it of items)if(!seen.has(it)){seen.add(it);out.push(it)}
+  }
   return out
 }
 
