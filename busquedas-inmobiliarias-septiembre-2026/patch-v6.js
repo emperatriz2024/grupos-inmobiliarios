@@ -15,7 +15,17 @@ const TYPE6=[
  ['Apartamento',/\b(?:apartamento|apto\.?)\b/],['Galpón',/\b(?:galpon|nave\s+industrial)\b/],['Oficina',/\boficina\b/],
  ['Edificio',/\bedificio\b/],['Depósito',/\bdeposito\b/],['Terreno',/\bterreno\b/],['Parcela',/\bparcela\b/],['Casa',/\b(?:casa|quinta)\b/],['Local comercial',/\blocal\b/]
 ];
-function type6(p){const x=n6(raw6(p));for(const[t,r]of TYPE6)if(r.test(x))return t;return p?.tipo||p?.property_type||null}
+// Un anuncio que OFRECE un terreno suele mencionar "townhouse" de forma incidental
+// ("proyecto para Townhouse", "residencia de 155 townhouses"). En ese caso el tipo real
+// es Terreno/Parcela, no Townhouse -- se revisa primero la oferta explícita.
+function landOffer6(x){
+  if(/\b(?:vende|venta|vendo|se\s+vende|ofrece\s+en\s+venta|alquila|se\s+alquila)\b[^.\n]{0,40}\b(terreno|parcela)\b/.test(x))return /parcela/.test(RegExp.$1)?'Parcela':'Terreno';
+  const head=x.split(/\n/).slice(0,3).join(' ');
+  if(/\bterreno\b/.test(head)&&!/\b(?:town\s?house|townhouse|casa|apartamento)\b/.test(head))return 'Terreno';
+  if(/\bparcela\b/.test(head)&&!/\b(?:town\s?house|townhouse|casa|apartamento)\b/.test(head))return 'Parcela';
+  return null
+}
+function type6(p){const x=n6(raw6(p));const land=landOffer6(x);if(land)return land;for(const[t,r]of TYPE6)if(r.test(x))return t;return p?.tipo||p?.property_type||null}
 
 const LOC6={
  Naguanagua:{'Mañongo':['mañongo','manongo'],'La Granja':['la granja'],Tazajal:['tazajal'],'Piedra Pintada':['piedra pintada']},
@@ -95,10 +105,14 @@ const D6=new WeakMap();
 function d6(p){
  let d=D6.get(p);if(d)return d;
  const C=captor6(p),nm=n6(C.name||p?.sender||'').replace(/\b(?:colega|asesor|asesora|inmobiliario|inmobiliaria)\b/g,' ').replace(/[^a-z0-9ñ]/g,'');
- const capKey=C.phone?('ph:'+C.phone):(nm?('nm:'+nm):('uniq:'+(p?.id||n6(raw6(p)).slice(0,140))));
+ // Se agrupa preferentemente por NOMBRE: el mismo corredor puede aparecer con teléfono
+ // resuelto en una publicación y sin él en otra; si se agrupara por teléfono, esas dos
+ // publicaciones del mismo inmueble nunca llegarían a compararse entre sí.
+ const capKey=nm?('nm:'+nm):(C.phone?('ph:'+C.phone):('uniq:'+(p?.id||n6(raw6(p)).slice(0,140))));
  d={type:type6(p),loc:loc6(p),captor:C,capKey,stats:stats6(p),tokens:tokens6(p),project:n6(project6(p)),op:op6(p)};
  D6.set(p,d);return d
 }
+function anyPrice6(p){return num6(p?.salePrice??p?.precioVenta??p?.rentPrice??p?.precioAlquiler??p?.precio)}
 function sameListing6(a,b){
  const da=d6(a),db=d6(b);
  if(da.capKey!==db.capKey)return false;if(da.type!==db.type)return false;if(da.loc.municipio&&db.loc.municipio&&da.loc.municipio!==db.loc.municipio)return false;
@@ -107,9 +121,13 @@ function sameListing6(a,b){
  if(diffProject)return false;
  const area=sa.m2&&sb.m2&&Math.abs(sa.m2-sb.m2)<=Math.max(2,Math.min(sa.m2,sb.m2)*.015);const beds=sa.h!=null&&sb.h!=null&&sa.h===sb.h,baths=sa.b!=null&&sb.b!=null&&sa.b===sb.b,parks=sa.e!=null&&sb.e!=null&&sa.e===sb.e;
  const j=jac6(da.tokens,db.tokens);
+ const pxa=anyPrice6(a),pxb=anyPrice6(b),samePrice=pxa&&pxb&&pxa===pxb;
  if(sameProject&&j>=.30)return true;
  if(za&&zb&&za===zb&&area&&(beds||baths)&&j>=.30)return true;
  if(area&&beds&&baths&&(parks||j>=.42))return true;
+ // Mismo captador + mismo tipo + mismo municipio + MISMO PRECIO EXACTO es señal fuerte,
+ // incluso cuando el anuncio no trae m²/baños/puestos detectables.
+ if(samePrice&&(beds||area||j>=.35))return true;
  if(j>=.70)return true;
  return false;
 }
@@ -150,8 +168,12 @@ function render6(a,wantOp){
   const STAGE6=['obra gris','obra blanca','a estrenar'],allF=features6(p),stage=allF.filter(x=>STAGE6.includes(x)),rest=allF.filter(x=>!STAGE6.includes(x));
   const stageBadges=stage.map(x=>'<span class="pill" style="background:#fef3c7;border-color:#f59e0b;color:#92400e;font-weight:700">'+e6(x.replace(/\b\w/g,c=>c.toUpperCase()))+'</span>').join('');
   const f=rest.slice(0,7).map(x=>'<span class="pill">'+e6(x)+'</span>').join('');
-  const contact=wa?'<button class="primary wa" data-wa6="'+e6(wa)+'">Contactar captador por WhatsApp</button><div class="hint">'+e6(C.source)+'</div>':'<button class="wa" disabled>Captador sin teléfono vinculado</button><div class="hint">Captador: '+e6(C.name)+'</div>';
- return'<article class="card"><div class="head"><div><div><span class="pill">'+e6(opLabel6(p,wantOp))+'</span>'+(T?'<span class="pill">'+e6(T)+'</span>':'')+stageBadges+'</div><div class="loc">'+e6(loc)+'</div><div class="sender"><b>Captador:</b> '+e6(C.name)+'</div></div><div><div class="price">'+priceLabel6(p,wantOp)+'</div><div class="age">'+e6(ageLabel6(p))+'</div></div></div><div class="specs"><div class="spec"><b>'+e6(S.m2??'—')+'</b><span>m²</span></div><div class="spec"><b>'+e6(S.h??'—')+'</b><span>HAB</span></div><div class="spec"><b>'+e6(S.b??'—')+'</b><span>BAÑOS</span></div><div class="spec"><b>'+e6(S.e??'—')+'</b><span>PUESTOS</span></div></div><div class="features">'+f+'</div>'+hist+contact+'<details><summary>Mensaje original</summary><pre>'+e6(raw6(p))+'</pre></details></article>'}).join('');
+  const contact=wa?'<button class="primary wa" data-wa6="'+e6(wa)+'" style="width:auto;padding:9px 16px;font-size:13px;border-radius:9px">WhatsApp al captador</button><span class="hint" style="margin-left:8px">'+e6(C.source)+'</span>':'<span class="hint">Sin teléfono · '+e6(C.name)+'</span>';
+  const rawTxt=raw6(p),half=Math.max(200,Math.ceil(rawTxt.length/2)),preview=rawTxt.length>half?rawTxt.slice(0,half).trim()+'…':rawTxt;
+  const original=rawTxt.length>half
+    ? '<details class="msg6"><summary style="list-style:none;cursor:pointer"><pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;margin:0;opacity:.82;font-family:inherit">'+e6(preview)+'</pre><span style="display:inline-block;margin-top:4px;font-size:12px;font-weight:700;color:#4e20d3">Ver mensaje completo</span></summary><pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;margin:6px 0 0;opacity:.82;font-family:inherit">'+e6(rawTxt)+'</pre></details>'
+    : '<pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;margin:0;opacity:.82;font-family:inherit">'+e6(rawTxt)+'</pre>';
+ return'<article class="card"><div class="head"><div><div><span class="pill">'+e6(opLabel6(p,wantOp))+'</span>'+(T?'<span class="pill">'+e6(T)+'</span>':'')+stageBadges+'</div><div class="loc">'+e6(loc)+'</div><div class="sender"><b>Captador:</b> '+e6(C.name)+'</div></div><div><div class="price">'+priceLabel6(p,wantOp)+'</div><div class="age">'+e6(ageLabel6(p))+'</div></div></div><div class="specs"><div class="spec"><b>'+e6(S.m2??'—')+'</b><span>m²</span></div><div class="spec"><b>'+e6(S.h??'—')+'</b><span>HAB</span></div><div class="spec"><b>'+e6(S.b??'—')+'</b><span>BAÑOS</span></div><div class="spec"><b>'+e6(S.e??'—')+'</b><span>PUESTOS</span></div></div><div class="features">'+f+'</div>'+hist+'<div style="margin:9px 0">'+contact+'</div><div style="border-top:1px solid var(--line);padding-top:8px">'+original+'</div></article>'}).join('');
  root.querySelectorAll('[data-wa6]').forEach(b=>b.onclick=()=>{location.href=b.getAttribute('data-wa6')});
 }
 function bind6(){
