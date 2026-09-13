@@ -58,9 +58,36 @@ function budgetFor7(raw){
   return null
 }
 
+// Características que la solicitud pide explícitamente. Se detectan sobre el texto de la
+// solicitud usando el mismo vocabulario que el extractor de características del inventario,
+// para que "Townhouse en obra blanca" realmente filtre por obra blanca y no solo por tipo.
+const FEATWORDS7=[
+  ['obra blanca',/\bobra\s+blanca\b/],
+  ['obra gris',/\bobra\s+gris\b/],
+  ['a estrenar',/\b(?:a|para|sin)\s+estrenar\b/],
+  ['pozo',/\bpozo\b/],
+  ['planta',/\bplanta\s+electrica\b|\bplanta\b/],
+  ['piscina',/\bpiscina\b/],
+  ['amoblado',/\bamoblad[oa]\b|\bamueblad[oa]\b/],
+  ['vigilancia',/\bvigilancia\b|\bseguridad\s+24/],
+  ['financiamiento',/\bfinanciamiento\b|\bfinancia/],
+  ['maletero',/\bmaletero\b/],
+  ['balcón',/\bbalcon\b/],
+  ['terraza',/\bterraza\b/],
+  ['patio',/\bpatio\b/],
+  ['gas directo',/\bgas\s+directo\b/],
+  ['ascensor',/\bascensor\b/],
+  ['inversor',/\binversor\b/]
+];
+function featuresWanted7(raw){
+  const x=n7(raw),out=[];
+  for(const[label,re]of FEATWORDS7)if(re.test(x))out.push(label);
+  return out
+}
+
 function demandExtract7(p){
   const R=window.RI6;if(!R)return null;
-  return{tipo:R.type6(p),tiposAll:R.typesAll6?R.typesAll6(p):[R.type6(p)].filter(Boolean),loc:R.loc6(p),municipiosAll:R.municipiosAll6?R.municipiosAll6(p):[R.loc6(p).municipio].filter(Boolean),op:R.op6(p),budget:budgetFor7(R.raw6(p)),captor:R.captor6(p),raw:R.raw6(p)}
+  return{tipo:R.type6(p),tiposAll:R.typesAll6?R.typesAll6(p):[R.type6(p)].filter(Boolean),loc:R.loc6(p),municipiosAll:R.municipiosAll6?R.municipiosAll6(p):[R.loc6(p).municipio].filter(Boolean),op:R.op6(p),budget:budgetFor7(R.raw6(p)),feats:featuresWanted7(R.raw6(p)),captor:R.captor6(p),raw:R.raw6(p)}
 }
 
 // Una solicitud se considera vigente solo si tiene 7 días o menos (después de eso, se asume
@@ -110,6 +137,25 @@ function matchesFor7(dem,buckets,R){
   return out
 }
 
+// Filtro fino: además de tipo/municipio, respeta lo que la solicitud pidió explícitamente
+// (características como "obra blanca", operación Venta/Alquiler, y presupuesto).
+function applyDemandFilters7(matches,dem,R){
+  let out=matches;
+  if(dem.feats&&dem.feats.length){
+    out=out.filter(inv=>{
+      const f=R.features6(inv)||[],raw=n7(R.raw6(inv));
+      return dem.feats.every(want=>f.includes(want)||raw.includes(n7(want)))
+    })
+  }
+  if(dem.op&&dem.op!=='Venta/Alquiler'){
+    out=out.filter(inv=>{const o=R.op6(inv);return!o||o===dem.op||o==='Venta/Alquiler'})
+  }
+  if(dem.budget){
+    out=out.filter(inv=>{const pr=R.priceFor6(inv,dem.op==='Alquiler'?'Alquiler':'Venta')||R.priceFor6(inv,'Venta')||R.priceFor6(inv,'Alquiler');return!pr||pr<=dem.budget*1.1})
+  }
+  return out
+}
+
 function opportunities7(){
   const R=window.RI6;if(!R||!Array.isArray(props))return[];
   const buckets=buildInventoryBuckets7(R);
@@ -117,8 +163,7 @@ function opportunities7(){
   const out=[];
   for(const sol of solicitudes){
     const dem=demandExtract7(sol);if(!dem)continue;
-    let matches=matchesFor7(dem,buckets,R);
-    if(dem.budget)matches=matches.filter(inv=>{const pr=R.priceFor6(inv,'Venta')||R.priceFor6(inv,'Alquiler');return!pr||pr<=dem.budget*1.1});
+    let matches=applyDemandFilters7(matchesFor7(dem,buckets,R),dem,R);
     if(!matches.length)continue;
     matches=matches.slice().sort((a,b)=>{const pa=R.priceFor6(a,'Venta')||R.priceFor6(a,'Alquiler')||1e15,pb=R.priceFor6(b,'Venta')||R.priceFor6(b,'Alquiler')||1e15;return pa-pb});
     out.push({sol,dem,matches:matches.slice(0,5)})
@@ -177,8 +222,11 @@ function cardHtml7(dem,matches,R,propId,proposals,senderLabel){
   const budgetTxt=dem.budget?'hasta $'+new Intl.NumberFormat('es-VE').format(dem.budget):'presupuesto no especificado';
   const matchList=matches.map(m=>{
     const price=R.priceLabel6(m,dem.op||undefined),loc=[R.loc6(m).municipio,R.loc6(m).zona].filter(Boolean).join(' · '),c=R.captor6(m),wa=R.wa6(m,c);
-    const contactBtn=wa?'<a href="'+e7(wa)+'" target="_blank" style="display:block;margin-top:4px;font-size:11px;color:#4e20d3;text-decoration:none;font-weight:700">Contactar a '+e7(c.name)+' por WhatsApp</a>':'<span style="display:block;margin-top:4px;font-size:11px;opacity:.6">'+e7(c.name)+' -- sin teléfono</span>';
-    return'<div class="spec" style="text-align:left;padding:8px 10px"><b>'+price+'</b><span>'+e7(loc||'Ubicación por confirmar')+'</span>'+contactBtn+'</div>'
+    const tipo=R.type6(m)||'Inmueble',op=R.op6(m)||'',feats=(R.features6(m)||[]).slice(0,6);
+    const featPills=feats.length?'<div style="margin:5px 0">'+feats.map(f=>'<span class="pill" style="font-size:10px;padding:2px 7px;margin:2px 3px 0 0">'+e7(f)+'</span>').join('')+'</div>':'';
+    const raw=R.raw6(m),extracto=raw.length>320?raw.slice(0,320).trim()+'…':raw;
+    const contactBtn=wa?'<a href="'+e7(wa)+'" target="_blank" style="display:inline-block;margin-top:6px;font-size:12px;color:#4e20d3;text-decoration:none;font-weight:700">Contactar a '+e7(c.name)+' por WhatsApp</a>':'<span style="display:block;margin-top:6px;font-size:11px;opacity:.6">'+e7(c.name)+' -- sin teléfono</span>';
+    return'<div style="border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><b style="font-size:15px">'+e7(price)+'</b><span style="font-size:12px;opacity:.7">'+e7(op)+'</span></div><div style="font-size:13px;font-weight:700;margin-top:2px">'+e7(tipo)+(loc?' · '+e7(loc):'')+'</div>'+featPills+'<pre style="white-space:pre-wrap;font-size:11.5px;line-height:1.45;margin:6px 0 0;opacity:.85;font-family:inherit">'+e7(extracto)+'</pre>'+contactBtn+'</div>'
   }).join('');
   return'<article class="card"><div class="sender"><b>Solicitante:</b> '+capName+'</div><div class="loc">Busca '+e7(dem.tipo||'inmueble')+(dem.loc.municipio?' en '+e7(dem.loc.municipio):'')+' · '+budgetTxt+'</div><div class="features" style="margin-top:8px">'+matchList+'</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+lead+'<button class="copyProp" data-propid="'+propId+'">Copiar propuesta</button></div><details><summary>Mensaje original de la solicitud</summary><pre>'+e7(dem.raw)+'</pre></details></article>'
 }
@@ -219,8 +267,7 @@ function matchAdhoc7(text){
   const p={raw:text,sender:'',date:todayStr7()};
   const dem=demandExtract7(p);if(!dem)return null;
   const buckets=buildInventoryBuckets7(R,{forceGeneral:true});
-  let matches=matchesFor7(dem,buckets,R);
-  if(dem.budget)matches=matches.filter(inv=>{const pr=R.priceFor6(inv,'Venta')||R.priceFor6(inv,'Alquiler');return!pr||pr<=dem.budget*1.1});
+  let matches=applyDemandFilters7(matchesFor7(dem,buckets,R),dem,R);
   matches=matches.slice().sort((a,b)=>{const pa=R.priceFor6(a,'Venta')||R.priceFor6(a,'Alquiler')||1e15,pb=R.priceFor6(b,'Venta')||R.priceFor6(b,'Alquiler')||1e15;return pa-pb});
   return{dem,matches:matches.slice(0,5)}
 }
@@ -235,8 +282,13 @@ function runPasteSearch7(){
     const res=matchAdhoc7(text);
     if(!res){root.innerHTML='<div class="hint">No pude leer esa solicitud.</div>';return}
     const proposals=new Map();
-    root.innerHTML=res.matches.length?cardHtml7(res.dem,res.matches,R,'pasteprop',proposals,'Solicitud pegada'):'<div class="hint">No encontré en tu inventario nada que calce con esta solicitud ('+e7(res.dem.tipo||'tipo no identificado')+(res.dem.loc.municipio?' en '+e7(res.dem.loc.municipio):'')+').</div>';
-    wireCopyButtons7(root,proposals)
+    if(res.matches.length){
+      root.innerHTML=cardHtml7(res.dem,res.matches,R,'pasteprop',proposals,'Solicitud pegada');
+      wireCopyButtons7(root,proposals)
+    }else{
+      const crit=[res.dem.tipo||null,res.dem.loc.municipio||null,res.dem.op||null,...(res.dem.feats||[]),res.dem.budget?('hasta $'+new Intl.NumberFormat('es-VE').format(res.dem.budget)):null].filter(Boolean);
+      root.innerHTML='<div class="hint">No encontré nada que cumpla TODOS estos criterios: <b>'+e7(crit.join(' + ')||'ninguno detectado')+'</b>.<br>Si crees que sí debería haber algo, prueba quitando alguna palabra de la solicitud (por ejemplo, sin la característica o sin el municipio) para ampliar la búsqueda.</div>'
+    }
   }catch(err){showError7(root,err)}
 }
 
