@@ -19,10 +19,15 @@ const TYPE6=[
 // ("proyecto para Townhouse", "residencia de 155 townhouses"). En ese caso el tipo real
 // es Terreno/Parcela, no Townhouse -- se revisa primero la oferta explícita.
 function landOffer6(x){
-  if(/\b(?:vende|venta|vendo|se\s+vende|ofrece\s+en\s+venta|alquila|se\s+alquila)\b[^.\n]{0,40}\b(terreno|parcela)\b/.test(x))return /parcela/.test(RegExp.$1)?'Parcela':'Terreno';
-  const head=x.split(/\n/).slice(0,3).join(' ');
+  // "Se vende terreno", incluso con saltos de línea o texto intermedio.
+  if(/\b(?:vende|venta|vendo|se\s+vende|ofrece\s+en\s+venta|alquila|se\s+alquila)\b[\s\S]{0,60}?\b(terreno|parcela)\b/.test(x))return /parcela/.test(RegExp.$1)?'Parcela':'Terreno';
+  // Encabezado (primeras líneas) que anuncia terreno/parcela sin ofrecer una vivienda construida.
+  const head=x.split(/\n/).slice(0,4).join(' ');
   if(/\bterreno\b/.test(head)&&!/\b(?:town\s?house|townhouse|casa|apartamento)\b/.test(head))return 'Terreno';
   if(/\bparcela\b/.test(head)&&!/\b(?:town\s?house|townhouse|casa|apartamento)\b/.test(head))return 'Parcela';
+  // El anuncio describe el ÁREA del terreno como objeto principal y solo menciona
+  // townhouse/casa como proyecto a futuro ("proyecto para Townhouse", "residencia de 155 townhouses").
+  if(/\b(?:terreno|parcela)\b/.test(x)&&/\b(?:proyecto|proyectado|para\s+construir|apto\s+para|ideal\s+para|residencia\s+de\s+\d+)\b[\s\S]{0,40}?\b(?:town\s?house|townhouse|casa|vivienda)/.test(x))return /\bparcela\b/.test(x)?'Parcela':'Terreno';
   return null
 }
 function type6(p){const x=n6(raw6(p));const land=landOffer6(x);if(land)return land;for(const[t,r]of TYPE6)if(r.test(x))return t;return p?.tipo||p?.property_type||null}
@@ -115,6 +120,13 @@ function d6(p){
 function anyPrice6(p){return num6(p?.salePrice??p?.precioVenta??p?.rentPrice??p?.precioAlquiler??p?.precio)}
 function sameListing6(a,b){
  const da=d6(a),db=d6(b);
+ // Excepción segura: si el texto es prácticamente idéntico, es la misma publicación
+ // republicada, aunque el captador no se haya podido identificar en ninguna de las dos.
+ // (Sin esto, dos copias exactas de un mismo anuncio anónimo salen como 2 tarjetas.)
+ const jFull=jac6(da.tokens,db.tokens);
+ const bothAnon=da.capKey.startsWith('uniq:')&&db.capKey.startsWith('uniq:');
+ if(jFull>=.92&&da.type===db.type)return true;
+ if(bothAnon&&jFull>=.80&&da.type===db.type)return true;
  if(da.capKey!==db.capKey)return false;if(da.type!==db.type)return false;if(da.loc.municipio&&db.loc.municipio&&da.loc.municipio!==db.loc.municipio)return false;
  const sa=da.stats,sb=db.stats,za=n6(da.loc.zona||''),zb=n6(db.loc.zona||''),pa=da.project,pb=db.project;
  const sameProject=pa&&pb&&(pa===pb||pa.includes(pb)||pb.includes(pa)),diffProject=pa&&pb&&!sameProject;
@@ -139,7 +151,30 @@ function dedupe6(arr){
   if(!w){p._historyCount=1;p._groupSet6=new Set([source6(p)]);p._firstSeen6=ts6(p);p._lastSeen6=ts6(p);bucket.push(p)}
   else{w._historyCount=(w._historyCount||1)+1;w._groupSet6=w._groupSet6||new Set([source6(w)]);w._groupSet6.add(source6(p));w._firstSeen6=Math.min(w._firstSeen6||ts6(w),ts6(p));w._lastSeen6=Math.max(w._lastSeen6||ts6(w),ts6(p))}
  }
- const wins=[];for(const bucket of buckets.values())wins.push(...bucket);
+ let wins=[];for(const bucket of buckets.values())wins.push(...bucket);
+ // Segunda pasada: agrupa publicaciones de texto casi idéntico que quedaron en buckets
+ // distintos (típicamente el mismo anuncio reenviado por remitentes anónimos distintos).
+ // Se agrupan por tipo+municipio para no comparar todo contra todo.
+ const byTM=new Map();
+ for(const w of wins){const d=d6(w),k=(d.type||'?')+'|'+(d.loc.municipio||'?');if(!byTM.has(k))byTM.set(k,[]);byTM.get(k).push(w)}
+ const dropped=new Set();
+ for(const group of byTM.values()){
+  if(group.length<2)continue;
+  const kept=[];
+  for(const p of group){
+   const dp=d6(p);
+   const twin=kept.find(k=>{const dk=d6(k);return dk.type===dp.type&&jac6(dk.tokens,dp.tokens)>=.92});
+   if(twin){
+    dropped.add(p);
+    twin._historyCount=(twin._historyCount||1)+(p._historyCount||1);
+    twin._groupSet6=twin._groupSet6||new Set([source6(twin)]);
+    if(p._groupSet6)for(const s of p._groupSet6)twin._groupSet6.add(s);else twin._groupSet6.add(source6(p));
+    twin._firstSeen6=Math.min(twin._firstSeen6||ts6(twin),p._firstSeen6||ts6(p));
+    twin._lastSeen6=Math.max(twin._lastSeen6||ts6(twin),p._lastSeen6||ts6(p))
+   }else kept.push(p)
+  }
+ }
+ if(dropped.size)wins=wins.filter(w=>!dropped.has(w));
  for(const w of wins)w._groupCount=w._groupSet6?.size||1;
  return wins
 }
